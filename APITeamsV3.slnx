@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="APITeamsV3.API/APITeamsV3.API.csproj" />
+  <Project Path="APITeamsV3.Application/APITeamsV3.Application.csproj" />
+  <Project Path="APITeamsV3.Domain/APITeamsV3.Domain.csproj" />
+  <Project Path="APITeamsV3.Infrastructure/APITeamsV3.Infrastructure.csproj" />
+  <Project Path="APITeamsV3.Worker/APITeamsV3.Worker.csproj" />
+</Solution>
