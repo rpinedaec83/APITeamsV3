@@ -16,6 +16,7 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
         string FrontHost,
         string ApiHost,
         string? SpaClientId,
+        string? SpaTenantId,
         string SmartConnectionString,
         string TimeZoneId,
         bool IsActive,
@@ -42,7 +43,7 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
             foreach (var c in configs)
             {
                 // Mask the connection string
-                dtos.Add(new CompanyConfigDto(c.Id, c.CompanyKey, c.DisplayName, c.FrontHost, c.ApiHost, c.SpaClientId, "********", c.TimeZoneId, c.IsActive, c.GraphTenantId, c.GraphClientId, c.GraphClientSecretRef, c.DefaultChannelName, c.MeetingPolicyMode));
+                dtos.Add(new CompanyConfigDto(c.Id, c.CompanyKey, c.DisplayName, c.FrontHost, c.ApiHost, c.SpaClientId, c.SpaTenantId, "********", c.TimeZoneId, c.IsActive, c.GraphTenantId, c.GraphClientId, c.GraphClientSecretRef, c.DefaultChannelName, c.MeetingPolicyMode));
             }
             return dtos;
         }
@@ -58,7 +59,7 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
             var c = await _context.CompanyConfigs.FindAsync(new object[] { request.Id }, cancellationToken);
             if (c == null) return null;
             // Mask the connection string
-            return new CompanyConfigDto(c.Id, c.CompanyKey, c.DisplayName, c.FrontHost, c.ApiHost, c.SpaClientId, "********", c.TimeZoneId, c.IsActive, c.GraphTenantId, c.GraphClientId, c.GraphClientSecretRef, c.DefaultChannelName, c.MeetingPolicyMode);
+            return new CompanyConfigDto(c.Id, c.CompanyKey, c.DisplayName, c.FrontHost, c.ApiHost, c.SpaClientId, c.SpaTenantId, "********", c.TimeZoneId, c.IsActive, c.GraphTenantId, c.GraphClientId, c.GraphClientSecretRef, c.DefaultChannelName, c.MeetingPolicyMode);
         }
     }
 
@@ -69,6 +70,7 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
         string FrontHost,
         string ApiHost,
         string? SpaClientId,
+        string? SpaTenantId,
         string SmartConnectionString,
         string TimeZoneId,
         bool IsActive,
@@ -97,6 +99,7 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
                 FrontHost = request.FrontHost,
                 ApiHost = request.ApiHost,
                 SpaClientId = request.SpaClientId,
+                SpaTenantId = request.SpaTenantId,
                 SmartConnectionString = _encryptionService.Encrypt(request.SmartConnectionString), // Encrypt here
                 TimeZoneId = request.TimeZoneId,
                 IsActive = request.IsActive,
@@ -119,6 +122,7 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
         string FrontHost,
         string ApiHost,
         string? SpaClientId,
+        string? SpaTenantId,
         string SmartConnectionString,
         string TimeZoneId,
         bool IsActive,
@@ -148,6 +152,7 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
             entity.FrontHost = request.FrontHost;
             entity.ApiHost = request.ApiHost;
             entity.SpaClientId = request.SpaClientId;
+            entity.SpaTenantId = request.SpaTenantId;
             
             // Only update if it's not the masked value
             if (!string.IsNullOrEmpty(request.SmartConnectionString) && request.SmartConnectionString != "********")

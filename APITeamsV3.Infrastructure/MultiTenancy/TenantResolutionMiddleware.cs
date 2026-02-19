@@ -87,7 +87,9 @@ namespace APITeamsV3.Infrastructure.MultiTenancy
                 TimeZoneId = config.TimeZoneId,
                 GraphTenantId = config.GraphTenantId,
                 GraphClientId = config.GraphClientId,
-                GraphClientSecret = config.GraphClientSecretRef // Retrieval from Secret Store here if needed
+                GraphClientSecret = config.GraphClientSecretRef, // Retrieval from Secret Store here if needed
+                SpaClientId = config.SpaClientId ?? string.Empty,
+                SpaTenantId = config.SpaTenantId ?? config.GraphTenantId // Assumed same tenant for Graph and SPA if missing
             });
         }
     }

@@ -5,15 +5,15 @@
 namespace APITeamsV3.Infrastructure.Persistence.Migrations
 {
     /// <inheritdoc />
-    public partial class AddSpaClientId : Migration
+    public partial class AddSpaTenantId : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.AddColumn<string>(
-                name: "SpaClientId",
+                name: "SpaTenantId",
                 table: "CompanyConfigs",
-                type: "nvarchar(max)",
+                type: "TEXT",
                 nullable: true);
         }
 
@@ -21,7 +21,7 @@ namespace APITeamsV3.Infrastructure.Persistence.Migrations
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropColumn(
-                name: "SpaClientId",
+                name: "SpaTenantId",
                 table: "CompanyConfigs");
         }
     }

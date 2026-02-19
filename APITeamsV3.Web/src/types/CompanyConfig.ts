@@ -5,6 +5,7 @@ export interface CompanyConfig {
     frontHost: string;
     apiHost: string;
     spaClientId?: string;
+    spaTenantId?: string;
     smartConnectionString?: string; // Optional/Masked
     timeZoneId: string;
     isActive: boolean;

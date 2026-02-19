@@ -22,10 +22,10 @@ namespace APITeamsV3.Infrastructure.Persistence.Contexts
             // Fallback for design time if appsettings not found or empty
             if (string.IsNullOrEmpty(connectionString))
             {
-                connectionString = "Server=localhost;Database=APITeamsV3_Central;User Id=SA;Password=StrongP@ssword1;TrustServerCertificate=True;MultipleActiveResultSets=true";
+                connectionString = "Data Source=APITeamsV3_Central.db";
             }
 
-            builder.UseSqlServer(connectionString);
+            builder.UseSqlite(connectionString);
 
             return new CentralDbContext(builder.Options);
         }

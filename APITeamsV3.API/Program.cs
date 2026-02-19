@@ -4,12 +4,27 @@ using APITeamsV3.Infrastructure.MultiTenancy;
 using Microsoft.EntityFrameworkCore;
 using APITeamsV3.Infrastructure.Persistence.Contexts;
 using APITeamsV3.Application.Common.Interfaces;
+using Hangfire;
+using Hangfire.MemoryStorage;
+
+using Microsoft.Identity.Web;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
+builder.Services.AddMicrosoftIdentityWebApiAuthentication(builder.Configuration);
+
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
+
+// Hangfire Configuration (Memory Storage for Dev)
+builder.Services.AddHangfire(configuration => configuration
+    .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
+    .UseSimpleAssemblyNameTypeSerializer()
+    .UseRecommendedSerializerSettings()
+    .UseMemoryStorage());
+
+builder.Services.AddHangfireServer();
 
 builder.Services.AddCors(options =>
 {
@@ -17,7 +32,15 @@ builder.Services.AddCors(options =>
         builder =>
         {
             builder
-                .WithOrigins("http://localhost:5173", "http://127.0.0.1:5173", "https://teams.localhost:3000") // Add your frontend origins
+                .WithOrigins(
+                    "http://localhost:5173",
+                    "http://127.0.0.1:5173",
+                    "https://teams.zegel.edu.pe",
+                    "https://teams.idat.edu.pe",
+                    "https://teams.corrientealterna.edu.pe",
+                    "https://teams.its.edu.pe",
+                    "https://teams.cdi.edu.pe"
+                )
                 .AllowAnyMethod()
                 .AllowAnyHeader()
                 .AllowCredentials();
@@ -44,10 +67,14 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+// Hangfire Dashboard
+app.UseHangfireDashboard();
+
 // app.UseHttpsRedirection(); // Force HTTPS
 
 app.UseCors("AllowAll");
 
+app.UseAuthentication();
 app.UseAuthorization();
 
 // Multi-tenancy Middleware
@@ -78,7 +105,7 @@ using (var scope = app.Services.CreateScope())
             optionsBuilder.UseSqlServer(connectionString);
             
             // We can pass null for TenantProvider as we configured the DB context with specific options
-            using (var directSmartContext = new SmartDbContext(optionsBuilder.Options, null)) 
+            using (var directSmartContext = new SmartDbContext(optionsBuilder.Options, null!)) 
             {
                  // Force View Update with Embedded SQL
                 var viewSql = @"
@@ -97,7 +124,7 @@ SELECT SE.IdSeccion,
     SD.Nombre AS SedeNombre,
     UN.Nombre AS UnidadNegocioNombre,
     UA.Nombre AS UnidadAcademicaNombre,
-    PE.Codigo AS CodigoPeriodo, -- Duplicate removed in map
+    PE.Codigo AS CodigoPeriodo,
     PG.GrupoCodigo,
     -- Date Filter Logic
     PR.TipoServicio,

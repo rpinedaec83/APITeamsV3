@@ -36,11 +36,13 @@ namespace APITeamsV3.Infrastructure.Persistence
                         DisplayName = "IDAT",
                         FrontHost = "teams.idat.edu.pe",
                         ApiHost = "api.teams.idat.edu.pe",
-                        SmartConnectionString = encryptionService.Encrypt("Server=localhost;Database=Smart_IDAT;User Id=SA;Password=StrongP@ssword1;TrustServerCertificate=True;MultipleActiveResultSets=true"),
+                        SmartConnectionString = encryptionService.Encrypt("Server=10.1.3.21;Database=AcademicoIDAT;User Id=smart_prueba;Password=qwerty123456;TrustServerCertificate=True;MultipleActiveResultSets=true"),
                         IsActive = true,
-                        GraphTenantId = "common",
-                        GraphClientId = "client-id-placeholder",
-                        GraphClientSecretRef = "secret-ref-placeholder"
+                        GraphTenantId = "be6becf1-4fef-4388-a21c-7184584d38cb", // Real Tenant ID (IDAT.PE)
+                        GraphClientId = "c356c453-9a02-48ae-90fe-6a55af698a60", // Api Teams V3 SPA (IDAT.PE)
+                        GraphClientSecretRef = "P3p8Q~G7J6XRfh1~Uzcwq0gIZrvAhknrGuLuQbn", // Api Teams V3 BACK (IDAT.PE)
+                        SpaClientId = "0856381c-a0f4-4e74-b1c4-23d6710e5d53", // Real SPA Client ID (IDAT.EDU.PE)
+                        SpaTenantId = "f707e30e-c9df-4de0-893b-6456dc36f382", // Real SPA Tenant ID (IDAT.EDU.PE)
                     },
                     new CompanyConfig
                     {
@@ -81,6 +83,18 @@ namespace APITeamsV3.Infrastructure.Persistence
                 };
 
                 await context.CompanyConfigs.AddRangeAsync(companies);
+                await context.CompanyConfigs.AddRangeAsync(companies);
+                await context.SaveChangesAsync();
+            }
+
+            // Force update IDAT for development/fix
+            var idat = await context.CompanyConfigs.FirstOrDefaultAsync(c => c.CompanyKey == "idat");
+            if (idat != null)
+            {
+                idat.SpaClientId = "0856381c-a0f4-4e74-b1c4-23d6710e5d53";
+                idat.SpaTenantId = "f707e30e-c9df-4de0-893b-6456dc36f382";
+                idat.GraphTenantId = "be6becf1-4fef-4388-a21c-7184584d38cb";
+                idat.GraphClientId = "c356c453-9a02-48ae-90fe-6a55af698a60";
                 await context.SaveChangesAsync();
             }
         }

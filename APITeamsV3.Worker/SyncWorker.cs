@@ -118,6 +118,30 @@ namespace APITeamsV3.Worker
                                         }
                                         break;
 
+                                    case "SyncMissingStudents":
+                                        if (int.TryParse(job.TargetId, out int sectionIdForMissing))
+                                        {
+                                            var mediator = scope.ServiceProvider.GetRequiredService<MediatR.IMediator>();
+                                            await mediator.Send(new APITeamsV3.Application.UseCases.Teams.Commands.SyncMissingStudentsCommand(sectionIdForMissing));
+                                        }
+                                        break;
+
+                                    case "SyncObsoleteStudents":
+                                        if (int.TryParse(job.TargetId, out int sectionIdForObsolete))
+                                        {
+                                            var mediator2 = scope.ServiceProvider.GetRequiredService<MediatR.IMediator>();
+                                            await mediator2.Send(new APITeamsV3.Application.UseCases.Teams.Commands.SyncObsoleteStudentsCommand(sectionIdForObsolete));
+                                        }
+                                        break;
+
+                                    case "SyncRenamedTeams":
+                                        if (int.TryParse(job.TargetId, out int sectionIdForRenamed))
+                                        {
+                                            var mediator3 = scope.ServiceProvider.GetRequiredService<MediatR.IMediator>();
+                                            await mediator3.Send(new APITeamsV3.Application.UseCases.Teams.Commands.SyncRenamedTeamsCommand(sectionIdForRenamed));
+                                        }
+                                        break;
+
                                     default:
                                         _logger.LogWarning($"Unknown JobType: {job.JobType}");
                                         break;

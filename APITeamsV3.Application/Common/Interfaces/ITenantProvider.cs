@@ -8,6 +8,8 @@ namespace APITeamsV3.Application.Common.Interfaces
         public string GraphTenantId { get; set; } = string.Empty;
         public string GraphClientId { get; set; } = string.Empty;
         public string GraphClientSecret { get; set; } = string.Empty; // Decrypted/Retrieved secret
+        public string SpaClientId { get; set; } = string.Empty; // For Frontend MSAL
+        public string SpaTenantId { get; set; } = string.Empty; // For Frontend MSAL
     }
 
     public interface ITenantProvider

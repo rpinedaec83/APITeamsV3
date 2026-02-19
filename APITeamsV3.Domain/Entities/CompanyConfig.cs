@@ -10,6 +10,7 @@ namespace APITeamsV3.Domain.Entities
         public string FrontHost { get; set; } = string.Empty; // teams.zegel.edu.pe
         public string ApiHost { get; set; } = string.Empty; // api.teams.zegel.edu.pe
         public string? SpaClientId { get; set; }
+        public string? SpaTenantId { get; set; } // Explicit Tenant ID for SPA auth
         public string SmartConnectionString { get; set; } = string.Empty; // Encrypted or safe ref
         public string TimeZoneId { get; set; } = "SA Pacific Standard Time";
         public bool IsActive { get; set; } = true;

@@ -3,9 +3,7 @@ import {
     makeStyles,
     tokens,
     shorthands,
-    Title3,
     Avatar,
-    LargeTitle,
     Button
 } from '@fluentui/react-components';
 import {
@@ -14,9 +12,10 @@ import {
     SettingsRegular,
     OrganizationRegular,
     SignOutRegular,
-    AlertRegular
+    TimerRegular,
 } from '@fluentui/react-icons';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
+import { useMsal } from "@azure/msal-react";
 
 const useStyles = makeStyles({
     root: {
@@ -120,12 +119,21 @@ const MainLayout: React.FC = () => {
     const styles = useStyles();
     const navigate = useNavigate();
     const location = useLocation();
+    const { instance, accounts } = useMsal();
+    const account = accounts[0];
 
     const menuItems = [
         { label: 'Dashboard', icon: <HomeRegular />, path: '/' },
         { label: 'Operations', icon: <OrganizationRegular />, path: '/operations' },
+        { label: 'Hangfire Jobs', icon: <TimerRegular />, path: '/jobs' },
         { label: 'Company Configs', icon: <SettingsRegular />, path: '/admin/company-configs' },
     ];
+
+    const handleSignOut = () => {
+        instance.logoutRedirect({
+            postLogoutRedirectUri: "/",
+        });
+    };
 
     return (
         <div className={styles.root}>
@@ -153,7 +161,7 @@ const MainLayout: React.FC = () => {
                 </nav>
 
                 <div className={styles.footer}>
-                    <Button icon={<SignOutRegular />} appearance="subtle">Sign Out</Button>
+                    <Button icon={<SignOutRegular />} appearance="subtle" onClick={handleSignOut}>Sign Out</Button>
                 </div>
             </div>
 
@@ -162,10 +170,10 @@ const MainLayout: React.FC = () => {
                 <header className={styles.header}>
                     <div className={styles.userProfile}>
                         <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column' }}>
-                            <span style={{ fontWeight: 600, fontSize: '14px' }}>Facundo Arana</span>
-                            <span style={{ fontSize: '12px', color: tokens.colorNeutralForeground3 }}>Admin</span>
+                            <span style={{ fontWeight: 600, fontSize: '14px' }}>{account?.name || "User"}</span>
+                            <span style={{ fontSize: '12px', color: tokens.colorNeutralForeground3 }}>{account?.username || ""}</span>
                         </div>
-                        <Avatar name="Facundo Arana" color="colorful" />
+                        <Avatar name={account?.name || "User"} color="colorful" />
                     </div>
                 </header>
 

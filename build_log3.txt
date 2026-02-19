@@ -1,0 +1,17 @@
+  Determining projects to restore...
+  Restored C:\Sources\APITeamsV3\APITeamsV3.Domain\APITeamsV3.Domain.csproj (in 217 ms).
+  Restored C:\Sources\APITeamsV3\APITeamsV3.Application\APITeamsV3.Application.csproj (in 457 ms).
+  Restored C:\Sources\APITeamsV3\APITeamsV3.Infrastructure\APITeamsV3.Infrastructure.csproj (in 486 ms).
+  Restored C:\Sources\APITeamsV3\APITeamsV3.Worker\APITeamsV3.Worker.csproj (in 493 ms).
+  Restored C:\Sources\APITeamsV3\APITeamsV3.API\APITeamsV3.API.csproj (in 537 ms).
+  APITeamsV3.Domain -> C:\Sources\APITeamsV3\APITeamsV3.Domain\bin\Debug\net10.0\APITeamsV3.Domain.dll
+  APITeamsV3.Application -> C:\Sources\APITeamsV3\APITeamsV3.Application\bin\Debug\net10.0\APITeamsV3.Application.dll
+  APITeamsV3.Infrastructure -> C:\Sources\APITeamsV3\APITeamsV3.Infrastructure\bin\Debug\net10.0\APITeamsV3.Infrastructure.dll
+  APITeamsV3.Worker -> C:\Sources\APITeamsV3\APITeamsV3.Worker\bin\Debug\net10.0\APITeamsV3.Worker.dll
+  APITeamsV3.API -> C:\Sources\APITeamsV3\APITeamsV3.API\bin\Debug\net10.0\APITeamsV3.API.dll
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:04.56

@@ -96,6 +96,54 @@ namespace APITeamsV3.Infrastructure.Persistence.Contexts
                 entity.HasOne(e => e.Alumno).WithMany().HasForeignKey(e => e.IdAlumno);
                 entity.HasOne(e => e.Seccion).WithMany().HasForeignKey(e => e.IdSeccion);
             });
+
+            // TeamsProgramacionGeneral
+            modelBuilder.Entity<APITeamsV3.Domain.Entities.TeamsProgramacionGeneral>(entity =>
+            {
+                entity.ToTable("TeamsProgramacionGeneral");
+                entity.HasKey(e => new { e.IdCurso, e.IdPeriodo }); // Assuming Composite Key based on usage, or add Id if exists in DB
+                // If the table has no PK, use HasNoKey() but EF requires a key for tracking. 
+                // Let's assume IdCurso (IdSeccion) is unique per Periodo? No, IdCurso is IdSeccion. 
+                // Actually, IdCurso + something? 
+                // Looking at legacy SQL: DELETE WHERE IdCurso = @IdSeccion.
+                // It seems to be a staging table. It might not have a PK.
+                // Let's check if we can define a composite key that makes sense, or use Keyless entity.
+                // For now, let's try HasKey(e => e.IdCurso) but it might not be unique globally? 
+                // Ah, it's "Programacion General", one row per section?
+                // SQL: INSERT INTO ... SELECT DISTINCT ... FROM Seccion ... WHERE IdSeccion = @IdSeccion
+                // Yes, it seems one row per section.
+                entity.HasKey(e => e.IdCurso);
+            });
+
+            // TeamsProgramacionAlumnos
+            modelBuilder.Entity<APITeamsV3.Domain.Entities.TeamsProgramacionAlumnos>(entity =>
+            {
+                entity.ToTable("TeamsProgramacionAlumnos");
+                // This definitely has multiple rows per course.
+                // It tracks students.
+                entity.HasKey(e => new { e.IdCurso, e.CodigoAlumno });
+            });
+
+            // SeccionHorario
+            modelBuilder.Entity<APITeamsV3.Domain.Entities.SeccionHorario>(entity =>
+            {
+                entity.ToTable("SeccionHorario");
+                entity.HasKey(e => e.IdSeccion);
+            });
+
+            // HorarioSesion
+            modelBuilder.Entity<APITeamsV3.Domain.Entities.HorarioSesion>(entity =>
+            {
+                entity.ToTable("HorarioSesion");
+                entity.HasKey(e => new { e.IdSeccion, e.IdHorario, e.Numero });
+            });
+
+            // Facilitador
+            modelBuilder.Entity<APITeamsV3.Domain.Entities.Facilitador>(entity =>
+            {
+                entity.ToTable("Facilitador");
+                entity.HasKey(e => e.IdFacilitador);
+            });
         }
     }
 }

@@ -1,0 +1,53 @@
+{
+  auto_https off
+}
+
+https://teams.zegel.edu.pe {
+  tls ./teams.zegel.edu.pe+5.pem ./teams.zegel.edu.pe+5-key.pem
+  reverse_proxy localhost:5173
+}
+
+https://api.teams.zegel.edu.pe {
+  tls ./teams.zegel.edu.pe+5.pem ./teams.zegel.edu.pe+5-key.pem
+  reverse_proxy localhost:5000
+}
+
+https://teams.idat.edu.pe {
+  tls ./teams.zegel.edu.pe+5.pem ./teams.zegel.edu.pe+5-key.pem
+  reverse_proxy localhost:5173
+}
+
+https://api.teams.idat.edu.pe {
+  tls ./teams.zegel.edu.pe+5.pem ./teams.zegel.edu.pe+5-key.pem
+  reverse_proxy localhost:5000
+}
+
+https://teams.corrientealterna.edu.pe {
+  tls ./teams.zegel.edu.pe+5.pem ./teams.zegel.edu.pe+5-key.pem
+  reverse_proxy localhost:5173
+}
+
+https://api.teams.corrientealterna.edu.pe {
+  tls ./teams.zegel.edu.pe+5.pem ./teams.zegel.edu.pe+5-key.pem
+  reverse_proxy localhost:5000
+}
+
+https://teams.its.edu.pe {
+  tls ./teams.zegel.edu.pe+5.pem ./teams.zegel.edu.pe+5-key.pem
+  reverse_proxy localhost:5173
+}
+
+https://api.teams.its.edu.pe {
+  tls ./teams.zegel.edu.pe+5.pem ./teams.zegel.edu.pe+5-key.pem
+  reverse_proxy localhost:5000
+}
+
+https://teams.cdi.edu.pe {
+  tls ./teams.zegel.edu.pe+5.pem ./teams.zegel.edu.pe+5-key.pem
+  reverse_proxy localhost:5173
+}
+
+https://api.teams.cdi.edu.pe {
+  tls ./teams.zegel.edu.pe+5.pem ./teams.zegel.edu.pe+5-key.pem
+  reverse_proxy localhost:5000
+}

@@ -15,7 +15,6 @@ SELECT SE.IdSeccion,
     UN.Nombre AS UnidadNegocioNombre,
     UA.Nombre AS UnidadAcademicaNombre,
     PE.Codigo AS CodigoPeriodo,
-    PE.Codigo AS CodigoPeriodo,
     PG.GrupoCodigo,
     -- Date Filter Logic
     PR.TipoServicio,
@@ -48,4 +47,4 @@ FROM Seccion SE WITH (NOLOCK)
     AND SP.EsResponsable = 1
     LEFT JOIN Actor AT2 WITH (NOLOCK) ON SP.IdActor = AT2.IdActor
     LEFT JOIN Facilitador FC WITH (NOLOCK) ON SP.IdActor = FC.IdFacilitador
-WHERE PE.EsTeams = 1;
+WHERE PE.EsTeams = 1 ;

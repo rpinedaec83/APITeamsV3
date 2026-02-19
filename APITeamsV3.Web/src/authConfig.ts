@@ -1,17 +1,17 @@
 import { LogLevel, type Configuration } from "@azure/msal-browser";
 
-export const createMsalConfig = (clientId: string, authority: string, redirectUri: string): Configuration => {
+export const createMsalConfig = (clientId: string, tenantId: string, redirectUri: string): Configuration => {
     return {
         auth: {
             clientId: clientId,
-            authority: authority,
+            authority: `https://login.microsoftonline.com/${tenantId}`,
             redirectUri: redirectUri,
             postLogoutRedirectUri: window.location.origin,
-            navigateToLoginRequestUrl: true,
+            // navigateToLoginRequestUrl: true, // Linter error: property does not exist in type
         },
         cache: {
             cacheLocation: "sessionStorage", // This configures where your cache will be stored
-            storeAuthStateInCookie: false, // Set this to "true" if you are having issues on IE11 or Edge
+            // storeAuthStateInCookie: false, // Set this to "true" if you are having issues on IE11 or Edge. Linter error: property does not exist
         },
         system: {
             loggerOptions: {

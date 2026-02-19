@@ -14,7 +14,7 @@ namespace APITeamsV3.Infrastructure
         {
             // Central DB
             services.AddDbContext<CentralDbContext>(options =>
-                options.UseSqlServer(
+                options.UseSqlite(
                     configuration.GetConnectionString("CentralConnection"),
                     b => b.MigrationsAssembly(typeof(CentralDbContext).Assembly.FullName)));
             services.AddScoped<ICentralDbContext>(provider => provider.GetRequiredService<CentralDbContext>());
@@ -36,6 +36,7 @@ namespace APITeamsV3.Infrastructure
             services.AddScoped<SessionSchedulingService>();
             services.AddTransient<IBackgroundJobService, BackgroundJobService>();
             services.AddSingleton<IEncryptionService, EncryptionService>();
+            services.AddTransient<IHangfireJobService, HangfireJobService>();
 
             return services;
         }

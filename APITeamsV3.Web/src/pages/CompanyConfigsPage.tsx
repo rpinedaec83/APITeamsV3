@@ -97,6 +97,7 @@ const CompanyConfigsPage: React.FC = () => {
                             <TableHeaderCell>Name</TableHeaderCell>
                             <TableHeaderCell>Front Host</TableHeaderCell>
                             <TableHeaderCell>API Host</TableHeaderCell>
+                            <TableHeaderCell>SPA Tenant</TableHeaderCell>
                             <TableHeaderCell>Active</TableHeaderCell>
                             <TableHeaderCell>Actions</TableHeaderCell>
                         </TableRow>
@@ -109,6 +110,7 @@ const CompanyConfigsPage: React.FC = () => {
                                 <TableCell><b>{c.displayName}</b></TableCell>
                                 <TableCell>{c.frontHost}</TableCell>
                                 <TableCell>{c.apiHost}</TableCell>
+                                <TableCell>{c.spaTenantId}</TableCell>
                                 <TableCell>
                                     <span style={{
                                         padding: '4px 8px',
@@ -165,6 +167,12 @@ const CompanyConfigsPage: React.FC = () => {
                                     <Label>SPA Client ID (Frontend)</Label>
                                     <Input value={currentConfig.spaClientId || ''} onChange={(_, d) => setCurrentConfig({ ...currentConfig, spaClientId: d.value })} placeholder="Client ID for React App" />
                                 </div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                    <Label>SPA Tenant ID (Frontend)</Label>
+                                    <Input value={currentConfig.spaTenantId || ''} onChange={(_, d) => setCurrentConfig({ ...currentConfig, spaTenantId: d.value })} placeholder="Tenant ID for React App" />
+                                </div>
+                            </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '16px' }}>
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                                     <Label>Smart Connection String</Label>
                                     <Input value={currentConfig.smartConnectionString || ''} type="password" onChange={(_, d) => setCurrentConfig({ ...currentConfig, smartConnectionString: d.value })} />
