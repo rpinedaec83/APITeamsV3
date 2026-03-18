@@ -26,6 +26,9 @@ builder.Services.AddHangfire(configuration => configuration
 
 builder.Services.AddHangfireServer();
 
+// Sync Scheduler Background Service
+builder.Services.AddHostedService<APITeamsV3.Infrastructure.Services.SyncSchedulerService>();
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll",
@@ -39,7 +42,7 @@ builder.Services.AddCors(options =>
                     "https://teams.idat.edu.pe",
                     "https://teams.corrientealterna.edu.pe",
                     "https://teams.its.edu.pe",
-                    "https://teams.cdi.edu.pe"
+                    "https://teams.centrodelaimagen.pe"
                 )
                 .AllowAnyMethod()
                 .AllowAnyHeader()

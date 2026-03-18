@@ -1,7 +1,7 @@
 import { useMsal, useAccount } from "@azure/msal-react";
 import axios from "axios";
 import { loginRequest } from "../authConfig";
-import { useEffect, useMemo } from "react";
+import { useMemo } from "react";
 
 export const useApiClient = () => {
     const { instance, accounts } = useMsal();

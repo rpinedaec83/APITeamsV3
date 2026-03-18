@@ -1,7 +1,9 @@
 
 import React, { useEffect, useState } from 'react';
 import type { CompanyConfig, CreateCompanyConfigRequest, UpdateCompanyConfigRequest } from '../types/CompanyConfig';
+import type { Sede } from '../types/Sede';
 import { CompanyConfigService } from '../services/CompanyConfigService';
+import { SedeService } from '../services/SedeService';
 import {
     Button,
     Table,
@@ -18,15 +20,25 @@ import {
     DialogActions,
     Input,
     Label,
-    Switch
+    Switch,
+    Badge,
+    Spinner,
+    Tooltip
 } from '@fluentui/react-components';
-import { DeleteRegular, EditRegular, AddRegular } from '@fluentui/react-icons';
+import { DeleteRegular, EditRegular, AddRegular, BuildingRegular, ArrowSyncRegular } from '@fluentui/react-icons';
 
 const CompanyConfigsPage: React.FC = () => {
     const [configs, setConfigs] = useState<CompanyConfig[]>([]);
     const [isOpen, setIsOpen] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
     const [currentConfig, setCurrentConfig] = useState<Partial<CompanyConfig>>({});
+
+    // Sede state
+    const [sedeDialogOpen, setSedeDialogOpen] = useState(false);
+    const [selectedCompany, setSelectedCompany] = useState<CompanyConfig | null>(null);
+    const [sedes, setSedes] = useState<Sede[]>([]);
+    const [sedeLoading, setSedeLoading] = useState(false);
+    const [importLoading, setImportLoading] = useState(false);
 
     useEffect(() => {
         loadConfigs();
@@ -78,6 +90,56 @@ const CompanyConfigsPage: React.FC = () => {
         setIsOpen(true);
     };
 
+    // Sede handlers
+    const openSedes = async (config: CompanyConfig) => {
+        setSelectedCompany(config);
+        setSedeDialogOpen(true);
+        setSedeLoading(true);
+        try {
+            const data = await SedeService.getByCompany(config.id);
+            setSedes(data);
+        } catch (error) {
+            console.error(error);
+        } finally {
+            setSedeLoading(false);
+        }
+    };
+
+    const handleImportSedes = async () => {
+        if (!selectedCompany) return;
+        setImportLoading(true);
+        try {
+            const data = await SedeService.importFromSmart(selectedCompany.id);
+            setSedes(data);
+        } catch (error) {
+            console.error(error);
+            alert('Failed to import sedes. Make sure the API is connected to Smart DB.');
+        } finally {
+            setImportLoading(false);
+        }
+    };
+
+    const handleToggleSede = async (sede: Sede) => {
+        try {
+            await SedeService.toggleActive(sede.id, !sede.isActive);
+            setSedes(prev => prev.map(s => s.id === sede.id ? { ...s, isActive: !s.isActive } : s));
+        } catch (error) {
+            console.error(error);
+        }
+    };
+
+    const handleDeleteSede = async (id: number) => {
+        if (!confirm('¿Eliminar esta sede?')) return;
+        try {
+            await SedeService.delete(id);
+            setSedes(prev => prev.filter(s => s.id !== id));
+        } catch (error) {
+            console.error(error);
+        }
+    };
+
+    const activeSedes = sedes.filter(s => s.isActive);
+
     return (
         <div style={{ padding: '40px', maxWidth: '1200px', margin: '0 auto' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
@@ -88,53 +150,60 @@ const CompanyConfigsPage: React.FC = () => {
                 <Button appearance="primary" icon={<AddRegular />} onClick={openCreate}>Add Configuration</Button>
             </div>
 
-            <div style={{ background: 'white', borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.1)', padding: '20px' }}>
-                <Table>
+            <div style={{ background: 'white', borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.1)', padding: '20px', overflowX: 'auto' }}>
+                <Table style={{ tableLayout: 'fixed', width: '100%' }}>
                     <TableHeader>
                         <TableRow>
-                            <TableHeaderCell>ID</TableHeaderCell>
-                            <TableHeaderCell>Key</TableHeaderCell>
-                            <TableHeaderCell>Name</TableHeaderCell>
-                            <TableHeaderCell>Front Host</TableHeaderCell>
-                            <TableHeaderCell>API Host</TableHeaderCell>
-                            <TableHeaderCell>SPA Tenant</TableHeaderCell>
-                            <TableHeaderCell>Active</TableHeaderCell>
-                            <TableHeaderCell>Actions</TableHeaderCell>
+                            <TableHeaderCell style={{ width: '40px' }}>ID</TableHeaderCell>
+                            <TableHeaderCell style={{ width: '110px' }}>Key</TableHeaderCell>
+                            <TableHeaderCell style={{ width: '120px' }}>Name</TableHeaderCell>
+                            <TableHeaderCell style={{ width: '180px' }}>Front Host</TableHeaderCell>
+                            <TableHeaderCell style={{ width: '200px' }}>API Host</TableHeaderCell>
+                            <TableHeaderCell style={{ width: '140px' }}>SPA Tenant</TableHeaderCell>
+                            <TableHeaderCell style={{ width: '70px' }}>Active</TableHeaderCell>
+                            <TableHeaderCell style={{ width: '120px' }}>Actions</TableHeaderCell>
                         </TableRow>
                     </TableHeader>
                     <TableBody>
-                        {configs.map(c => (
-                            <TableRow key={c.id}>
-                                <TableCell>{c.id}</TableCell>
-                                <TableCell>{c.companyKey}</TableCell>
-                                <TableCell><b>{c.displayName}</b></TableCell>
-                                <TableCell>{c.frontHost}</TableCell>
-                                <TableCell>{c.apiHost}</TableCell>
-                                <TableCell>{c.spaTenantId}</TableCell>
-                                <TableCell>
-                                    <span style={{
-                                        padding: '4px 8px',
-                                        borderRadius: '12px',
-                                        background: c.isActive ? '#e6f7e9' : '#fbeaea',
-                                        color: c.isActive ? '#107c10' : '#c50f1f',
-                                        fontSize: '12px',
-                                        fontWeight: 600
-                                    }}>
-                                        {c.isActive ? 'Active' : 'Inactive'}
-                                    </span>
-                                </TableCell>
-                                <TableCell>
-                                    <div style={{ display: 'flex', gap: '8px' }}>
-                                        <Button icon={<EditRegular />} onClick={() => openEdit(c)} />
-                                        <Button icon={<DeleteRegular />} appearance="subtle" onClick={() => handleDelete(c.id)} />
-                                    </div>
-                                </TableCell>
-                            </TableRow>
-                        ))}
+                        {configs.map(c => {
+                            const cellStyle: React.CSSProperties = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
+                            return (
+                                <TableRow key={c.id}>
+                                    <TableCell>{c.id}</TableCell>
+                                    <TableCell style={cellStyle}>{c.companyKey}</TableCell>
+                                    <TableCell style={cellStyle}><b>{c.displayName}</b></TableCell>
+                                    <TableCell style={cellStyle} title={c.frontHost}><span style={{ fontSize: '12px' }}>{c.frontHost}</span></TableCell>
+                                    <TableCell style={cellStyle} title={c.apiHost}><span style={{ fontSize: '12px' }}>{c.apiHost}</span></TableCell>
+                                    <TableCell style={cellStyle} title={c.spaTenantId}><span style={{ fontSize: '11px' }}>{c.spaTenantId}</span></TableCell>
+                                    <TableCell>
+                                        <span style={{
+                                            padding: '4px 8px',
+                                            borderRadius: '12px',
+                                            background: c.isActive ? '#e6f7e9' : '#fbeaea',
+                                            color: c.isActive ? '#107c10' : '#c50f1f',
+                                            fontSize: '12px',
+                                            fontWeight: 600
+                                        }}>
+                                            {c.isActive ? 'Active' : 'Inactive'}
+                                        </span>
+                                    </TableCell>
+                                    <TableCell>
+                                        <div style={{ display: 'flex', gap: '4px' }}>
+                                            <Tooltip content="Manage Sedes" relationship="label">
+                                                <Button icon={<BuildingRegular />} appearance="subtle" size="small" onClick={() => openSedes(c)} />
+                                            </Tooltip>
+                                            <Button icon={<EditRegular />} size="small" onClick={() => openEdit(c)} />
+                                            <Button icon={<DeleteRegular />} appearance="subtle" size="small" onClick={() => handleDelete(c.id)} />
+                                        </div>
+                                    </TableCell>
+                                </TableRow>
+                            );
+                        })}
                     </TableBody>
                 </Table>
             </div>
 
+            {/* Company Config Dialog */}
             <Dialog open={isOpen} onOpenChange={(_, data) => setIsOpen(data.open)}>
                 <DialogSurface>
                     <DialogBody>
@@ -204,6 +273,141 @@ const CompanyConfigsPage: React.FC = () => {
                         <DialogActions>
                             <Button appearance="secondary" onClick={() => setIsOpen(false)}>Cancel</Button>
                             <Button appearance="primary" onClick={handleSave}>Save Changes</Button>
+                        </DialogActions>
+                    </DialogBody>
+                </DialogSurface>
+            </Dialog>
+
+            {/* Sedes Dialog */}
+            <Dialog open={sedeDialogOpen} onOpenChange={(_, data) => setSedeDialogOpen(data.open)}>
+                <DialogSurface style={{ maxWidth: '720px' }}>
+                    <DialogBody>
+                        <DialogTitle>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                <BuildingRegular style={{ fontSize: '20px' }} />
+                                <span>Sedes — {selectedCompany?.displayName}</span>
+                            </div>
+                        </DialogTitle>
+                        <DialogContent style={{ marginTop: '10px' }}>
+                            {/* Header actions */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                    <Badge appearance="filled" color="success">{activeSedes.length} activas</Badge>
+                                    <Badge appearance="filled" color="informative">{sedes.length} total</Badge>
+                                </div>
+                                <Button
+                                    appearance="primary"
+                                    icon={importLoading ? <Spinner size="tiny" /> : <ArrowSyncRegular />}
+                                    disabled={importLoading}
+                                    onClick={handleImportSedes}
+                                >
+                                    {importLoading ? 'Importando...' : 'Importar desde Smart'}
+                                </Button>
+                            </div>
+
+                            {/* Sedes table */}
+                            {sedeLoading ? (
+                                <div style={{ display: 'flex', justifyContent: 'center', padding: '40px' }}>
+                                    <Spinner label="Cargando sedes..." />
+                                </div>
+                            ) : sedes.length === 0 ? (
+                                <div style={{
+                                    padding: '40px',
+                                    textAlign: 'center',
+                                    background: '#fafafa',
+                                    borderRadius: '8px',
+                                    border: '1px dashed #ddd'
+                                }}>
+                                    <BuildingRegular style={{ fontSize: '32px', color: '#999' }} />
+                                    <p style={{ color: '#666', marginTop: '8px' }}>
+                                        No hay sedes importadas para esta empresa.
+                                    </p>
+                                    <p style={{ color: '#999', fontSize: '13px' }}>
+                                        Haz clic en "Importar desde Smart" para cargar las sedes.
+                                    </p>
+                                </div>
+                            ) : (
+                                <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                                    <Table size="small">
+                                        <TableHeader>
+                                            <TableRow>
+                                                <TableHeaderCell>ID Sede</TableHeaderCell>
+                                                <TableHeaderCell>Código</TableHeaderCell>
+                                                <TableHeaderCell>Nombre</TableHeaderCell>
+                                                <TableHeaderCell>Estado</TableHeaderCell>
+                                                <TableHeaderCell>Acciones</TableHeaderCell>
+                                            </TableRow>
+                                        </TableHeader>
+                                        <TableBody>
+                                            {sedes.map(s => (
+                                                <TableRow key={s.id}>
+                                                    <TableCell>{s.idSede}</TableCell>
+                                                    <TableCell>
+                                                        <code style={{
+                                                            padding: '2px 6px',
+                                                            background: '#f0f0f0',
+                                                            borderRadius: '4px',
+                                                            fontWeight: 600,
+                                                            fontSize: '13px'
+                                                        }}>
+                                                            {s.codigo}
+                                                        </code>
+                                                    </TableCell>
+                                                    <TableCell>{s.nombre}</TableCell>
+                                                    <TableCell>
+                                                        <span style={{
+                                                            padding: '3px 8px',
+                                                            borderRadius: '12px',
+                                                            background: s.isActive ? '#e6f7e9' : '#fbeaea',
+                                                            color: s.isActive ? '#107c10' : '#c50f1f',
+                                                            fontSize: '11px',
+                                                            fontWeight: 600
+                                                        }}>
+                                                            {s.isActive ? 'Activa' : 'Inactiva'}
+                                                        </span>
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        <div style={{ display: 'flex', gap: '4px' }}>
+                                                            <Switch
+                                                                checked={s.isActive}
+                                                                onChange={() => handleToggleSede(s)}
+                                                                style={{ margin: 0 }}
+                                                            />
+                                                            <Button
+                                                                icon={<DeleteRegular />}
+                                                                appearance="subtle"
+                                                                size="small"
+                                                                onClick={() => handleDeleteSede(s.id)}
+                                                            />
+                                                        </div>
+                                                    </TableCell>
+                                                </TableRow>
+                                            ))}
+                                        </TableBody>
+                                    </Table>
+                                </div>
+                            )}
+
+                            {/* Active codes summary */}
+                            {activeSedes.length > 0 && (
+                                <div style={{
+                                    marginTop: '16px',
+                                    padding: '12px',
+                                    background: '#f0f6ff',
+                                    borderRadius: '6px',
+                                    border: '1px solid #c7deff'
+                                }}>
+                                    <div style={{ fontSize: '12px', color: '#0f6cbd', fontWeight: 600, marginBottom: '4px' }}>
+                                        Códigos activos para sincronización:
+                                    </div>
+                                    <code style={{ fontSize: '13px', color: '#333' }}>
+                                        {activeSedes.map(s => s.codigo).join(', ')}
+                                    </code>
+                                </div>
+                            )}
+                        </DialogContent>
+                        <DialogActions>
+                            <Button appearance="secondary" onClick={() => setSedeDialogOpen(false)}>Cerrar</Button>
                         </DialogActions>
                     </DialogBody>
                 </DialogSurface>

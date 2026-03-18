@@ -8,6 +8,8 @@ namespace APITeamsV3.Application.Common.Interfaces
     public interface ICentralDbContext
     {
         DbSet<CompanyConfig> CompanyConfigs { get; }
+        DbSet<CompanySede> CompanySedes { get; }
+        DbSet<SyncSchedule> SyncSchedules { get; }
         DbSet<SyncJob> SyncJobs { get; }
         Task<int> SaveChangesAsync(CancellationToken cancellationToken);
     }

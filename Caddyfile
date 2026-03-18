@@ -3,51 +3,51 @@
 }
 
 https://teams.zegel.edu.pe {
-  tls ./teams.zegel.edu.pe+5.pem ./teams.zegel.edu.pe+5-key.pem
+  tls ./teams.zegel.edu.pe+9.pem ./teams.zegel.edu.pe+9-key.pem
   reverse_proxy localhost:5173
 }
 
 https://api.teams.zegel.edu.pe {
-  tls ./teams.zegel.edu.pe+5.pem ./teams.zegel.edu.pe+5-key.pem
+  tls ./teams.zegel.edu.pe+9.pem ./teams.zegel.edu.pe+9-key.pem
   reverse_proxy localhost:5000
 }
 
 https://teams.idat.edu.pe {
-  tls ./teams.zegel.edu.pe+5.pem ./teams.zegel.edu.pe+5-key.pem
+  tls ./teams.zegel.edu.pe+9.pem ./teams.zegel.edu.pe+9-key.pem
   reverse_proxy localhost:5173
 }
 
 https://api.teams.idat.edu.pe {
-  tls ./teams.zegel.edu.pe+5.pem ./teams.zegel.edu.pe+5-key.pem
+  tls ./teams.zegel.edu.pe+9.pem ./teams.zegel.edu.pe+9-key.pem
   reverse_proxy localhost:5000
 }
 
 https://teams.corrientealterna.edu.pe {
-  tls ./teams.zegel.edu.pe+5.pem ./teams.zegel.edu.pe+5-key.pem
+  tls ./teams.zegel.edu.pe+9.pem ./teams.zegel.edu.pe+9-key.pem
   reverse_proxy localhost:5173
 }
 
 https://api.teams.corrientealterna.edu.pe {
-  tls ./teams.zegel.edu.pe+5.pem ./teams.zegel.edu.pe+5-key.pem
+  tls ./teams.zegel.edu.pe+9.pem ./teams.zegel.edu.pe+9-key.pem
   reverse_proxy localhost:5000
 }
 
 https://teams.its.edu.pe {
-  tls ./teams.zegel.edu.pe+5.pem ./teams.zegel.edu.pe+5-key.pem
+  tls ./teams.zegel.edu.pe+9.pem ./teams.zegel.edu.pe+9-key.pem
   reverse_proxy localhost:5173
 }
 
 https://api.teams.its.edu.pe {
-  tls ./teams.zegel.edu.pe+5.pem ./teams.zegel.edu.pe+5-key.pem
+  tls ./teams.zegel.edu.pe+9.pem ./teams.zegel.edu.pe+9-key.pem
   reverse_proxy localhost:5000
 }
 
-https://teams.cdi.edu.pe {
-  tls ./teams.zegel.edu.pe+5.pem ./teams.zegel.edu.pe+5-key.pem
+https://teams.centrodelaimagen.pe {
+  tls ./teams.zegel.edu.pe+9.pem ./teams.zegel.edu.pe+9-key.pem
   reverse_proxy localhost:5173
 }
 
-https://api.teams.cdi.edu.pe {
-  tls ./teams.zegel.edu.pe+5.pem ./teams.zegel.edu.pe+5-key.pem
+https://api.teams.centrodelaimagen.pe {
+  tls ./teams.zegel.edu.pe+9.pem ./teams.zegel.edu.pe+9-key.pem
   reverse_proxy localhost:5000
 }

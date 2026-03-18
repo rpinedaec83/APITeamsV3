@@ -13,9 +13,12 @@ import {
     OrganizationRegular,
     SignOutRegular,
     TimerRegular,
+    CalendarClockRegular,
 } from '@fluentui/react-icons';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useMsal } from "@azure/msal-react";
+import { useCompanyKey } from '../../CompanyContext';
+import brandLogos from '../../brandLogos';
 
 const useStyles = makeStyles({
     root: {
@@ -46,6 +49,11 @@ const useStyles = makeStyles({
         fontWeight: tokens.fontWeightBold,
         color: tokens.colorBrandForeground1,
         fontSize: tokens.fontSizeBase400,
+    },
+    brandLogo: {
+        height: '36px',
+        maxWidth: '180px',
+        objectFit: 'contain' as const,
     },
     navContainer: {
         flex: 1,
@@ -121,11 +129,14 @@ const MainLayout: React.FC = () => {
     const location = useLocation();
     const { instance, accounts } = useMsal();
     const account = accounts[0];
+    const companyKey = useCompanyKey();
+    const logoSrc = brandLogos[companyKey?.toLowerCase()];
 
     const menuItems = [
         { label: 'Dashboard', icon: <HomeRegular />, path: '/' },
         { label: 'Operations', icon: <OrganizationRegular />, path: '/operations' },
         { label: 'Hangfire Jobs', icon: <TimerRegular />, path: '/jobs' },
+        { label: 'Sync Schedules', icon: <CalendarClockRegular />, path: '/schedules' },
         { label: 'Company Configs', icon: <SettingsRegular />, path: '/admin/company-configs' },
     ];
 
@@ -140,8 +151,14 @@ const MainLayout: React.FC = () => {
             {/* Sidebar */}
             <div className={styles.sidebar}>
                 <div className={styles.sidebarHeader}>
-                    <GridDotsRegular fontSize={24} color={tokens.colorBrandForeground1} />
-                    <span className={styles.brand}>Teams Admin</span>
+                    {logoSrc ? (
+                        <img src={logoSrc} alt={companyKey} className={styles.brandLogo} />
+                    ) : (
+                        <>
+                            <GridDotsRegular fontSize={24} color={tokens.colorBrandForeground1} />
+                            <span className={styles.brand}>Teams Admin</span>
+                        </>
+                    )}
                 </div>
 
                 <nav className={styles.navContainer}>

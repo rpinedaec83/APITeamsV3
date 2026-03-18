@@ -72,8 +72,8 @@ namespace APITeamsV3.Infrastructure.Persistence
                     {
                         CompanyKey = "cdi",
                         DisplayName = "CDI",
-                        FrontHost = "teams.cdi.edu.pe",
-                        ApiHost = "api.teams.cdi.edu.pe",
+                        FrontHost = "teams.centrodelaimagen.pe",
+                        ApiHost = "api.teams.centrodelaimagen.pe",
                         SmartConnectionString = encryptionService.Encrypt("Server=localhost;Database=Smart_CDI;User Id=SA;Password=StrongP@ssword1;TrustServerCertificate=True;MultipleActiveResultSets=true"),
                         IsActive = true,
                         GraphTenantId = "common",

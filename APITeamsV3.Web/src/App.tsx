@@ -4,6 +4,7 @@ import Dashboard from './pages/Dashboard';
 import CompanyConfigsPage from './pages/CompanyConfigsPage';
 import OperationsPage from './pages/OperationsPage';
 import JobsPage from './pages/JobsPage';
+import SchedulesPage from './pages/SchedulesPage';
 import MainLayout from './components/layout/MainLayout';
 
 import { PublicClientApplication } from "@azure/msal-browser";
@@ -11,6 +12,7 @@ import { MsalProvider, AuthenticatedTemplate, UnauthenticatedTemplate } from "@a
 import { createMsalConfig } from "./authConfig";
 import { useMemo } from "react";
 import { Login } from "./components/Login";
+import { CompanyProvider } from "./CompanyContext";
 
 interface AppProps {
   spaConfig: {
@@ -27,24 +29,27 @@ function App({ spaConfig }: AppProps) {
   }, [spaConfig]);
 
   return (
-    <MsalProvider instance={msalInstance}>
-      <AuthenticatedTemplate>
-        <Router>
-          <Routes>
-            <Route element={<MainLayout />}>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/admin/company-configs" element={<CompanyConfigsPage />} />
-              <Route path="/operations" element={<OperationsPage />} />
-              <Route path="/jobs" element={<JobsPage />} />
-            </Route>
-            <Route path="/auth/callback" element={<Navigate to="/" />} />
-          </Routes>
-        </Router>
-      </AuthenticatedTemplate>
-      <UnauthenticatedTemplate>
-        <Login />
-      </UnauthenticatedTemplate>
-    </MsalProvider>
+    <CompanyProvider companyKey={spaConfig.companyKey}>
+      <MsalProvider instance={msalInstance}>
+        <AuthenticatedTemplate>
+          <Router>
+            <Routes>
+              <Route element={<MainLayout />}>
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/admin/company-configs" element={<CompanyConfigsPage />} />
+                <Route path="/operations" element={<OperationsPage />} />
+                <Route path="/jobs" element={<JobsPage />} />
+                <Route path="/schedules" element={<SchedulesPage />} />
+              </Route>
+              <Route path="/auth/callback" element={<Navigate to="/" />} />
+            </Routes>
+          </Router>
+        </AuthenticatedTemplate>
+        <UnauthenticatedTemplate>
+          <Login />
+        </UnauthenticatedTemplate>
+      </MsalProvider>
+    </CompanyProvider>
   );
 }
 

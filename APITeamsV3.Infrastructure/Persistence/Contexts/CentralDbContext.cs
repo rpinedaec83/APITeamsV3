@@ -13,6 +13,8 @@ namespace APITeamsV3.Infrastructure.Persistence.Contexts
         }
 
         public DbSet<CompanyConfig> CompanyConfigs { get; set; }
+        public DbSet<CompanySede> CompanySedes { get; set; }
+        public DbSet<SyncSchedule> SyncSchedules { get; set; }
         public DbSet<SyncJob> SyncJobs { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -25,6 +27,17 @@ namespace APITeamsV3.Infrastructure.Persistence.Contexts
                 entity.HasIndex(e => e.CompanyKey).IsUnique();
                 entity.HasIndex(e => e.FrontHost).IsUnique();
                 entity.HasIndex(e => e.ApiHost).IsUnique();
+            });
+
+            modelBuilder.Entity<CompanySede>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.HasIndex(e => new { e.CompanyConfigId, e.IdSede }).IsUnique();
+            });
+
+            modelBuilder.Entity<SyncSchedule>(entity =>
+            {
+                entity.HasKey(e => e.Id);
             });
         }
     }

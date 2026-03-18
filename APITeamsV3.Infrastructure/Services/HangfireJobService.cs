@@ -110,6 +110,16 @@ namespace APITeamsV3.Infrastructure.Services
             return _backgroundJobClient.Enqueue(() => SendSyncRenamedTeams(idSeccion, key));
         }
 
+        public string EnqueueFullSectionSync(int idSeccion)
+        {
+            var key = GetCurrentCompanyKey();
+            // Chain: MissingStudents (includes team creation) → ObsoleteStudents → RenamedTeams
+            var j1 = _backgroundJobClient.Enqueue(() => SendSyncMissingStudents(idSeccion, key));
+            var j2 = _backgroundJobClient.ContinueJobWith(j1, () => SendSyncObsoleteStudents(idSeccion, key));
+            _backgroundJobClient.ContinueJobWith(j2, () => SendSyncRenamedTeams(idSeccion, key));
+            return j1;
+        }
+
         // ── Send methods (resolve tenant, then dispatch command) ──
 
         [JobDisplayName("Generate Schedule: Section {0} [{1}]")]

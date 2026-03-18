@@ -10,7 +10,7 @@ export default defineConfig({
       'teams.idat.edu.pe',
       'teams.corrientealterna.edu.pe',
       'teams.its.edu.pe',
-      'teams.cdi.edu.pe',
+      'teams.centrodelaimagen.pe',
     ],
   },
 })

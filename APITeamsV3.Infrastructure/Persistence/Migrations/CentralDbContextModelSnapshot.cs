@@ -93,6 +93,40 @@ namespace APITeamsV3.Infrastructure.Persistence.Migrations
                     b.ToTable("CompanyConfigs");
                 });
 
+            modelBuilder.Entity("APITeamsV3.Domain.Entities.CompanySede", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Codigo")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("CompanyConfigId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("IdSede")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("ImportedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Nombre")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyConfigId", "IdSede")
+                        .IsUnique();
+
+                    b.ToTable("CompanySedes");
+                });
+
             modelBuilder.Entity("APITeamsV3.Domain.Entities.SyncJob", b =>
                 {
                     b.Property<int>("Id")
@@ -130,6 +164,39 @@ namespace APITeamsV3.Infrastructure.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("SyncJobs");
+                });
+
+            modelBuilder.Entity("APITeamsV3.Domain.Entities.SyncSchedule", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("CompanyConfigId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DaysOfWeek")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Hour")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("LastRunAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Minute")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("SyncSchedules");
                 });
 #pragma warning restore 612, 618
         }

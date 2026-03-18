@@ -1,0 +1,11 @@
+
+> apiteamsv3-web@0.0.0 build
+> tsc -b && vite build
+
+src/hooks/useApiClient.ts(4,10): error TS6133: 'useEffect' is declared but its value is never read.
+src/pages/JobsPage.tsx(23,5): error TS6133: 'MessageBar' is declared but its value is never read.
+src/pages/JobsPage.tsx(24,5): error TS6133: 'MessageBarBody' is declared but its value is never read.
+src/pages/JobsPage.tsx(25,5): error TS6133: 'Card' is declared but its value is never read.
+src/pages/JobsPage.tsx(26,5): error TS6133: 'CardHeader' is declared but its value is never read.
+src/pages/JobsPage.tsx(39,5): error TS6133: 'LinkRegular' is declared but its value is never read.
+src/pages/JobsPage.tsx(128,13): error TS2322: Type 'string' is not assignable to type 'undefined'.

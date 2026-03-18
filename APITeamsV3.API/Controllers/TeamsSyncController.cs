@@ -60,5 +60,18 @@ namespace APITeamsV3.API.Controllers
             var result = await _mediator.Send(new SyncTeamFacilitatorsCommand(idSeccion));
             return Ok(result);
         }
+
+        /// <summary>
+        /// Triggers full synchronization of all teams across all sections.
+        /// Fetches all section IDs using Option 19 logic (filtered by SEDE),
+        /// then enqueues chained Hangfire jobs per section to sync teams,
+        /// students, facilitators, and meetings.
+        /// </summary>
+        [HttpPost("all")]
+        public async Task<ActionResult<SyncAllTeamsResult>> SyncAll([FromQuery] string sede = "WI,SV,AP,AT,CH,IV,LN,PI,PT,SL,SM")
+        {
+            var result = await _mediator.Send(new SyncAllTeamsCommand(sede));
+            return Ok(result);
+        }
     }
 }
