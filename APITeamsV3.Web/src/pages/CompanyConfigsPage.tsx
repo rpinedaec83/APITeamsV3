@@ -2,8 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import type { CompanyConfig, CreateCompanyConfigRequest, UpdateCompanyConfigRequest } from '../types/CompanyConfig';
 import type { Sede } from '../types/Sede';
-import { CompanyConfigService } from '../services/CompanyConfigService';
-import { SedeService } from '../services/SedeService';
+import { useApiClient } from '../hooks/useApiClient';
 import {
     Button,
     Table,
@@ -28,6 +27,7 @@ import {
 import { DeleteRegular, EditRegular, AddRegular, BuildingRegular, ArrowSyncRegular } from '@fluentui/react-icons';
 
 const CompanyConfigsPage: React.FC = () => {
+    const api = useApiClient();
     const [configs, setConfigs] = useState<CompanyConfig[]>([]);
     const [isOpen, setIsOpen] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
@@ -46,8 +46,8 @@ const CompanyConfigsPage: React.FC = () => {
 
     const loadConfigs = async () => {
         try {
-            const data = await CompanyConfigService.getAll();
-            setConfigs(data);
+            const response = await api.get('/admin/company-configs');
+            setConfigs(response.data);
         } catch (error) {
             console.error(error);
         }
@@ -56,9 +56,9 @@ const CompanyConfigsPage: React.FC = () => {
     const handleSave = async () => {
         try {
             if (isEditing && currentConfig.id) {
-                await CompanyConfigService.update(currentConfig.id, currentConfig as UpdateCompanyConfigRequest);
+                await api.put(`/admin/company-configs/${currentConfig.id}`, currentConfig as UpdateCompanyConfigRequest);
             } else {
-                await CompanyConfigService.create(currentConfig as CreateCompanyConfigRequest);
+                await api.post('/admin/company-configs', currentConfig as CreateCompanyConfigRequest);
             }
             setIsOpen(false);
             loadConfigs();
@@ -71,7 +71,7 @@ const CompanyConfigsPage: React.FC = () => {
     const handleDelete = async (id: number) => {
         if (!confirm('Are you sure?')) return;
         try {
-            await CompanyConfigService.delete(id);
+            await api.delete(`/admin/company-configs/${id}`);
             loadConfigs();
         } catch (error) {
             console.error(error);
@@ -96,8 +96,8 @@ const CompanyConfigsPage: React.FC = () => {
         setSedeDialogOpen(true);
         setSedeLoading(true);
         try {
-            const data = await SedeService.getByCompany(config.id);
-            setSedes(data);
+            const response = await api.get(`/sedes/company/${config.id}`);
+            setSedes(response.data);
         } catch (error) {
             console.error(error);
         } finally {
@@ -109,8 +109,8 @@ const CompanyConfigsPage: React.FC = () => {
         if (!selectedCompany) return;
         setImportLoading(true);
         try {
-            const data = await SedeService.importFromSmart(selectedCompany.id);
-            setSedes(data);
+            const response = await api.post(`/sedes/import/${selectedCompany.id}`);
+            setSedes(response.data);
         } catch (error) {
             console.error(error);
             alert('Failed to import sedes. Make sure the API is connected to Smart DB.');
@@ -121,7 +121,7 @@ const CompanyConfigsPage: React.FC = () => {
 
     const handleToggleSede = async (sede: Sede) => {
         try {
-            await SedeService.toggleActive(sede.id, !sede.isActive);
+            await api.patch(`/sedes/${sede.id}/toggle-active?active=${!sede.isActive}`);
             setSedes(prev => prev.map(s => s.id === sede.id ? { ...s, isActive: !s.isActive } : s));
         } catch (error) {
             console.error(error);
@@ -131,7 +131,7 @@ const CompanyConfigsPage: React.FC = () => {
     const handleDeleteSede = async (id: number) => {
         if (!confirm('¿Eliminar esta sede?')) return;
         try {
-            await SedeService.delete(id);
+            await api.delete(`/sedes/${id}`);
             setSedes(prev => prev.filter(s => s.id !== id));
         } catch (error) {
             console.error(error);

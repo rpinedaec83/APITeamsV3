@@ -10,6 +10,7 @@ namespace APITeamsV3.API.Controllers
 {
     [ApiController]
     [Route("api/admin/company-configs")]
+    [Microsoft.AspNetCore.Authorization.Authorize(Roles = "ADMIN,IT")]
     public class CompanyConfigsController : ControllerBase
     {
         private readonly IMediator _mediator;

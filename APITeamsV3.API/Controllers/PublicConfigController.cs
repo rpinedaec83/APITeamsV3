@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
-using APITeamsV3.Application.Common.Interfaces;
+using Microsoft.EntityFrameworkCore;
+using APITeamsV3.Infrastructure.Persistence.Contexts;
 
 namespace APITeamsV3.API.Controllers
 {
@@ -7,30 +8,39 @@ namespace APITeamsV3.API.Controllers
     [ApiController]
     public class PublicConfigController : ControllerBase
     {
-        private readonly ITenantProvider _tenantProvider;
+        private readonly CentralDbContext _dbContext;
 
-        public PublicConfigController(ITenantProvider tenantProvider)
+        public PublicConfigController(CentralDbContext dbContext)
         {
-            _tenantProvider = tenantProvider;
+            _dbContext = dbContext;
         }
 
         [HttpGet("spa-config")]
-        public IActionResult GetSpaConfig()
+        public async Task<IActionResult> GetSpaConfig()
         {
             try
             {
-                var tenant = _tenantProvider.GetCurrentTenant();
+                // Resolve tenant by the API host (e.g. api.teams.zegel.edu.pe)
+                var host = Request.Host.Host.ToLower();
+
+                var config = await _dbContext.CompanyConfigs
+                    .FirstOrDefaultAsync(c => c.ApiHost == host && c.IsActive);
+
+                if (config == null)
+                    return NotFound($"No tenant config found for host: {host}");
+
                 return Ok(new
                 {
-                    spaClientId = tenant.SpaClientId,
-                    tenantId = tenant.SpaTenantId,
-                    companyKey = tenant.CompanyKey
+                    spaClientId = config.SpaClientId ?? string.Empty,
+                    tenantId    = config.SpaTenantId ?? config.GraphTenantId,
+                    companyKey  = config.CompanyKey
                 });
             }
-            catch (System.Exception)
+            catch (Exception ex)
             {
-                return NotFound("Tenant config not found");
+                return StatusCode(500, $"Error resolving tenant config: {ex.Message}");
             }
         }
     }
 }
+

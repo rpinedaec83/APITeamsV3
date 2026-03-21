@@ -5,6 +5,7 @@ namespace APITeamsV3.API.Controllers
 {
     [ApiController]
     [Route("api/jobs")]
+    [Microsoft.AspNetCore.Authorization.Authorize(Roles = "ADMIN,IT")]
     public class JobsController : ControllerBase
     {
         private readonly IHangfireJobService _jobService;

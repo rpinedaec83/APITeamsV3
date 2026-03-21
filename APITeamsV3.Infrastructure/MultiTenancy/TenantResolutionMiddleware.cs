@@ -21,60 +21,88 @@ namespace APITeamsV3.Infrastructure.MultiTenancy
 
         public async Task InvokeAsync(HttpContext context, ITenantProvider tenantProvider, CentralDbContext dbContext, IEncryptionService encryptionService)
         {
-            // 0. Exempt Admin Routes
-            if (context.Request.Path.StartsWithSegments("/api/admin"))
-            {
-                await _next(context);
-                return;
-            }
-
             // 1. Resolve Host
             var host = context.Request.Host.Host.ToLower();
             
-            // 2. Dev Override (Header)
+            // 2. Resolve Tenant from Host
+            APITeamsV3.Domain.Entities.CompanyConfig? config = null;
+
             if (host.Contains("localhost"))
             {
                 if (context.Request.Headers.TryGetValue("X-Company-Key", out var companyKeyHeader))
                 {
                     var companyKey = companyKeyHeader.ToString().ToLower();
-                    var devConfig = await dbContext.CompanyConfigs.FirstOrDefaultAsync(c => c.CompanyKey == companyKey && c.IsActive);
-                    if (devConfig != null)
+                    config = await dbContext.CompanyConfigs.FirstOrDefaultAsync(c => c.CompanyKey == companyKey && c.IsActive);
+                }
+                
+                if (config == null)
+                {
+                    config = await dbContext.CompanyConfigs.FirstOrDefaultAsync(c => c.CompanyKey == "idat" && c.IsActive);
+                }
+            }
+            else
+            {
+                config = await dbContext.CompanyConfigs.FirstOrDefaultAsync(c => (c.ApiHost == host || c.FrontHost == host) && c.IsActive);
+            }
+
+            // 3. Role/Tenancy Enforcement
+            if (context.User.Identity != null && context.User.Identity.IsAuthenticated)
+            {
+                var roleClaims = context.User.FindAll("roles")
+                    .Concat(context.User.FindAll(System.Security.Claims.ClaimTypes.Role))
+                    .Select(c => c.Value)
+                    .ToList();
+
+                var email = context.User.FindFirst("preferred_username")?.Value 
+                         ?? context.User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
+                         ?? context.User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value;
+
+                bool isIt = roleClaims.Contains("IT");
+                bool isAdmin = roleClaims.Contains("ADMIN");
+
+                if (isAdmin && !isIt)
+                {
+                    if (string.IsNullOrEmpty(email))
                     {
-                        SetTenantContext(tenantProvider, devConfig, encryptionService);
-                        await _next(context);
+                        context.Response.StatusCode = 403;
+                        await context.Response.WriteAsync("Forbidden: Email claim missing for role verification.");
+                        return;
+                    }
+
+                    var emailDomain = email.Split('@').Last().ToLower();
+                    // Block if the resolved tenant doesn't match the email domain
+                    if (config != null && !config.FrontHost.ToLower().Contains(emailDomain))
+                    {
+                        context.Response.StatusCode = 403;
+                        await context.Response.WriteAsync($"Forbidden: Your account ({email}) is not authorized to access this tenant ({config.CompanyKey}).");
                         return;
                     }
                 }
-                
-                // Fallback to "idat" if no header or header not found (User's active context)
-                var fallbackConfig = await dbContext.CompanyConfigs.FirstOrDefaultAsync(c => c.CompanyKey == "idat" && c.IsActive);
-                if (fallbackConfig != null)
+                // GESTION role follows the host-based resolution naturally
+            }
+
+            // 4. Set Context if resolution was successful
+            if (config != null)
+            {
+                SetTenantContext(tenantProvider, config, encryptionService);
+                using (_logger.BeginScope(new Dictionary<string, object> { ["CompanyKey"] = config.CompanyKey }))
                 {
-                     SetTenantContext(tenantProvider, fallbackConfig, encryptionService);
-                     await _next(context);
-                     return;
+                    await _next(context);
                 }
             }
-
-            // 3. Prod Resolution (Host Match)
-            // Caching strategy should be applied here in production (IMemoryCache) - omitted for simplicity in initial setup
-            var config = await dbContext.CompanyConfigs.FirstOrDefaultAsync(c => c.ApiHost == host && c.IsActive);
-
-            if (config == null)
+            else
             {
-                _logger.LogWarning($"Tenant resolution failed for host: {host}");
-                context.Response.StatusCode = 404;
-                await context.Response.WriteAsync("Tenant not found or inactive.");
-                return;
-            }
-
-            // 4. Set Context
-            SetTenantContext(tenantProvider, config, encryptionService);
-
-            // 5. Add to Logs
-            using (_logger.BeginScope(new Dictionary<string, object> { ["CompanyKey"] = config.CompanyKey }))
-            {
-                await _next(context);
+                // Exempt public routes from resolution failure
+                if (context.Request.Path.StartsWithSegments("/api/public"))
+                {
+                    await _next(context);
+                }
+                else
+                {
+                    _logger.LogWarning($"Tenant resolution failed for host: {host}");
+                    context.Response.StatusCode = 404;
+                    await context.Response.WriteAsync("Tenant not found or inactive.");
+                }
             }
         }
 

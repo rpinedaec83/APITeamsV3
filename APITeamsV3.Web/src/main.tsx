@@ -5,17 +5,11 @@ import './index.css';
 
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
-const DetermineApiUrl = () => {
-  if (window.location.hostname.includes('localhost')) {
-    return 'http://localhost:5000/api';
-  } else {
-    return `https://api.${window.location.hostname}/api`;
-  }
-}
+import { getBaseApiUrl } from './utils/config';
 
 const init = async () => {
   try {
-    const apiUrl = DetermineApiUrl();
+    const apiUrl = getBaseApiUrl();
     const response = await fetch(`${apiUrl}/public/spa-config`);
     if (!response.ok) {
       throw new Error(`Failed to load config: ${response.statusText}`);

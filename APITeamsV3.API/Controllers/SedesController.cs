@@ -8,6 +8,7 @@ namespace APITeamsV3.API.Controllers
 {
     [ApiController]
     [Route("api/admin/sedes")]
+    [Microsoft.AspNetCore.Authorization.Authorize(Roles = "ADMIN,IT,GESTION")]
     public class SedesController : ControllerBase
     {
         private readonly IMediator _mediator;

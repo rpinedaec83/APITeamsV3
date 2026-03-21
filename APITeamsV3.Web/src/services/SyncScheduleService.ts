@@ -1,11 +1,7 @@
 import type { SyncSchedule, CreateSyncScheduleRequest } from '../types/SyncSchedule';
+import { getBaseApiUrl } from '../utils/config';
 
-const getApiUrl = () => {
-    if (window.location.hostname.includes('localhost')) {
-        return 'http://localhost:5000/api/admin/sync-schedules';
-    }
-    return `https://api.${window.location.hostname}/api/admin/sync-schedules`;
-};
+const getApiUrl = () => `${getBaseApiUrl()}/admin/sync-schedules`;
 
 const getHeaders = () => {
     const headers = new Headers();

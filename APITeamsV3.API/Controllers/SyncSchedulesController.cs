@@ -8,6 +8,7 @@ namespace APITeamsV3.API.Controllers
 {
     [ApiController]
     [Route("api/admin/sync-schedules")]
+    [Microsoft.AspNetCore.Authorization.Authorize(Roles = "ADMIN,IT")]
     public class SyncSchedulesController : ControllerBase
     {
         private readonly IMediator _mediator;

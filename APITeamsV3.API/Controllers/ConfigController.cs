@@ -5,6 +5,7 @@ namespace APITeamsV3.API.Controllers
 {
     [ApiController]
     [Route("api/config")]
+    [Microsoft.AspNetCore.Authorization.Authorize(Roles = "ADMIN,IT,GESTION")]
     public class ConfigController : ControllerBase
     {
         private readonly ITenantProvider _tenantProvider;

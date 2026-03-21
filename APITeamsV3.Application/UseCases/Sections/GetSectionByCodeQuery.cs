@@ -23,6 +23,7 @@ namespace APITeamsV3.Application.UseCases.Sections
         public string UnidadNegocio { get; set; } = string.Empty;
         public List<StudentSummaryDto> Members { get; set; } = new();
         public bool HasTeam { get; set; }
+        public bool EsTeams { get; set; }
     }
 
     public class StudentSummaryDto

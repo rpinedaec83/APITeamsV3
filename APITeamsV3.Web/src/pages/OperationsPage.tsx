@@ -31,6 +31,7 @@ import {
     ArrowUploadRegular,
     GridDotsRegular,
 } from '@fluentui/react-icons';
+import { useApiClient } from '../hooks/useApiClient';
 
 interface Member {
     name: string;
@@ -182,7 +183,7 @@ const useStyles = makeStyles({
 
 const OperationsPage: React.FC = () => {
     const styles = useStyles();
-    // const apiClient = useApiClient(); // TODO: Enable when Auth is ready or use direct axios for now
+    const apiClient = useApiClient();
 
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
@@ -208,11 +209,11 @@ const OperationsPage: React.FC = () => {
         setError('');
         setSeccionData(null);
         try {
-            // Temporary direct fetch until Auth hook is fully ready
-            const response = await fetch(`http://localhost:5000/api/sections/search?code=${seccionCodigo}`);
-            if (!response.ok) throw new Error('Sección no encontrada');
-            const data = await response.json();
-            setSeccionData(data);
+            const response = await apiClient.get(`/sections/search?code=${seccionCodigo}`);
+            setSeccionData(response.data);
+            if (!response.data.esTeams) {
+                setError('Esta sección no está marcada para Teams (EsTeams = 0). Procede con precaución.');
+            }
         } catch (err: any) {
             setError(err.message || 'Error al buscar sección');
         } finally {
@@ -226,11 +227,8 @@ const OperationsPage: React.FC = () => {
         setError('');
         setAlumnoData(null);
         try {
-            const response = await fetch(`http://localhost:5000/api/students/search?code=${alumnoCodigo}`);
-            if (!response.ok) throw new Error('Alumno no encontrado');
-            const data = await response.json();
-            setAlumnoData(data);
-            setAlumnoData(data);
+            const response = await apiClient.get(`/students/search?code=${alumnoCodigo}`);
+            setAlumnoData(response.data);
         } catch (err: unknown) {
             const errorMessage = err instanceof Error ? err.message : 'Error desconocido al buscar alumno';
             setError(errorMessage);
@@ -245,18 +243,11 @@ const OperationsPage: React.FC = () => {
 
         setLoading(true);
         try {
-            const response = await fetch(`http://localhost:5000/api/sections/${seccionData.idSeccion}/provision-team`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ownerEmail: ownerEmail })
+            const response = await apiClient.post(`/sections/${seccionData.idSeccion}/provision-team`, {
+                ownerEmail: ownerEmail
             });
 
-            if (!response.ok) {
-                const err = await response.json();
-                throw new Error(err.Error || 'Error al iniciar aprovisionamiento');
-            }
-
-            const result = await response.json();
+            const result = response.data;
             alert(`Proceso iniciado correctamente (Job ID: ${result.jobId}). El equipo estará listo en breve.`);
             // Optionally reload data
             handleSearchSeccion();

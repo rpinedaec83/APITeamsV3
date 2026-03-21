@@ -44,7 +44,8 @@ namespace APITeamsV3.Application.UseCases.Sections
                 Curso = section.CursoNombre,
                 Profesor = $"{section.NombresFacilitador}",
                 Members = new List<StudentSummaryDto>(), // Skip members for list view
-                HasTeam = teams.Contains(section.IdSeccion)
+                HasTeam = teams.Contains(section.IdSeccion),
+                EsTeams = section.EsTeams
             }).ToList();
         }
     }

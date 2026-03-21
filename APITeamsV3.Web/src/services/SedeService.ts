@@ -1,11 +1,7 @@
 import type { Sede } from '../types/Sede';
+import { getBaseApiUrl } from '../utils/config';
 
-const getApiUrl = () => {
-    if (window.location.hostname.includes('localhost')) {
-        return 'http://localhost:5000/api/admin/sedes';
-    }
-    return `https://api.${window.location.hostname}/api/admin/sedes`;
-};
+const getApiUrl = () => `${getBaseApiUrl()}/admin/sedes`;
 
 const getHeaders = () => {
     const headers = new Headers();

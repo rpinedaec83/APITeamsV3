@@ -94,7 +94,8 @@ namespace APITeamsV3.Application.UseCases.Sections
                 Semestre = section.CodigoPeriodo, // or Semestre
                 UnidadNegocio = section.UnidadNegocioNombre,
                 Members = students,
-                HasTeam = team != null
+                HasTeam = team != null,
+                EsTeams = section.EsTeams
             };
         }
     }

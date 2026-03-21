@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import type { SyncSchedule, CreateSyncScheduleRequest } from '../types/SyncSchedule';
 import type { CompanyConfig } from '../types/CompanyConfig';
-import { SyncScheduleService } from '../services/SyncScheduleService';
-import { CompanyConfigService } from '../services/CompanyConfigService';
+import { useApiClient } from '../hooks/useApiClient';
 import {
     Button,
     Dialog,
@@ -31,6 +30,7 @@ const ALL_DAYS = [
 ];
 
 const SchedulesPage: React.FC = () => {
+    const api = useApiClient();
     const [schedules, setSchedules] = useState<SyncSchedule[]>([]);
     const [companies, setCompanies] = useState<CompanyConfig[]>([]);
     const [loading, setLoading] = useState(true);
@@ -54,12 +54,12 @@ const SchedulesPage: React.FC = () => {
     const loadData = async () => {
         setLoading(true);
         try {
-            const [schedulesData, companiesData] = await Promise.all([
-                SyncScheduleService.getAll(),
-                CompanyConfigService.getAll()
+            const [schedulesRes, companiesRes] = await Promise.all([
+                api.get('/sync-schedules'),
+                api.get('/admin/company-configs')
             ]);
-            setSchedules(schedulesData);
-            setCompanies(companiesData);
+            setSchedules(schedulesRes.data);
+            setCompanies(companiesRes.data);
         } catch (error) {
             console.error(error);
         } finally {
@@ -100,9 +100,9 @@ const SchedulesPage: React.FC = () => {
 
         try {
             if (isEditing && editId != null) {
-                await SyncScheduleService.update(editId, { ...data, id: editId });
+                await api.put(`/sync-schedules/${editId}`, { ...data, id: editId });
             } else {
-                await SyncScheduleService.create(data);
+                await api.post('/sync-schedules', data);
             }
             setDialogOpen(false);
             loadData();
@@ -115,7 +115,7 @@ const SchedulesPage: React.FC = () => {
     const handleDelete = async (id: number) => {
         if (!confirm('¿Eliminar esta programación?')) return;
         try {
-            await SyncScheduleService.delete(id);
+            await api.delete(`/sync-schedules/${id}`);
             loadData();
         } catch (error) {
             console.error(error);
@@ -124,7 +124,7 @@ const SchedulesPage: React.FC = () => {
 
     const handleToggle = async (s: SyncSchedule) => {
         try {
-            await SyncScheduleService.toggle(s.id, !s.isEnabled);
+            await api.patch(`/sync-schedules/${s.id}/toggle?enabled=${!s.isEnabled}`);
             setSchedules(prev => prev.map(item => item.id === s.id ? { ...item, isEnabled: !item.isEnabled } : item));
         } catch (error) {
             console.error(error);

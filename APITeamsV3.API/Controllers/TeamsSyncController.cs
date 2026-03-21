@@ -9,6 +9,7 @@ namespace APITeamsV3.API.Controllers
 {
     [ApiController]
     [Route("api/sync")]
+    [Microsoft.AspNetCore.Authorization.Authorize(Roles = "ADMIN,IT,GESTION")]
     public class TeamsSyncController : ControllerBase
     {
         private readonly IMediator _mediator;

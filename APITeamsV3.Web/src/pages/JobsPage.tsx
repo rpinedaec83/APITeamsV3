@@ -38,8 +38,9 @@ import {
     InfoRegular,
     ClockRegular,
 } from '@fluentui/react-icons';
+import { useApiClient } from '../hooks/useApiClient';
 
-const API_BASE = 'http://localhost:5000';
+// Removed hardcoded API_BASE
 
 interface JobResult {
     jobId: string;
@@ -254,6 +255,7 @@ const JOB_DEFINITIONS: JobDefinition[] = [
 
 const JobsPage: React.FC = () => {
     const styles = useStyles();
+    const apiClient = useApiClient();
 
     const [idSeccion, setIdSeccion] = useState('');
     const [loading, setLoading] = useState<string | null>(null); // tracks which job key is loading
@@ -275,23 +277,16 @@ const JobsPage: React.FC = () => {
         setLoading(job.key);
         try {
             const url = job.key === 'sync-roster'
-                ? `${API_BASE}${job.endpoint}/${seccionId}?fullSync=true`
-                : `${API_BASE}${job.endpoint}/${seccionId}`;
+                ? `${job.endpoint}/${seccionId}?fullSync=true`
+                : `${job.endpoint}/${seccionId}`;
 
-            const response = await fetch(url, {
-                method: 'POST',
+            const response = await apiClient.post(url, {}, {
                 headers: {
-                    'Content-Type': 'application/json',
-                    'X-Tenant': 'idat',
+                    'X-Tenant': 'idat', // Should this be dynamic? Keeping it for now.
                 },
             });
 
-            if (!response.ok) {
-                const errText = await response.text();
-                throw new Error(errText || `Error HTTP ${response.status}`);
-            }
-
-            const result = await response.json();
+            const result = response.data;
             setHistory(prev => [{
                 jobId: result.jobId,
                 message: result.message,

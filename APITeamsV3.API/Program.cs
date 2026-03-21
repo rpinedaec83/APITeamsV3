@@ -14,6 +14,18 @@ var builder = WebApplication.CreateBuilder(args);
 // Add services to the container.
 builder.Services.AddMicrosoftIdentityWebApiAuthentication(builder.Configuration);
 
+builder.Services.Configure<Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerOptions>(
+    Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerDefaults.AuthenticationScheme,
+    options => {
+        options.TokenValidationParameters.ValidAudiences = new[] { 
+            "c356c453-9a02-48ae-90fe-6a55af698a60", 
+            "0a769a7f-b15f-49b3-832b-f4755ced41d1", // Zegel SPA
+            "0856381c-a0f4-4e74-b1c4-23d6710e5d53",  // Idat SPA
+            "0fbcd069-7033-407b-91db-c7943513a078",  // CA SPA (Placeholder if needed)
+            "4c7ba983-34bd-44a6-848e-670560b411d3"   // ITS SPA
+        };
+    });
+
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 
@@ -96,22 +108,20 @@ using (var scope = app.Services.CreateScope())
         context.Database.Migrate();
         await APITeamsV3.Infrastructure.Persistence.CentralDbContextSeed.SeedAsync(context, encryptionService);
         
-        // Update View for SmartDbContext
-        // CRITICAL: We must manually fetch the connection string for the default tenant ('idat') 
-        // because ITenantProvider is empty outside of an HTTP request.
-        var idatConfig = await context.CompanyConfigs.FirstOrDefaultAsync(c => c.CompanyKey == "idat");
-        if (idatConfig != null)
+        // Update View for SmartDbContext for ALL active tenants
+        var configs = await context.CompanyConfigs.Where(c => c.IsActive).ToListAsync();
+        foreach (var config in configs)
         {
-            var connectionString = encryptionService.Decrypt(idatConfig.SmartConnectionString);
-            
-            var optionsBuilder = new DbContextOptionsBuilder<SmartDbContext>();
-            optionsBuilder.UseSqlServer(connectionString);
-            
-            // We can pass null for TenantProvider as we configured the DB context with specific options
-            using (var directSmartContext = new SmartDbContext(optionsBuilder.Options, null!)) 
+            try 
             {
-                 // Force View Update with Embedded SQL
-                var viewSql = @"
+                var connectionString = encryptionService.Decrypt(config.SmartConnectionString);
+                
+                var optionsBuilder = new DbContextOptionsBuilder<SmartDbContext>();
+                optionsBuilder.UseSqlServer(connectionString);
+                
+                using (var directSmartContext = new SmartDbContext(optionsBuilder.Options, null!)) 
+                {
+                    var viewSql = @"
 CREATE OR ALTER VIEW [dbo].[vw_MatriculasActivas] AS
 SELECT SE.IdSeccion,
     SE.Codigo,
@@ -143,33 +153,34 @@ SELECT SE.IdSeccion,
         ''
     ) AS NombresFacilitador,
     ISNULL(FC.EmailInstitucion, '') AS EmailFacilitador,
+    -- Flags
+    CAST(ISNULL(PE.EsTeams, 0) AS BIT) AS EsTeams,
     -- Calculated Placeholders (EF requires them if mapped)
     CAST('' AS NVARCHAR(100)) AS CalculatedMailNickname,
     CAST('' AS NVARCHAR(100)) AS CalculatedDisplayName
 FROM Seccion SE WITH (NOLOCK)
-    INNER JOIN Promocion PR WITH (NOLOCK) ON SE.IdPromocion = PR.IdPromocion
-    INNER JOIN Sede SD WITH (NOLOCK) ON PR.IdSede = SD.IdSede
-    INNER JOIN UnidadNegocio UN WITH (NOLOCK) ON PR.IdUnidadNegocio = UN.IdUnidadNegocio
-    INNER JOIN UnidadAcademica UA WITH (NOLOCK) ON PR.IdUnidadAcademica = UA.IdUnidadAcademica
-    INNER JOIN Periodo PE WITH (NOLOCK) ON PR.IdPeriodo = PE.IdPeriodo
-    INNER JOIN Producto PD WITH (NOLOCK) ON PR.IdProducto = PD.IdProducto
+    LEFT JOIN Promocion PR WITH (NOLOCK) ON SE.IdPromocion = PR.IdPromocion
+    LEFT JOIN Sede SD WITH (NOLOCK) ON PR.IdSede = SD.IdSede
+    LEFT JOIN UnidadNegocio UN WITH (NOLOCK) ON PR.IdUnidadNegocio = UN.IdUnidadNegocio
+    LEFT JOIN UnidadAcademica UA WITH (NOLOCK) ON PR.IdUnidadAcademica = UA.IdUnidadAcademica
+    LEFT JOIN Periodo PE WITH (NOLOCK) ON PR.IdPeriodo = PE.IdPeriodo
+    LEFT JOIN Producto PD WITH (NOLOCK) ON PR.IdProducto = PD.IdProducto
     LEFT JOIN PromocionGrupo PG WITH (NOLOCK) ON SE.IdPromocion = PG.IdPromocion
     AND SE.IdGrupo = PG.IdGrupo
     LEFT JOIN Curso CU WITH (NOLOCK) ON SE.IdCurso = CU.IdCurso
     LEFT JOIN SeccionProfesor SP WITH (NOLOCK) ON SP.IdSeccion = SE.IdSeccion
     AND SP.EsResponsable = 1
     LEFT JOIN Actor AT2 WITH (NOLOCK) ON SP.IdActor = AT2.IdActor
-    LEFT JOIN Facilitador FC WITH (NOLOCK) ON SP.IdActor = FC.IdFacilitador
-WHERE PE.EsTeams = 1;";
+    LEFT JOIN Facilitador FC WITH (NOLOCK) ON SP.IdActor = FC.IdFacilitador;";
 
-                await directSmartContext.Database.ExecuteSqlRawAsync(viewSql);
-            
+                    await directSmartContext.Database.ExecuteSqlRawAsync(viewSql);
+                }
             }
-        }
-        else
-        {
-             var logger = services.GetRequiredService<ILogger<Program>>();
-             logger.LogWarning("DEBUG: idatConfig NOT FOUND in CentralDbContext. View vw_MatriculasActivas NOT UPDATED.");
+            catch (Exception ex)
+            {
+                var logger = services.GetRequiredService<ILogger<Program>>();
+                logger.LogWarning($"Could not update view for tenant {config.CompanyKey}: {ex.Message}");
+            }
         }
     }
     catch (Exception ex)

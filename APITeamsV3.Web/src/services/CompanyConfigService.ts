@@ -1,12 +1,8 @@
 import type { CompanyConfig, CreateCompanyConfigRequest, UpdateCompanyConfigRequest } from '../types/CompanyConfig';
+import { getBaseApiUrl } from '../utils/config';
 
 // Helper to get API URL
-const getApiUrl = () => {
-    if (window.location.hostname.includes('localhost')) {
-        return 'http://localhost:5000/api/admin/company-configs';
-    }
-    return `https://api.${window.location.hostname}/api/admin/company-configs`;
-};
+const getApiUrl = () => `${getBaseApiUrl()}/admin/company-configs`;
 
 // Helper for headers (simple for now, ideally includes auth token)
 const getHeaders = () => {

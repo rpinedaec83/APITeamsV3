@@ -9,6 +9,7 @@ namespace APITeamsV3.API.Controllers
 {
     [ApiController]
     [Route("api")]
+    [Microsoft.AspNetCore.Authorization.Authorize(Roles = "ADMIN,IT,GESTION")]
     public class TeamsUserController : ControllerBase
     {
         private readonly IMediator _mediator;

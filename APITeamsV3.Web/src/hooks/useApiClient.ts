@@ -2,6 +2,7 @@ import { useMsal, useAccount } from "@azure/msal-react";
 import axios from "axios";
 import { loginRequest } from "../authConfig";
 import { useMemo } from "react";
+import { getBaseApiUrl } from "../utils/config";
 
 export const useApiClient = () => {
     const { instance, accounts } = useMsal();
@@ -9,7 +10,7 @@ export const useApiClient = () => {
 
     const client = useMemo(() => {
         const api = axios.create({
-            baseURL: DetermineApiUrl(), // Helper function or direct logic
+            baseURL: getBaseApiUrl(),
         });
 
         api.interceptors.request.use(async (config) => {
@@ -19,7 +20,7 @@ export const useApiClient = () => {
                         ...loginRequest,
                         account: account
                     });
-                    config.headers.Authorization = `Bearer ${response.accessToken}`;
+                    config.headers.Authorization = `Bearer ${response.idToken}`;
                 } catch (error) {
                     // Fallback to interaction if silent fails? 
                     // Usually we redirect to login or handle error
@@ -35,11 +36,4 @@ export const useApiClient = () => {
     return client;
 };
 
-// Helper to determine API URL based on host
-const DetermineApiUrl = () => {
-    if (window.location.hostname.includes('localhost')) {
-        return 'http://localhost:5000/api'; // Use http for local dev for now as https might have cert issues
-    } else {
-        return `https://api.${window.location.hostname}/api`;
-    }
-}
+// Utility now centrally managed in src/utils/config.ts

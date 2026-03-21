@@ -7,6 +7,7 @@ namespace APITeamsV3.API.Controllers
 {
     [ApiController]
     [Route("api/lifecycle")]
+    [Microsoft.AspNetCore.Authorization.Authorize(Roles = "ADMIN,IT,GESTION")]
     public class TeamsLifecycleController : ControllerBase
     {
         private readonly IMediator _mediator;

@@ -8,6 +8,7 @@ namespace APITeamsV3.API.Controllers
 {
     [ApiController]
     [Route("api/sections")]
+    [Microsoft.AspNetCore.Authorization.Authorize(Roles = "ADMIN,IT,GESTION")]
     public class SectionController : ControllerBase
     {
         private readonly IMediator _mediator;

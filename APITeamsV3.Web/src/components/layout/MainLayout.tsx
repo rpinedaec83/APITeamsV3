@@ -132,13 +132,23 @@ const MainLayout: React.FC = () => {
     const companyKey = useCompanyKey();
     const logoSrc = brandLogos[companyKey?.toLowerCase()];
 
-    const menuItems = [
+    console.log("DEBUG: All ID Token Claims:", account?.idTokenClaims);
+    const idTokenClaims = account?.idTokenClaims as any;
+    const roles = (idTokenClaims?.roles as string[]) || [];
+    console.log("DEBUG: Current User Roles:", roles);
+
+    const allMenuItems = [
         { label: 'Dashboard', icon: <HomeRegular />, path: '/' },
         { label: 'Operations', icon: <OrganizationRegular />, path: '/operations' },
-        { label: 'Hangfire Jobs', icon: <TimerRegular />, path: '/jobs' },
-        { label: 'Sync Schedules', icon: <CalendarClockRegular />, path: '/schedules' },
-        { label: 'Company Configs', icon: <SettingsRegular />, path: '/admin/company-configs' },
+        { label: 'Hangfire Jobs', icon: <TimerRegular />, path: '/jobs', allowedRoles: ['ADMIN', 'IT'] },
+        { label: 'Sync Schedules', icon: <CalendarClockRegular />, path: '/schedules', allowedRoles: ['ADMIN', 'IT'] },
+        { label: 'Company Configs', icon: <SettingsRegular />, path: '/admin/company-configs', allowedRoles: ['ADMIN', 'IT'] },
     ];
+
+    const menuItems = allMenuItems.filter(item => {
+        if (!item.allowedRoles) return true;
+        return item.allowedRoles.some(role => roles.includes(role));
+    });
 
     const handleSignOut = () => {
         instance.logoutRedirect({

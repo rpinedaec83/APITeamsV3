@@ -35,5 +35,6 @@ namespace APITeamsV3.Domain.Entities
         // Calculated for Teams
         public string CalculatedMailNickname { get; set; } = string.Empty;
         public string CalculatedDisplayName { get; set; } = string.Empty;
+        public bool EsTeams { get; set; }
     }
 }

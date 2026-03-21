@@ -7,6 +7,7 @@ namespace APITeamsV3.API.Controllers
 {
     [ApiController]
     [Route("api/students")]
+    [Microsoft.AspNetCore.Authorization.Authorize(Roles = "ADMIN,IT,GESTION")]
     public class StudentController : ControllerBase
     {
         private readonly IMediator _mediator;
