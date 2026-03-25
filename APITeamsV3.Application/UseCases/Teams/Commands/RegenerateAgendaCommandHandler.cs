@@ -126,7 +126,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                 _logger.LogError(ex, "Error regenerating agenda.");
                 result.IsValid = false;
                 result.Summary = "Error técnico al regenerar.";
-                await LogOperativoAsync("Error", "Agenda", request.IdSeccion.ToString(), ex.Message, request.JobId, ex.StackTrace);
+                await LogOperativoAsync("Error", "Agenda", request.IdSeccion.ToString(), ex.Message, request.JobId, ex.StackTrace ?? string.Empty);
             }
 
             return result;

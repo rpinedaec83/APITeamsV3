@@ -128,7 +128,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
             catch (Exception ex)
             {
                 _logger.LogError(ex, $"Error synchronizing section {request.IdSeccion}");
-                await LogOperativoAsync("Error", "Seccion", request.IdSeccion.ToString(), ex.Message, request.JobId, ex.StackTrace);
+                await LogOperativoAsync("Error", "Seccion", request.IdSeccion.ToString(), ex.Message, request.JobId, ex.StackTrace ?? string.Empty);
                 result.Failure++;
             }
 

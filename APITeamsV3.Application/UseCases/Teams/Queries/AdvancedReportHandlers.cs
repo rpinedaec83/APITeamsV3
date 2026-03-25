@@ -26,15 +26,15 @@ namespace APITeamsV3.Application.UseCases.Teams.Queries
 
         public async Task<List<ScheduleReportDto>> Handle(GetScheduleReportQuery request, CancellationToken cancellationToken)
         {
-            // Join Seccion with SeccionHorario
+            // Join Seccion with HorarioSesion
             var query = from s in _context.Set<Seccion>().AsNoTracking()
-                        join h in _context.Set<SeccionHorario>().AsNoTracking() on s.IdSeccion equals h.IdSeccion
+                        join h in _context.Set<HorarioSesion>().AsNoTracking() on s.IdSeccion equals h.IdSeccion
                         select new ScheduleReportDto
                         {
                             IdSeccion = s.IdSeccion,
                             Seccion = s.GrupoCodigo,
                             Curso = s.CursoNombre,
-                            Dia = h.Dia,
+                            Dia = h.Fecha.DayOfWeek.ToString(),
                             Inicio = h.Inicio,
                             Fin = h.Fin,
                             Sede = s.SedeNombre,
@@ -112,7 +112,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Queries
                                     where s.SedeNombre == sede && t.EstadoTeam == "A"
                                     select s).CountAsync(cancellationToken);
 
-                var errors = await _context.Set<TeamsLogOperativo>()
+                var errors = await _context.Set<APITeamsV3.Domain.Entities.TeamsLogOperativo>()
                     .CountAsync(l => l.Tipo == "Error" && l.Fecha >= DateTime.UtcNow.AddDays(-1), cancellationToken);
 
                 result.Add(new SyncProgressReportDto
