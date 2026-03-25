@@ -18,6 +18,8 @@ interface TenancyStats {
     enTeams: number;
 }
 
+type TenancyStatsRow = TenancyStats;
+
 const Dashboard: React.FC = () => {
     const { accounts } = useMsal();
     const api = useApiClient();
@@ -29,9 +31,9 @@ const Dashboard: React.FC = () => {
     useEffect(() => {
         api.get('/reports/tenancy-stats')
             .then(res => {
-                const data = res.data as any[];
+                const data = res.data as TenancyStatsRow[];
                 if (data && data.length > 0) {
-                    const aggregated = data.reduce((acc, curr) => ({
+                    const aggregated = data.reduce<TenancyStats>((acc, curr) => ({
                         equipos: acc.equipos + curr.equipos,
                         equiposActivos: acc.equiposActivos + curr.equiposActivos,
                         alumnos: acc.alumnos + curr.alumnos,

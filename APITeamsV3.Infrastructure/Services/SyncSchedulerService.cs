@@ -93,7 +93,7 @@ namespace APITeamsV3.Infrastructure.Services
                 {
                     // Get active sede codes for this company
                     var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
-                    var sedeCodes = await mediator.Send(new GetActiveSedeCodesQuery(schedule.CompanyConfigId), stoppingToken);
+                    var sedeCodes = await mediator.Send(new GetActiveSedeCodesQuery(schedule.CompanyConfigId, true), stoppingToken);
 
                     if (string.IsNullOrEmpty(sedeCodes))
                     {

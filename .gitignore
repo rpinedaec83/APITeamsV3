@@ -419,3 +419,9 @@ FodyWeavers.xsd
 [Bb]in/*
 [Bb]in\*
 **/bin/*
+
+# Local databases and published artifacts
+publish_output/
+*.db
+*.db-shm
+*.db-wal

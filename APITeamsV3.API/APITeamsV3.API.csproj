@@ -13,7 +13,7 @@
   <ItemGroup>
     <PackageReference Include="Hangfire.AspNetCore" Version="1.8.23" />
     <PackageReference Include="Hangfire.Core" Version="1.8.23" />
-    <PackageReference Include="Hangfire.MemoryStorage" Version="1.8.1.2" />
+    <PackageReference Include="Hangfire.SqlServer" Version="1.8.23" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="5.2.2" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.*">
       <PrivateAssets>all</PrivateAssets>
@@ -31,4 +31,4 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
-</Project>
+</Project>

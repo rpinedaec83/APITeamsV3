@@ -5,6 +5,7 @@ import './index.css';
 
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
+import type { SpaBootstrapConfig } from './authConfig';
 import { getBaseApiUrl } from './utils/config';
 
 const init = async () => {
@@ -14,7 +15,8 @@ const init = async () => {
     if (!response.ok) {
       throw new Error(`Failed to load config: ${response.statusText}`);
     }
-    const spaConfig = await response.json();
+    const spaConfig = await response.json() as SpaBootstrapConfig;
+    window.__APITEAMSV3_CONFIG__ = spaConfig;
 
     ReactDOM.createRoot(document.getElementById('root')!).render(
       <React.StrictMode>

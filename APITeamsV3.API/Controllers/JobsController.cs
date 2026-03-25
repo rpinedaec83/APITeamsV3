@@ -16,58 +16,58 @@ namespace APITeamsV3.API.Controllers
         }
 
         [HttpPost("generate-schedule/{idSeccion}")]
-        public ActionResult<string> GenerateSchedule(int idSeccion)
+        public async Task<ActionResult<string>> GenerateSchedule(int idSeccion)
         {
-            var jobId = _jobService.EnqueueGenerateSchedule(idSeccion);
+            var jobId = await _jobService.EnqueueGenerateSchedule(idSeccion);
             return Ok(new { JobId = jobId, Message = "Generate Schedule Job Enqueued" });
         }
 
         [HttpPost("sync-roster/{idSeccion}")]
-        public ActionResult<string> SyncRoster(int idSeccion, [FromQuery] bool fullSync = true)
+        public async Task<ActionResult<string>> SyncRoster(int idSeccion, [FromQuery] bool fullSync = true)
         {
-            var jobId = _jobService.EnqueueSyncRoster(idSeccion, fullSync);
+            var jobId = await _jobService.EnqueueSyncRoster(idSeccion, fullSync);
             return Ok(new { JobId = jobId, Message = "Sync Roster Job Enqueued" });
         }
 
         [HttpPost("sync-dates/{idSeccion}")]
-        public ActionResult<string> SyncDates(int idSeccion)
+        public async Task<ActionResult<string>> SyncDates(int idSeccion)
         {
-            var jobId = _jobService.EnqueueSyncDates(idSeccion);
+            var jobId = await _jobService.EnqueueSyncDates(idSeccion);
             return Ok(new { JobId = jobId, Message = "Sync Dates Job Enqueued" });
         }
 
         [HttpPost("sync-facilitator/{idSeccion}")]
-        public ActionResult<string> SyncFacilitator(int idSeccion)
+        public async Task<ActionResult<string>> SyncFacilitator(int idSeccion)
         {
-             var jobId = _jobService.EnqueueSyncFacilitator(idSeccion);
+            var jobId = await _jobService.EnqueueSyncFacilitator(idSeccion);
             return Ok(new { JobId = jobId, Message = "Sync Facilitator Job Enqueued" });
         }
 
         [HttpPost("update-join-url")]
-        public ActionResult<string> UpdateJoinUrl([FromBody] UpdateJoinUrlRequest request)
+        public async Task<ActionResult<string>> UpdateJoinUrl([FromBody] UpdateJoinUrlRequest request)
         {
-            var jobId = _jobService.EnqueueUpdateJoinUrl(request.IdSeccion, request.JoinUrl, request.IdEvento);
+            var jobId = await _jobService.EnqueueUpdateJoinUrl(request.IdSeccion, request.JoinUrl, request.IdEvento);
             return Ok(new { JobId = jobId, Message = "Update Join URL Job Enqueued" });
         }
 
         [HttpPost("sync-missing-students/{idSeccion}")]
-        public ActionResult<string> SyncMissingStudents(int idSeccion)
+        public async Task<ActionResult<string>> SyncMissingStudents(int idSeccion)
         {
-            var jobId = _jobService.EnqueueSyncMissingStudents(idSeccion);
+            var jobId = await _jobService.EnqueueSyncMissingStudents(idSeccion);
             return Ok(new { JobId = jobId, Message = "Sync Missing Students Job Enqueued" });
         }
 
         [HttpPost("sync-obsolete-students/{idSeccion}")]
-        public ActionResult<string> SyncObsoleteStudents(int idSeccion)
+        public async Task<ActionResult<string>> SyncObsoleteStudents(int idSeccion)
         {
-            var jobId = _jobService.EnqueueSyncObsoleteStudents(idSeccion);
+            var jobId = await _jobService.EnqueueSyncObsoleteStudents(idSeccion);
             return Ok(new { JobId = jobId, Message = "Sync Obsolete Students Job Enqueued" });
         }
 
         [HttpPost("sync-renamed-teams/{idSeccion}")]
-        public ActionResult<string> SyncRenamedTeams(int idSeccion)
+        public async Task<ActionResult<string>> SyncRenamedTeams(int idSeccion)
         {
-            var jobId = _jobService.EnqueueSyncRenamedTeams(idSeccion);
+            var jobId = await _jobService.EnqueueSyncRenamedTeams(idSeccion);
             return Ok(new { JobId = jobId, Message = "Sync Renamed Teams Job Enqueued" });
         }
     }

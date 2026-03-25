@@ -1,4 +1,18 @@
-import { LogLevel, type Configuration } from "@azure/msal-browser";
+import { LogLevel, type Configuration, type RedirectRequest } from "@azure/msal-browser";
+
+export interface SpaBootstrapConfig {
+    spaClientId: string;
+    tenantId: string;
+    companyKey: string;
+    apiClientId: string;
+    apiScopes: string[];
+}
+
+declare global {
+    interface Window {
+        __APITEAMSV3_CONFIG__?: SpaBootstrapConfig;
+    }
+}
 
 export const createMsalConfig = (clientId: string, tenantId: string, redirectUri: string): Configuration => {
     return {
@@ -7,11 +21,9 @@ export const createMsalConfig = (clientId: string, tenantId: string, redirectUri
             authority: `https://login.microsoftonline.com/${tenantId}`,
             redirectUri: redirectUri,
             postLogoutRedirectUri: window.location.origin,
-            // navigateToLoginRequestUrl: true, // Linter error: property does not exist in type
         },
         cache: {
-            cacheLocation: "sessionStorage", // This configures where your cache will be stored
-            // storeAuthStateInCookie: false, // Set this to "true" if you are having issues on IE11 or Edge. Linter error: property does not exist
+            cacheLocation: "sessionStorage",
         },
         system: {
             loggerOptions: {
@@ -19,15 +31,14 @@ export const createMsalConfig = (clientId: string, tenantId: string, redirectUri
                     if (containsPii) {
                         return;
                     }
+
                     switch (level) {
                         case LogLevel.Error:
                             console.error(message);
                             return;
                         case LogLevel.Info:
-                            // console.info(message);
                             return;
                         case LogLevel.Verbose:
-                            // console.debug(message);
                             return;
                         case LogLevel.Warning:
                             console.warn(message);
@@ -39,6 +50,18 @@ export const createMsalConfig = (clientId: string, tenantId: string, redirectUri
     };
 };
 
-export const loginRequest = {
-    scopes: ["User.Read", "Directory.Read.All", "Group.ReadWrite.All"] // Adjust scopes as needed
+export const getApiScopes = (config?: Pick<SpaBootstrapConfig, "apiClientId" | "apiScopes">): string[] => {
+    if (config?.apiScopes?.length) {
+        return config.apiScopes;
+    }
+
+    if (!config?.apiClientId) {
+        return [];
+    }
+
+    return [`api://${config.apiClientId}/access_as_user`];
 };
+
+export const getLoginRequest = (): RedirectRequest => ({
+    scopes: getApiScopes(window.__APITEAMSV3_CONFIG__)
+});

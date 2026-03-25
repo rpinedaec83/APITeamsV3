@@ -1,53 +1,48 @@
 using APITeamsV3.Application;
 using APITeamsV3.Infrastructure;
 using APITeamsV3.Infrastructure.MultiTenancy;
-using Microsoft.EntityFrameworkCore;
 using APITeamsV3.Infrastructure.Persistence.Contexts;
-using APITeamsV3.Application.Common.Interfaces;
+using APITeamsV3.Infrastructure.Services;
 using Hangfire;
-using Hangfire.MemoryStorage;
-
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Identity.Web;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddMicrosoftIdentityWebApiAuthentication(builder.Configuration);
 
 builder.Services.Configure<Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerOptions>(
     Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerDefaults.AuthenticationScheme,
-    options => {
-        options.TokenValidationParameters.ValidAudiences = new[] { 
-            "c356c453-9a02-48ae-90fe-6a55af698a60", 
-            "0a769a7f-b15f-49b3-832b-f4755ced41d1", // Zegel SPA
-            "0856381c-a0f4-4e74-b1c4-23d6710e5d53",  // Idat SPA
-            "0fbcd069-7033-407b-91db-c7943513a078",  // CA SPA (Placeholder if needed)
-            "4c7ba983-34bd-44a6-848e-670560b411d3"   // ITS SPA
-        };
+    options =>
+    {
+        var apiClientId = builder.Configuration["AzureAd:ClientId"];
+        if (string.IsNullOrWhiteSpace(apiClientId))
+        {
+            throw new InvalidOperationException("AzureAd:ClientId must be configured.");
+        }
+
+        options.TokenValidationParameters.ValidAudiences = new[] { apiClientId };
     });
 
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 
-// Hangfire Configuration (Memory Storage for Dev)
+builder.Services.AddSingleton<HangfireServiceScopeJobActivator>();
 builder.Services.AddHangfire(configuration => configuration
     .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
     .UseSimpleAssemblyNameTypeSerializer()
-    .UseRecommendedSerializerSettings()
-    .UseMemoryStorage());
+    .UseRecommendedSerializerSettings());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<TenantHangfireRuntime>());
 
-builder.Services.AddHangfireServer();
-
-// Sync Scheduler Background Service
-builder.Services.AddHostedService<APITeamsV3.Infrastructure.Services.SyncSchedulerService>();
+builder.Services.AddHostedService<SyncSchedulerService>();
 
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll",
-        builder =>
+        policy =>
         {
-            builder
+            policy
                 .WithOrigins(
                     "http://localhost:5173",
                     "http://127.0.0.1:5173",
@@ -76,44 +71,25 @@ builder.Services.AddSwaggerGen(c =>
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
-
-// 1. Enable CORS for ALL responses (including errors)
 app.UseCors("AllowAll");
-
-// 2. Global Exception Handling (ensure JSON response on crash)
 app.UseMiddleware<APITeamsV3.API.Middleware.ExceptionHandlingMiddleware>();
 
 app.UseSwagger();
 app.UseSwaggerUI(c =>
 {
     c.SwaggerEndpoint("/swagger/v1/swagger.json", "APITeamsV3.API v1");
-    c.RoutePrefix = "swagger"; // This ensures it's at /swagger
+    c.RoutePrefix = "swagger";
 });
 
-// Hangfire Dashboard
-app.UseHangfireDashboard();
-
-app.UseHttpsRedirection(); // Force HTTPS
-
-app.UseAuthentication();
-app.UseAuthorization();
-
-// Multi-tenancy Middleware
-app.UseMiddleware<TenantResolutionMiddleware>();
-
-app.MapControllers();
-
-// Ensure Central DB is ready (Essential for tenant resolution)
 using (var scope = app.Services.CreateScope())
 {
     var services = scope.ServiceProvider;
+
     try
     {
         var context = services.GetRequiredService<CentralDbContext>();
-        var encryptionService = services.GetRequiredService<IEncryptionService>();
-        context.Database.Migrate(); // SQLite migration is fast
-        await APITeamsV3.Infrastructure.Persistence.CentralDbContextSeed.SeedAsync(context, encryptionService);
+        context.Database.Migrate();
+        await APITeamsV3.Infrastructure.Persistence.CentralDbContextSeed.SeedAsync(context);
     }
     catch (Exception ex)
     {
@@ -121,5 +97,32 @@ using (var scope = app.Services.CreateScope())
         logger.LogError(ex, "An error occurred migrating the central DB.");
     }
 }
+
+GlobalConfiguration.Configuration.UseActivator(app.Services.GetRequiredService<HangfireServiceScopeJobActivator>());
+
+var runtime = app.Services.GetRequiredService<TenantHangfireRuntime>();
+var startupLogger = app.Services.GetRequiredService<ILogger<Program>>();
+var dashboardRegistrations = await runtime.GetDashboardRegistrationsAsync();
+
+foreach (var registration in dashboardRegistrations)
+{
+    var dashboardPath = $"/hangfire/{registration.CompanyKey}";
+    app.UseHangfireDashboard(dashboardPath, new DashboardOptions(), registration.Storage);
+    startupLogger.LogInformation("Mapped Hangfire dashboard route {DashboardPath}.", dashboardPath);
+}
+
+if (dashboardRegistrations.Count == 0)
+{
+    startupLogger.LogWarning("No tenant Hangfire dashboards were mapped because there are no active tenants with SmartConnectionString configured.");
+}
+
+app.UseHttpsRedirection();
+
+app.UseAuthentication();
+app.UseAuthorization();
+
+app.UseMiddleware<TenantResolutionMiddleware>();
+
+app.MapControllers();
 
 app.Run();

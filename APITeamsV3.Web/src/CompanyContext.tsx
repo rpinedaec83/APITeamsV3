@@ -1,10 +1,5 @@
-import React, { createContext, useContext } from 'react';
-
-interface CompanyContextType {
-    companyKey: string;
-}
-
-const CompanyContext = createContext<CompanyContextType>({ companyKey: '' });
+import React from 'react';
+import { CompanyContext } from './context/companyContext';
 
 export const CompanyProvider: React.FC<{ companyKey: string; children: React.ReactNode }> = ({ companyKey, children }) => {
     return (
@@ -13,5 +8,3 @@ export const CompanyProvider: React.FC<{ companyKey: string; children: React.Rea
         </CompanyContext.Provider>
     );
 };
-
-export const useCompanyKey = () => useContext(CompanyContext).companyKey;

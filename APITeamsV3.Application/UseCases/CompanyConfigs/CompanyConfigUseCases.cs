@@ -8,6 +8,11 @@ using System.Threading.Tasks;
 
 namespace APITeamsV3.Application.UseCases.CompanyConfigs
 {
+    internal static class CompanyConfigMasks
+    {
+        public const string Secret = "********";
+    }
+
     // --- DTOs ---
     public record CompanyConfigDto(
         int Id,
@@ -57,8 +62,22 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
             var dtos = new List<CompanyConfigDto>();
             foreach (var c in configs)
             {
-                // Mask the connection string
-                dtos.Add(new CompanyConfigDto(c.Id, c.CompanyKey, c.DisplayName, c.FrontHost, c.ApiHost, c.SpaClientId, c.SpaTenantId, "********", c.TimeZoneId, c.IsActive, c.GraphTenantId, c.GraphClientId, c.GraphClientSecretRef, c.DefaultChannelName, c.MeetingPolicyMode));
+                dtos.Add(new CompanyConfigDto(
+                    c.Id,
+                    c.CompanyKey,
+                    c.DisplayName,
+                    c.FrontHost,
+                    c.ApiHost,
+                    c.SpaClientId,
+                    c.SpaTenantId,
+                    CompanyConfigMasks.Secret,
+                    c.TimeZoneId,
+                    c.IsActive,
+                    c.GraphTenantId,
+                    c.GraphClientId,
+                    CompanyConfigMasks.Secret,
+                    c.DefaultChannelName,
+                    c.MeetingPolicyMode));
             }
             return dtos;
         }
@@ -87,8 +106,23 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
             {
                 return null;
             }
-            // Mask the connection string
-            return new CompanyConfigDto(c.Id, c.CompanyKey, c.DisplayName, c.FrontHost, c.ApiHost, c.SpaClientId, c.SpaTenantId, "********", c.TimeZoneId, c.IsActive, c.GraphTenantId, c.GraphClientId, c.GraphClientSecretRef, c.DefaultChannelName, c.MeetingPolicyMode);
+
+            return new CompanyConfigDto(
+                c.Id,
+                c.CompanyKey,
+                c.DisplayName,
+                c.FrontHost,
+                c.ApiHost,
+                c.SpaClientId,
+                c.SpaTenantId,
+                CompanyConfigMasks.Secret,
+                c.TimeZoneId,
+                c.IsActive,
+                c.GraphTenantId,
+                c.GraphClientId,
+                CompanyConfigMasks.Secret,
+                c.DefaultChannelName,
+                c.MeetingPolicyMode);
         }
     }
 
@@ -195,7 +229,7 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
             entity.SpaTenantId = request.SpaTenantId;
             
             // Only update if it's not the masked value
-            if (!string.IsNullOrEmpty(request.SmartConnectionString) && request.SmartConnectionString != "********")
+            if (!string.IsNullOrEmpty(request.SmartConnectionString) && request.SmartConnectionString != CompanyConfigMasks.Secret)
             {
                  entity.SmartConnectionString = _encryptionService.Encrypt(request.SmartConnectionString);
             }
@@ -204,7 +238,10 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
             entity.IsActive = request.IsActive;
             entity.GraphTenantId = request.GraphTenantId;
             entity.GraphClientId = request.GraphClientId;
-            entity.GraphClientSecretRef = request.GraphClientSecretRef;
+            if (!string.IsNullOrWhiteSpace(request.GraphClientSecretRef) && request.GraphClientSecretRef != CompanyConfigMasks.Secret)
+            {
+                entity.GraphClientSecretRef = request.GraphClientSecretRef;
+            }
             
             await _context.SaveChangesAsync(cancellationToken);
             return true;

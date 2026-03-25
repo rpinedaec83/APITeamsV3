@@ -18,13 +18,14 @@ namespace APITeamsV3.API.Controllers
         [HttpGet]
         public async Task<ActionResult<List<SyncScheduleDto>>> GetAll()
         {
-            return await _mediator.Send(new GetAllSchedulesQuery());
+            return await _mediator.Send(new GetAllSchedulesQuery(User.IsInRole("IT")));
         }
 
         [HttpPost]
         public async Task<ActionResult<int>> Create(CreateSyncScheduleCommand command)
         {
-            var id = await _mediator.Send(command);
+            var id = await _mediator.Send(command with { AllowCrossTenant = User.IsInRole("IT") });
+            if (id == 0) return Forbid();
             return Ok(id);
         }
 
@@ -32,7 +33,7 @@ namespace APITeamsV3.API.Controllers
         public async Task<IActionResult> Update(int id, UpdateSyncScheduleCommand command)
         {
             if (id != command.Id) return BadRequest();
-            var success = await _mediator.Send(command);
+            var success = await _mediator.Send(command with { AllowCrossTenant = User.IsInRole("IT") });
             if (!success) return NotFound();
             return NoContent();
         }
@@ -40,7 +41,7 @@ namespace APITeamsV3.API.Controllers
         [HttpDelete("{id}")]
         public async Task<IActionResult> Delete(int id)
         {
-            var success = await _mediator.Send(new DeleteSyncScheduleCommand(id));
+            var success = await _mediator.Send(new DeleteSyncScheduleCommand(id, User.IsInRole("IT")));
             if (!success) return NotFound();
             return NoContent();
         }
@@ -48,7 +49,7 @@ namespace APITeamsV3.API.Controllers
         [HttpPatch("{id}/toggle")]
         public async Task<IActionResult> Toggle(int id, [FromBody] ToggleRequest request)
         {
-            var success = await _mediator.Send(new ToggleSyncScheduleCommand(id, request.IsEnabled));
+            var success = await _mediator.Send(new ToggleSyncScheduleCommand(id, request.IsEnabled, User.IsInRole("IT")));
             if (!success) return NotFound();
             return NoContent();
         }

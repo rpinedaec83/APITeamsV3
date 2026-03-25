@@ -11,18 +11,14 @@ import MainLayout from './components/layout/MainLayout';
 
 import { PublicClientApplication } from "@azure/msal-browser";
 import { MsalProvider, AuthenticatedTemplate, UnauthenticatedTemplate } from "@azure/msal-react";
-import { createMsalConfig } from "./authConfig";
+import { createMsalConfig, type SpaBootstrapConfig } from "./authConfig";
 import { useMemo } from "react";
 import { Login } from "./components/Login";
 import { CompanyProvider } from "./CompanyContext";
 import RequiredRoleRoute from "./components/RequiredRoleRoute";
 
 interface AppProps {
-  spaConfig: {
-    spaClientId: string;
-    tenantId: string;
-    companyKey: string;
-  };
+  spaConfig: SpaBootstrapConfig;
 }
 
 function App({ spaConfig }: AppProps) {

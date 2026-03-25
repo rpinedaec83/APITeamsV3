@@ -5,30 +5,29 @@ using APITeamsV3.Application.UseCases.Provisioning.Commands;
 using APITeamsV3.Application.UseCases.Teams.Commands;
 using APITeamsV3.Infrastructure.Persistence.Contexts;
 using Microsoft.EntityFrameworkCore;
-using System;
 
 namespace APITeamsV3.Infrastructure.Services
 {
     public class HangfireJobService : IHangfireJobService
     {
-        private readonly IBackgroundJobClient _backgroundJobClient;
         private readonly IMediator _mediator;
         private readonly ITenantProvider _tenantProvider;
         private readonly CentralDbContext _centralDb;
         private readonly IEncryptionService _encryptionService;
+        private readonly TenantHangfireRuntime _tenantHangfireRuntime;
 
         public HangfireJobService(
-            IBackgroundJobClient backgroundJobClient,
             IMediator mediator,
             ITenantProvider tenantProvider,
             CentralDbContext centralDb,
-            IEncryptionService encryptionService)
+            IEncryptionService encryptionService,
+            TenantHangfireRuntime tenantHangfireRuntime)
         {
-            _backgroundJobClient = backgroundJobClient;
             _mediator = mediator;
             _tenantProvider = tenantProvider;
             _centralDb = centralDb;
             _encryptionService = encryptionService;
+            _tenantHangfireRuntime = tenantHangfireRuntime;
         }
 
         private string GetCurrentCompanyKey()
@@ -60,73 +59,87 @@ namespace APITeamsV3.Infrastructure.Services
             });
         }
 
-        // ── Enqueue methods (capture tenant key at request time) ──
-
-        public string EnqueueGenerateSchedule(int idSeccion)
+        // Capture tenant key at request time, but enqueue against the tenant's own Hangfire storage.
+        public async Task<string> EnqueueGenerateSchedule(int idSeccion)
         {
             var key = GetCurrentCompanyKey();
-            return _backgroundJobClient.Enqueue(() => SendGenerateSchedule(idSeccion, key));
+            var client = await CreateClientAsync(key);
+            return client.Enqueue(() => SendGenerateSchedule(idSeccion, key));
         }
 
-        public string EnqueueSyncDates(int idSeccion)
+        public async Task<string> EnqueueSyncDates(int idSeccion)
         {
             var key = GetCurrentCompanyKey();
-            return _backgroundJobClient.Enqueue(() => SendSyncDates(idSeccion, key));
+            var client = await CreateClientAsync(key);
+            return client.Enqueue(() => SendSyncDates(idSeccion, key));
         }
 
-        public string EnqueueSyncFacilitator(int idSeccion)
+        public async Task<string> EnqueueSyncFacilitator(int idSeccion)
         {
             var key = GetCurrentCompanyKey();
-            return _backgroundJobClient.Enqueue(() => SendSyncFacilitator(idSeccion, key));
+            var client = await CreateClientAsync(key);
+            return client.Enqueue(() => SendSyncFacilitator(idSeccion, key));
         }
 
-        public string EnqueueSyncRoster(int idSeccion, bool fullSync)
+        public async Task<string> EnqueueSyncRoster(int idSeccion, bool fullSync)
         {
             var key = GetCurrentCompanyKey();
-            return _backgroundJobClient.Enqueue(() => SendSyncRoster(idSeccion, fullSync, key));
+            var client = await CreateClientAsync(key);
+            return client.Enqueue(() => SendSyncRoster(idSeccion, fullSync, key));
         }
 
-        public string EnqueueUpdateJoinUrl(int idSeccion, string joinUrl, string idEvento)
+        public async Task<string> EnqueueUpdateJoinUrl(int idSeccion, string joinUrl, string idEvento)
         {
             var key = GetCurrentCompanyKey();
-            return _backgroundJobClient.Enqueue(() => SendUpdateJoinUrl(idSeccion, joinUrl, idEvento, key));
+            var client = await CreateClientAsync(key);
+            return client.Enqueue(() => SendUpdateJoinUrl(idSeccion, joinUrl, idEvento, key));
         }
 
-        public string EnqueueSyncMissingStudents(int idSeccion)
+        public async Task<string> EnqueueSyncMissingStudents(int idSeccion)
         {
             var key = GetCurrentCompanyKey();
-            return _backgroundJobClient.Enqueue(() => SendSyncMissingStudents(idSeccion, key));
+            var client = await CreateClientAsync(key);
+            return client.Enqueue(() => SendSyncMissingStudents(idSeccion, key));
         }
 
-        public string EnqueueSyncObsoleteStudents(int idSeccion)
+        public async Task<string> EnqueueSyncObsoleteStudents(int idSeccion)
         {
             var key = GetCurrentCompanyKey();
-            return _backgroundJobClient.Enqueue(() => SendSyncObsoleteStudents(idSeccion, key));
+            var client = await CreateClientAsync(key);
+            return client.Enqueue(() => SendSyncObsoleteStudents(idSeccion, key));
         }
 
-        public string EnqueueSyncRenamedTeams(int idSeccion)
+        public async Task<string> EnqueueSyncRenamedTeams(int idSeccion)
         {
             var key = GetCurrentCompanyKey();
-            return _backgroundJobClient.Enqueue(() => SendSyncRenamedTeams(idSeccion, key));
+            var client = await CreateClientAsync(key);
+            return client.Enqueue(() => SendSyncRenamedTeams(idSeccion, key));
         }
 
-        public string EnqueueFullSectionSync(int idSeccion)
+        public async Task<string> EnqueueFullSectionSync(int idSeccion)
         {
             var key = GetCurrentCompanyKey();
-            // Chain: MissingStudents (includes team creation) → ObsoleteStudents → RenamedTeams
-            var j1 = _backgroundJobClient.Enqueue(() => SendSyncMissingStudents(idSeccion, key));
-            var j2 = _backgroundJobClient.ContinueJobWith(j1, () => SendSyncObsoleteStudents(idSeccion, key));
-            _backgroundJobClient.ContinueJobWith(j2, () => SendSyncRenamedTeams(idSeccion, key));
+            var client = await CreateClientAsync(key);
+
+            var j1 = client.Enqueue(() => SendSyncMissingStudents(idSeccion, key));
+            var j2 = client.ContinueJobWith(j1, () => SendSyncObsoleteStudents(idSeccion, key));
+            client.ContinueJobWith(j2, () => SendSyncRenamedTeams(idSeccion, key));
+
             return j1;
         }
 
-        public string EnqueueSyncSectionTeam(int idSeccion)
+        public async Task<string> EnqueueSyncSectionTeam(int idSeccion)
         {
             var key = GetCurrentCompanyKey();
-            return _backgroundJobClient.Enqueue(() => SendSyncSectionTeam(idSeccion, key, null));
+            var client = await CreateClientAsync(key);
+            return client.Enqueue(() => SendSyncSectionTeam(idSeccion, key, null));
         }
 
-        // ── Send methods (resolve tenant, then dispatch command) ──
+        private async Task<IBackgroundJobClient> CreateClientAsync(string companyKey)
+        {
+            var storage = await _tenantHangfireRuntime.GetStorageAsync(companyKey);
+            return new BackgroundJobClient(storage);
+        }
 
         [JobDisplayName("Generate Schedule: Section {0} [{1}]")]
         public async Task SendGenerateSchedule(int idSeccion, string companyKey)
@@ -153,10 +166,10 @@ namespace APITeamsV3.Infrastructure.Services
         public async Task SendSyncRoster(int idSeccion, bool fullSync, string companyKey)
         {
             await ResolveTenantAsync(companyKey);
-            var command = new SyncSessionRosterCommand 
-            { 
-                IdSeccion = idSeccion, 
-                Mode = fullSync ? SessionRosterSyncType.FullSync : SessionRosterSyncType.EventSync 
+            var command = new SyncSessionRosterCommand
+            {
+                IdSeccion = idSeccion,
+                Mode = fullSync ? SessionRosterSyncType.FullSync : SessionRosterSyncType.EventSync
             };
             await _mediator.Send(command);
         }

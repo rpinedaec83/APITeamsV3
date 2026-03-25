@@ -18,7 +18,7 @@ import {
 } from '@fluentui/react-icons';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useMsal } from "@azure/msal-react";
-import { useCompanyKey } from '../../CompanyContext';
+import { useCompanyKey } from '../../hooks/useCompanyKey';
 import brandLogos from '../../brandLogos';
 
 const useStyles = makeStyles({
@@ -133,10 +133,8 @@ const MainLayout: React.FC = () => {
     const companyKey = useCompanyKey();
     const logoSrc = brandLogos[companyKey?.toLowerCase()];
 
-    console.log("DEBUG: All ID Token Claims:", account?.idTokenClaims);
-    const idTokenClaims = account?.idTokenClaims as any;
-    const roles = (idTokenClaims?.roles as string[]) || [];
-    console.log("DEBUG: Current User Roles:", roles);
+    const idTokenClaims = account?.idTokenClaims as { roles?: string[] } | undefined;
+    const roles = idTokenClaims?.roles ?? [];
 
     const allMenuItems = [
         { label: 'Dashboard', icon: <HomeRegular />, path: '/' },

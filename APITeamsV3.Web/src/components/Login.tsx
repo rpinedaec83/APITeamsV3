@@ -1,6 +1,6 @@
 import React from "react";
 import { useMsal } from "@azure/msal-react";
-import { loginRequest } from "../authConfig";
+import { getLoginRequest } from "../authConfig";
 import { Button, Card, CardHeader, CardPreview, Text, makeStyles, tokens } from "@fluentui/react-components";
 import { LockClosedRegular } from "@fluentui/react-icons";
 
@@ -32,7 +32,7 @@ export const Login: React.FC = () => {
     const styles = useStyles();
 
     const handleLogin = () => {
-        instance.loginRedirect(loginRequest).catch((e) => {
+        instance.loginRedirect(getLoginRequest()).catch((e) => {
             console.error(e);
         });
     };

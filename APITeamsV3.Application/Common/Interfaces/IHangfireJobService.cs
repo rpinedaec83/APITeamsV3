@@ -2,15 +2,15 @@ namespace APITeamsV3.Application.Common.Interfaces
 {
     public interface IHangfireJobService
     {
-        string EnqueueSyncRoster(int idSeccion, bool fullSync);
-        string EnqueueSyncDates(int idSeccion);
-        string EnqueueSyncFacilitator(int idSeccion);
-        string EnqueueUpdateJoinUrl(int idSeccion, string joinUrl, string idEvento);
-        string EnqueueGenerateSchedule(int idSeccion);
-        string EnqueueSyncMissingStudents(int idSeccion);
-        string EnqueueSyncObsoleteStudents(int idSeccion);
-        string EnqueueSyncRenamedTeams(int idSeccion);
-        string EnqueueFullSectionSync(int idSeccion);
-        string EnqueueSyncSectionTeam(int idSeccion);
+        Task<string> EnqueueSyncRoster(int idSeccion, bool fullSync);
+        Task<string> EnqueueSyncDates(int idSeccion);
+        Task<string> EnqueueSyncFacilitator(int idSeccion);
+        Task<string> EnqueueUpdateJoinUrl(int idSeccion, string joinUrl, string idEvento);
+        Task<string> EnqueueGenerateSchedule(int idSeccion);
+        Task<string> EnqueueSyncMissingStudents(int idSeccion);
+        Task<string> EnqueueSyncObsoleteStudents(int idSeccion);
+        Task<string> EnqueueSyncRenamedTeams(int idSeccion);
+        Task<string> EnqueueFullSectionSync(int idSeccion);
+        Task<string> EnqueueSyncSectionTeam(int idSeccion);
     }
 }

@@ -36,18 +36,10 @@ namespace APITeamsV3.API.Middleware
             context.Response.ContentType = "application/json";
             context.Response.StatusCode = (int)HttpStatusCode.InternalServerError;
 
-            // Ensure CORS headers are present even on failure
-            // Note: If UseCors was already called and configured, 
-            // the response might already have the headers. 
-            // But if it crashed before reaching UseCors or in a way that cleared them, 
-            // we might want to ensure them here if possible.
-            // However, modifying headers after the response has started will fail.
-
             var result = JsonSerializer.Serialize(new
             {
                 error = "Internal Server Error",
-                message = exception.Message,
-                detail = exception.InnerException?.Message
+                message = "An unexpected error occurred."
             });
 
             return context.Response.WriteAsync(result);

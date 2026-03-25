@@ -26,9 +26,9 @@ namespace APITeamsV3.API.Controllers
                 var jobId = await _mediator.Send(new ProvisionTeamCommand(idSeccion, request.OwnerEmail));
                 return Accepted(new { JobId = jobId });
             }
-            catch (System.Exception ex)
+            catch (System.Exception)
             {
-                return BadRequest(new { Error = ex.Message });
+                return BadRequest(new { Error = "No se pudo encolar la provisión del team." });
             }
         }
 

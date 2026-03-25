@@ -24,7 +24,7 @@ namespace APITeamsV3.API.Controllers
         [HttpGet("{companyConfigId}")]
         public async Task<ActionResult<List<SedeDto>>> GetByCompany(int companyConfigId)
         {
-            var result = await _mediator.Send(new GetSedesByCompanyQuery(companyConfigId));
+            var result = await _mediator.Send(new GetSedesByCompanyQuery(companyConfigId, User.IsInRole("IT")));
             return Ok(result);
         }
 
@@ -34,7 +34,7 @@ namespace APITeamsV3.API.Controllers
         [HttpPost("import/{companyConfigId}")]
         public async Task<ActionResult<List<SedeDto>>> ImportFromSmart(int companyConfigId)
         {
-            var result = await _mediator.Send(new ImportSedesFromSmartCommand(companyConfigId));
+            var result = await _mediator.Send(new ImportSedesFromSmartCommand(companyConfigId, User.IsInRole("IT")));
             return Ok(result);
         }
 
@@ -44,7 +44,7 @@ namespace APITeamsV3.API.Controllers
         [HttpPatch("{id}/toggle")]
         public async Task<IActionResult> ToggleActive(int id, [FromBody] ToggleSedeRequest request)
         {
-            var success = await _mediator.Send(new ToggleSedeActiveCommand(id, request.IsActive));
+            var success = await _mediator.Send(new ToggleSedeActiveCommand(id, request.IsActive, User.IsInRole("IT")));
             if (!success) return NotFound();
             return NoContent();
         }
@@ -55,7 +55,7 @@ namespace APITeamsV3.API.Controllers
         [HttpDelete("{id}")]
         public async Task<IActionResult> Delete(int id)
         {
-            var success = await _mediator.Send(new DeleteSedeCommand(id));
+            var success = await _mediator.Send(new DeleteSedeCommand(id, User.IsInRole("IT")));
             if (!success) return NotFound();
             return NoContent();
         }
@@ -66,7 +66,7 @@ namespace APITeamsV3.API.Controllers
         [HttpGet("{companyConfigId}/active-codes")]
         public async Task<ActionResult<string>> GetActiveCodes(int companyConfigId)
         {
-            var codes = await _mediator.Send(new GetActiveSedeCodesQuery(companyConfigId));
+            var codes = await _mediator.Send(new GetActiveSedeCodesQuery(companyConfigId, User.IsInRole("IT")));
             return Ok(new { codes });
         }
     }

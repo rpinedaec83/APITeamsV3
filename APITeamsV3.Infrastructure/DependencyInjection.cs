@@ -40,6 +40,7 @@ namespace APITeamsV3.Infrastructure
             services.AddScoped<ITeamsAgendaService, TeamsAgendaService>();
             services.AddTransient<IBackgroundJobService, BackgroundJobService>();
             services.AddSingleton<IEncryptionService, EncryptionService>();
+            services.AddSingleton<TenantHangfireRuntime>();
             services.AddTransient<IHangfireJobService, HangfireJobService>();
 
             // Database Initialization Service (Background)

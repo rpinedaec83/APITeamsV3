@@ -1,16 +1,10 @@
-using APITeamsV3.Domain.Entities;
 using APITeamsV3.Application.Common.Interfaces;
+using APITeamsV3.Domain.Entities;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace APITeamsV3.Application.UseCases.Schedules
 {
-    // --- DTOs ---
     public record SyncScheduleDto(
         int Id,
         int CompanyConfigId,
@@ -22,18 +16,33 @@ namespace APITeamsV3.Application.UseCases.Schedules
         DateTime? LastRunAt
     );
 
-    // --- Queries ---
-    public record GetAllSchedulesQuery : IRequest<List<SyncScheduleDto>>;
+    public record GetAllSchedulesQuery(bool AllowCrossTenant = false) : IRequest<List<SyncScheduleDto>>;
 
     public class GetAllSchedulesQueryHandler : IRequestHandler<GetAllSchedulesQuery, List<SyncScheduleDto>>
     {
         private readonly ICentralDbContext _context;
-        public GetAllSchedulesQueryHandler(ICentralDbContext context) => _context = context;
+        private readonly ITenantProvider _tenantProvider;
+
+        public GetAllSchedulesQueryHandler(ICentralDbContext context, ITenantProvider tenantProvider)
+        {
+            _context = context;
+            _tenantProvider = tenantProvider;
+        }
 
         public async Task<List<SyncScheduleDto>> Handle(GetAllSchedulesQuery request, CancellationToken cancellationToken)
         {
-            var schedules = await _context.SyncSchedules.ToListAsync(cancellationToken);
-            var companies = await _context.CompanyConfigs.ToListAsync(cancellationToken);
+            var schedulesQuery = _context.SyncSchedules.AsQueryable();
+            var companiesQuery = _context.CompanyConfigs.AsQueryable();
+
+            if (!request.AllowCrossTenant)
+            {
+                var tenant = _tenantProvider.GetCurrentTenant();
+                schedulesQuery = schedulesQuery.Where(s => s.CompanyConfigId == tenant.CompanyId);
+                companiesQuery = companiesQuery.Where(c => c.Id == tenant.CompanyId);
+            }
+
+            var schedules = await schedulesQuery.ToListAsync(cancellationToken);
+            var companies = await companiesQuery.ToListAsync(cancellationToken);
 
             return schedules.Select(s => new SyncScheduleDto(
                 s.Id,
@@ -48,23 +57,33 @@ namespace APITeamsV3.Application.UseCases.Schedules
         }
     }
 
-    // --- Commands ---
     public record CreateSyncScheduleCommand(
         int CompanyConfigId,
         string DaysOfWeek,
         int Hour,
         int Minute,
-        bool IsEnabled
+        bool IsEnabled,
+        bool AllowCrossTenant = false
     ) : IRequest<int>;
 
     public class CreateSyncScheduleCommandHandler : IRequestHandler<CreateSyncScheduleCommand, int>
     {
         private readonly ICentralDbContext _context;
+        private readonly ITenantProvider _tenantProvider;
 
-        public CreateSyncScheduleCommandHandler(ICentralDbContext context) => _context = context;
+        public CreateSyncScheduleCommandHandler(ICentralDbContext context, ITenantProvider tenantProvider)
+        {
+            _context = context;
+            _tenantProvider = tenantProvider;
+        }
 
         public async Task<int> Handle(CreateSyncScheduleCommand request, CancellationToken cancellationToken)
         {
+            if (!await HasAccessToCompanyAsync(request.CompanyConfigId, request.AllowCrossTenant, cancellationToken))
+            {
+                return 0;
+            }
+
             var entity = new SyncSchedule
             {
                 CompanyConfigId = request.CompanyConfigId,
@@ -79,6 +98,24 @@ namespace APITeamsV3.Application.UseCases.Schedules
             await _context.SaveChangesAsync(cancellationToken);
             return entity.Id;
         }
+
+        private async Task<bool> HasAccessToCompanyAsync(int companyConfigId, bool allowCrossTenant, CancellationToken cancellationToken)
+        {
+            if (allowCrossTenant)
+            {
+                return true;
+            }
+
+            var tenant = _tenantProvider.GetCurrentTenant();
+            if (tenant.CompanyId != 0)
+            {
+                return tenant.CompanyId == companyConfigId;
+            }
+
+            return await _context.CompanyConfigs.AnyAsync(
+                c => c.Id == companyConfigId && c.CompanyKey == tenant.CompanyKey,
+                cancellationToken);
+        }
     }
 
     public record UpdateSyncScheduleCommand(
@@ -87,18 +124,33 @@ namespace APITeamsV3.Application.UseCases.Schedules
         string DaysOfWeek,
         int Hour,
         int Minute,
-        bool IsEnabled
+        bool IsEnabled,
+        bool AllowCrossTenant = false
     ) : IRequest<bool>;
 
     public class UpdateSyncScheduleCommandHandler : IRequestHandler<UpdateSyncScheduleCommand, bool>
     {
         private readonly ICentralDbContext _context;
-        public UpdateSyncScheduleCommandHandler(ICentralDbContext context) => _context = context;
+        private readonly ITenantProvider _tenantProvider;
+
+        public UpdateSyncScheduleCommandHandler(ICentralDbContext context, ITenantProvider tenantProvider)
+        {
+            _context = context;
+            _tenantProvider = tenantProvider;
+        }
 
         public async Task<bool> Handle(UpdateSyncScheduleCommand request, CancellationToken cancellationToken)
         {
             var entity = await _context.SyncSchedules.FindAsync(new object[] { request.Id }, cancellationToken);
-            if (entity == null) return false;
+            if (entity == null || !HasEntityAccess(entity, request.AllowCrossTenant))
+            {
+                return false;
+            }
+
+            if (!request.AllowCrossTenant && entity.CompanyConfigId != request.CompanyConfigId)
+            {
+                return false;
+            }
 
             entity.CompanyConfigId = request.CompanyConfigId;
             entity.DaysOfWeek = request.DaysOfWeek;
@@ -109,41 +161,92 @@ namespace APITeamsV3.Application.UseCases.Schedules
             await _context.SaveChangesAsync(cancellationToken);
             return true;
         }
+
+        private bool HasEntityAccess(SyncSchedule entity, bool allowCrossTenant)
+        {
+            if (allowCrossTenant)
+            {
+                return true;
+            }
+
+            var tenant = _tenantProvider.GetCurrentTenant();
+            return tenant.CompanyId == entity.CompanyConfigId;
+        }
     }
 
-    public record DeleteSyncScheduleCommand(int Id) : IRequest<bool>;
+    public record DeleteSyncScheduleCommand(int Id, bool AllowCrossTenant = false) : IRequest<bool>;
 
     public class DeleteSyncScheduleCommandHandler : IRequestHandler<DeleteSyncScheduleCommand, bool>
     {
         private readonly ICentralDbContext _context;
-        public DeleteSyncScheduleCommandHandler(ICentralDbContext context) => _context = context;
+        private readonly ITenantProvider _tenantProvider;
+
+        public DeleteSyncScheduleCommandHandler(ICentralDbContext context, ITenantProvider tenantProvider)
+        {
+            _context = context;
+            _tenantProvider = tenantProvider;
+        }
 
         public async Task<bool> Handle(DeleteSyncScheduleCommand request, CancellationToken cancellationToken)
         {
             var entity = await _context.SyncSchedules.FindAsync(new object[] { request.Id }, cancellationToken);
-            if (entity == null) return false;
+            if (entity == null || !HasEntityAccess(entity, request.AllowCrossTenant))
+            {
+                return false;
+            }
 
             _context.SyncSchedules.Remove(entity);
             await _context.SaveChangesAsync(cancellationToken);
             return true;
         }
+
+        private bool HasEntityAccess(SyncSchedule entity, bool allowCrossTenant)
+        {
+            if (allowCrossTenant)
+            {
+                return true;
+            }
+
+            var tenant = _tenantProvider.GetCurrentTenant();
+            return tenant.CompanyId == entity.CompanyConfigId;
+        }
     }
 
-    public record ToggleSyncScheduleCommand(int Id, bool IsEnabled) : IRequest<bool>;
+    public record ToggleSyncScheduleCommand(int Id, bool IsEnabled, bool AllowCrossTenant = false) : IRequest<bool>;
 
     public class ToggleSyncScheduleCommandHandler : IRequestHandler<ToggleSyncScheduleCommand, bool>
     {
         private readonly ICentralDbContext _context;
-        public ToggleSyncScheduleCommandHandler(ICentralDbContext context) => _context = context;
+        private readonly ITenantProvider _tenantProvider;
+
+        public ToggleSyncScheduleCommandHandler(ICentralDbContext context, ITenantProvider tenantProvider)
+        {
+            _context = context;
+            _tenantProvider = tenantProvider;
+        }
 
         public async Task<bool> Handle(ToggleSyncScheduleCommand request, CancellationToken cancellationToken)
         {
             var entity = await _context.SyncSchedules.FindAsync(new object[] { request.Id }, cancellationToken);
-            if (entity == null) return false;
+            if (entity == null || !HasEntityAccess(entity, request.AllowCrossTenant))
+            {
+                return false;
+            }
 
             entity.IsEnabled = request.IsEnabled;
             await _context.SaveChangesAsync(cancellationToken);
             return true;
+        }
+
+        private bool HasEntityAccess(SyncSchedule entity, bool allowCrossTenant)
+        {
+            if (allowCrossTenant)
+            {
+                return true;
+            }
+
+            var tenant = _tenantProvider.GetCurrentTenant();
+            return tenant.CompanyId == entity.CompanyConfigId;
         }
     }
 }

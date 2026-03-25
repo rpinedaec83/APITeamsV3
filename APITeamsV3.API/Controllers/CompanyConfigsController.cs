@@ -3,7 +3,6 @@ using MediatR;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using System.Collections.Generic;
-using System.Text.Json;
 using System.Threading.Tasks;
 
 namespace APITeamsV3.API.Controllers
@@ -25,14 +24,14 @@ namespace APITeamsV3.API.Controllers
         [HttpGet]
         public async Task<ActionResult<List<CompanyConfigDto>>> GetAll()
         {
-            var isAdminView = User.IsInRole("IT") || User.IsInRole("ADMIN");
+            var isAdminView = User.IsInRole("IT");
             return await _mediator.Send(new GetCompanyConfigsQuery(isAdminView));
         }
 
         [HttpGet("{id}")]
         public async Task<ActionResult<CompanyConfigDto>> GetById(int id)
         {
-            var isAdminView = User.IsInRole("IT") || User.IsInRole("ADMIN");
+            var isAdminView = User.IsInRole("IT");
             var config = await _mediator.Send(new GetCompanyConfigByIdQuery(id, isAdminView));
             if (config == null) return NotFound();
             return config;
@@ -41,7 +40,12 @@ namespace APITeamsV3.API.Controllers
         [HttpPost]
         public async Task<ActionResult<int>> Create(CreateCompanyConfigCommand command)
         {
-            _logger.LogInformation("Creating Config: {Command}", JsonSerializer.Serialize(command));
+            if (!User.IsInRole("IT"))
+            {
+                return Forbid();
+            }
+
+            _logger.LogInformation("Creating company config for {CompanyKey} ({DisplayName})", command.CompanyKey, command.DisplayName);
             var id = await _mediator.Send(command);
             return CreatedAtAction(nameof(GetById), new { id }, id);
         }
@@ -49,7 +53,7 @@ namespace APITeamsV3.API.Controllers
         [HttpPut("{id}")]
         public async Task<IActionResult> Update(int id, UpdateCompanyConfigCommand command)
         {
-            _logger.LogInformation("Updating Config ID {Id}. Payload: {Command}", id, JsonSerializer.Serialize(command));
+            _logger.LogInformation("Updating company config {Id}", id);
 
             if (id != command.Id) 
             {
@@ -57,7 +61,7 @@ namespace APITeamsV3.API.Controllers
                 return BadRequest();
             }
 
-            var isAdminView = User.IsInRole("IT") || User.IsInRole("ADMIN");
+            var isAdminView = User.IsInRole("IT");
             var success = await _mediator.Send(command with { IsAdminView = isAdminView });
             if (!success) return NotFound();
             return NoContent();
@@ -66,7 +70,12 @@ namespace APITeamsV3.API.Controllers
         [HttpDelete("{id}")]
         public async Task<IActionResult> Delete(int id)
         {
-            var isAdminView = User.IsInRole("IT") || User.IsInRole("ADMIN");
+            if (!User.IsInRole("IT"))
+            {
+                return Forbid();
+            }
+
+            var isAdminView = true;
             var success = await _mediator.Send(new DeleteCompanyConfigCommand(id, isAdminView));
             if (!success) return NotFound();
             return NoContent();
