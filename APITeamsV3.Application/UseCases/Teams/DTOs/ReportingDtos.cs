@@ -41,6 +41,9 @@ namespace APITeamsV3.Application.UseCases.Teams.DTOs
         public string IdTeamsGroup { get; set; } = string.Empty;
         public string NombreTeam { get; set; } = string.Empty;
         public int IdSeccion { get; set; }
+        public bool ExisteEnGraph { get; set; }
+        public string GraphName { get; set; } = string.Empty;
+        public string GraphDescription { get; set; } = string.Empty;
     }
 
     // Option 35: GetStudentSyncStatusQuery
@@ -94,5 +97,60 @@ namespace APITeamsV3.Application.UseCases.Teams.DTOs
         public int Alumnos { get; set; }
         public int EnTeams { get; set; }
         public decimal PorAlumnos { get; set; }
+    }
+
+    public class TeamsLogOperativoDto
+    {
+        public int Id { get; set; }
+        public string Tipo { get; set; } = string.Empty;
+        public string EntidadAfectada { get; set; } = string.Empty;
+        public string Referencia { get; set; } = string.Empty;
+        public string Mensaje { get; set; } = string.Empty;
+        public string ContextoTecnico { get; set; } = string.Empty;
+        public string Severidad { get; set; } = string.Empty;
+        public string JobId { get; set; } = string.Empty;
+        public DateTime Fecha { get; set; }
+    }
+
+    public class ScheduleReportDto
+    {
+        public int IdSeccion { get; set; }
+        public string Seccion { get; set; } = string.Empty;
+        public string Curso { get; set; } = string.Empty;
+        public string Dia { get; set; } = string.Empty;
+        public int Inicio { get; set; }
+        public int Fin { get; set; }
+        public string Sede { get; set; } = string.Empty;
+        public string Facilitador { get; set; } = string.Empty;
+    }
+
+    public class TeamMemberReportDto
+    {
+        public string IdTeamsGroup { get; set; } = string.Empty;
+        public string NombreTeam { get; set; } = string.Empty;
+        public string CodigoAlumno { get; set; } = string.Empty;
+        public string NombreAlumno { get; set; } = string.Empty;
+        public string Correo { get; set; } = string.Empty;
+        public string Rol { get; set; } = string.Empty; // Owner, Member
+        public string Estado { get; set; } = string.Empty; // A, I
+    }
+
+    public class SmartVsTeamsReportDto
+    {
+        public int IdSeccion { get; set; }
+        public string Seccion { get; set; } = string.Empty;
+        public int AlumnosSmart { get; set; }
+        public int AlumnosTeams { get; set; }
+        public int Diferencia { get; set; }
+        public string EstadoTeam { get; set; } = string.Empty;
+    }
+
+    public class SyncProgressReportDto
+    {
+        public string Sede { get; set; } = string.Empty;
+        public int TotalSecciones { get; set; }
+        public int SeccionesSincronizadas { get; set; }
+        public decimal PorcentajeAvance { get; set; }
+        public int ErroresUltimas24h { get; set; }
     }
 }

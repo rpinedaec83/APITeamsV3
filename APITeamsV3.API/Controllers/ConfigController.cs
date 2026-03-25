@@ -24,7 +24,9 @@ namespace APITeamsV3.API.Controllers
                 ClientId = tenant.GraphClientId,
                 Authority = $"https://login.microsoftonline.com/{tenant.GraphTenantId}",
                 RedirectUri = $"https://{Request.Host}/auth/callback",
-                CompanyKey = tenant.CompanyKey
+                CompanyKey = tenant.CompanyKey,
+                DisplayName = tenant.DisplayName,
+                CompanyId = tenant.CompanyId 
             });
         }
     }

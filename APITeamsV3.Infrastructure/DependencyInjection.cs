@@ -26,7 +26,10 @@ namespace APITeamsV3.Infrastructure
 
             // Multi-tenancy
             services.AddScoped<ITenantProvider, TenantProvider>();
-            // services.AddScoped<TenantResolutionMiddleware>(); // Middleware is convention-based, do not register in DI unless using IMiddleware factory
+            
+            // Repositories
+            services.AddScoped<ITeamAcademicoRepository, APITeamsV3.Infrastructure.Persistence.Repositories.TeamAcademicoRepository>();
+            services.AddScoped<ITeamsLogOperativoRepository, APITeamsV3.Infrastructure.Persistence.Repositories.TeamsLogOperativoRepository>();
 
 
             // Services
@@ -34,9 +37,13 @@ namespace APITeamsV3.Infrastructure
             services.AddScoped<IGraphClientFactory, GraphClientFactory>();
             services.AddTransient<ITeamProvisioningService, TeamProvisioningService>();
             services.AddScoped<SessionSchedulingService>();
+            services.AddScoped<ITeamsAgendaService, TeamsAgendaService>();
             services.AddTransient<IBackgroundJobService, BackgroundJobService>();
             services.AddSingleton<IEncryptionService, EncryptionService>();
             services.AddTransient<IHangfireJobService, HangfireJobService>();
+
+            // Database Initialization Service (Background)
+            services.AddHostedService<DatabaseInitializerService>();
 
             return services;
         }

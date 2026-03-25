@@ -110,7 +110,9 @@ namespace APITeamsV3.Infrastructure.MultiTenancy
         {
             provider.SetTenant(new TenantContext
             {
+                CompanyId = config.Id,
                 CompanyKey = config.CompanyKey,
+                DisplayName = config.DisplayName,
                 ConnectionString = encryptionService.Decrypt(config.SmartConnectionString), // Decrypt here
                 TimeZoneId = config.TimeZoneId,
                 GraphTenantId = config.GraphTenantId,

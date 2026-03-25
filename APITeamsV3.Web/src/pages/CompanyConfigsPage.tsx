@@ -96,7 +96,7 @@ const CompanyConfigsPage: React.FC = () => {
         setSedeDialogOpen(true);
         setSedeLoading(true);
         try {
-            const response = await api.get(`/sedes/company/${config.id}`);
+            const response = await api.get(`/admin/sedes/${config.id}`);
             setSedes(response.data);
         } catch (error) {
             console.error(error);
@@ -109,7 +109,7 @@ const CompanyConfigsPage: React.FC = () => {
         if (!selectedCompany) return;
         setImportLoading(true);
         try {
-            const response = await api.post(`/sedes/import/${selectedCompany.id}`);
+            const response = await api.post(`/admin/sedes/import/${selectedCompany.id}`);
             setSedes(response.data);
         } catch (error) {
             console.error(error);
@@ -121,7 +121,7 @@ const CompanyConfigsPage: React.FC = () => {
 
     const handleToggleSede = async (sede: Sede) => {
         try {
-            await api.patch(`/sedes/${sede.id}/toggle-active?active=${!sede.isActive}`);
+            await api.patch(`/admin/sedes/${sede.id}/toggle`, { isActive: !sede.isActive });
             setSedes(prev => prev.map(s => s.id === sede.id ? { ...s, isActive: !s.isActive } : s));
         } catch (error) {
             console.error(error);
@@ -131,7 +131,7 @@ const CompanyConfigsPage: React.FC = () => {
     const handleDeleteSede = async (id: number) => {
         if (!confirm('¿Eliminar esta sede?')) return;
         try {
-            await api.delete(`/sedes/${id}`);
+            await api.delete(`/admin/sedes/${id}`);
             setSedes(prev => prev.filter(s => s.id !== id));
         } catch (error) {
             console.error(error);

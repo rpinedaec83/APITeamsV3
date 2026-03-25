@@ -2,7 +2,9 @@ namespace APITeamsV3.Application.Common.Interfaces
 {
     public class TenantContext
     {
+        public int CompanyId { get; set; }
         public string CompanyKey { get; set; } = string.Empty;
+        public string DisplayName { get; set; } = string.Empty;
         public string ConnectionString { get; set; } = string.Empty;
         public string TimeZoneId { get; set; } = string.Empty;
         public string GraphTenantId { get; set; } = string.Empty;

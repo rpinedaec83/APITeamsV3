@@ -6,6 +6,7 @@ namespace APITeamsV3.Infrastructure.Persistence.Contexts
     public class SmartDbContext : DbContext, ISmartDbContext
     {
         public DbSet<APITeamsV3.Domain.Entities.Parametro> Parametro { get; set; }
+        public DbSet<APITeamsV3.Domain.Entities.TeamsLogOperativo> TeamsLogOperativo { get; set; }
         private readonly ITenantProvider _tenantProvider;
 
         public SmartDbContext(DbContextOptions<SmartDbContext> options, ITenantProvider tenantProvider) 
@@ -22,7 +23,13 @@ namespace APITeamsV3.Infrastructure.Persistence.Contexts
                 var tenant = _tenantProvider.GetCurrentTenant();
                 if (!string.IsNullOrEmpty(tenant.ConnectionString))
                 {
-                    optionsBuilder.UseSqlServer(tenant.ConnectionString);
+                    optionsBuilder.UseSqlServer(tenant.ConnectionString, sqlOptions => 
+                    {
+                        sqlOptions.EnableRetryOnFailure(
+                            maxRetryCount: 5,
+                            maxRetryDelay: TimeSpan.FromSeconds(30),
+                            errorNumbersToAdd: null);
+                    });
                 }
             }
         }
@@ -36,6 +43,13 @@ namespace APITeamsV3.Infrastructure.Persistence.Contexts
             {
                 entity.ToTable("Parametro");
                 entity.HasKey(e => e.Nombre);
+            });
+
+            // TeamsLogOperativo
+            modelBuilder.Entity<APITeamsV3.Domain.Entities.TeamsLogOperativo>(entity =>
+            {
+                entity.ToTable("TeamsLogOperativo");
+                entity.HasKey(e => e.Id);
             });
 
             // TeamsEquipos
@@ -66,10 +80,6 @@ namespace APITeamsV3.Infrastructure.Persistence.Contexts
             {
                 entity.ToTable("TeamsHorarios");
                 // Assuming composite key based on usage, or Id if exists. 
-                // For safety regarding legacy schema without full knowledge, we might rely on EF shadow properties if PK is missing, 
-                // but usually legacy has some PK. Let's assume Id or composite.
-                // The MERGE statement in SQL used (idTeams, idEvento), let's assume that's unique enough for business logic
-                // but for EF we need a real PK. Let's assume there is an ID column or use composite.
                 entity.HasKey(e => new { e.IdTeams, e.IdEvento }); 
             });
 

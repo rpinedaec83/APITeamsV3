@@ -74,5 +74,35 @@ namespace APITeamsV3.API.Controllers
             var result = await _mediator.Send(new SyncAllTeamsCommand(sede));
             return Ok(result);
         }
+
+        [HttpPost("section/{idSeccion}")]
+        public async Task<IActionResult> SyncSectionTeam(int idSeccion, [FromQuery] string companyKey = "idat")
+        {
+            // Opcionalmente se puede devolver Accepted() y encolar, pero para simplificar
+            // se ejecuta síncrono si no toma mucho o se delega.
+            var result = await _mediator.Send(new SyncSectionTeamCommand(idSeccion, companyKey));
+            return Ok(result);
+        }
+
+        [HttpPost("student/{codigoAlumno}")]
+        public async Task<IActionResult> SyncStudentTeams(string codigoAlumno)
+        {
+            var jobIds = await _mediator.Send(new SyncStudentTeamsCommand(codigoAlumno));
+            return Accepted(new { Message = "Jobs encolados para el alumno", JobIds = jobIds });
+        }
+
+        [HttpPost("verify/{idSeccion}")]
+        public async Task<IActionResult> VerifyTeamState(int idSeccion)
+        {
+            var result = await _mediator.Send(new VerifyTeamStateCommand(idSeccion));
+            return Ok(result);
+        }
+
+        [HttpPost("agenda/regenerate/{idSeccion}")]
+        public async Task<IActionResult> RegenerateAgenda(int idSeccion, [FromQuery] string companyKey = "idat")
+        {
+            var result = await _mediator.Send(new RegenerateAgendaCommand(idSeccion, companyKey));
+            return Ok(result);
+        }
     }
 }

@@ -1,63 +1,86 @@
 import React, { useEffect, useState } from 'react';
 import { useApiClient } from '../hooks/useApiClient';
 import { useMsal } from "@azure/msal-react";
+import { Title1, Title3, Card, CardHeader, CardPreview, Text, makeStyles, tokens, shorthands, Button } from '@fluentui/react-components';
+import { ArrowTrendingRegular } from '@fluentui/react-icons';
+import { useNavigate } from 'react-router-dom';
 
-interface Section {
-    idSeccion: number;
-    cursoNombre: string;
-    // Add other fields
+const useStyles = makeStyles({
+    root: { padding: '32px', display: 'flex', flexDirection: 'column', gap: '24px' },
+    grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' },
+    card: { ...shorthands.padding('20px'), backgroundColor: tokens.colorNeutralBackground1, boxShadow: tokens.shadow4 }
+});
+
+interface TenancyStats {
+    equipos: number;
+    equiposActivos: number;
+    alumnos: number;
+    enTeams: number;
 }
 
-// Placeholder for Dashboard
 const Dashboard: React.FC = () => {
     const { accounts } = useMsal();
     const api = useApiClient();
-    const [status, setStatus] = useState<string>("Loading...");
-    const [sections, setSections] = useState<Section[]>([]);
+    const styles = useStyles();
+    const navigate = useNavigate();
+    const [stats, setStats] = useState<TenancyStats | null>(null);
+    const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        setStatus("Fetching data...");
-        api.get('/sections')
+        api.get('/reports/tenancy-stats')
             .then(res => {
-                setSections(res.data.data);
-                setStatus("Ready");
+                const data = res.data as any[];
+                if (data && data.length > 0) {
+                    const aggregated = data.reduce((acc, curr) => ({
+                        equipos: acc.equipos + curr.equipos,
+                        equiposActivos: acc.equiposActivos + curr.equiposActivos,
+                        alumnos: acc.alumnos + curr.alumnos,
+                        enTeams: acc.enTeams + curr.enTeams
+                    }), { equipos: 0, equiposActivos: 0, alumnos: 0, enTeams: 0 });
+                    setStats(aggregated);
+                } else {
+                    setStats({ equipos: 0, equiposActivos: 0, alumnos: 0, enTeams: 0 });
+                }
             })
-            .catch(err => {
-                console.error(err);
-                setStatus("Error loading sections");
-            });
-    }, [api]); // api dependency is stable
+            .catch(err => console.error(err))
+            .finally(() => setLoading(false));
+    }, [api]);
+
+    const porTeams = stats && stats.equipos > 0 ? (stats.equiposActivos / stats.equipos) * 100 : 0;
+    const porAlumnos = stats && stats.alumnos > 0 ? (stats.enTeams / stats.alumnos) * 100 : 0;
 
     return (
-        <div style={{ padding: 20 }}>
-            <h1>Teams Provisioning Dashboard</h1>
-            <p>Welcome, {accounts[0]?.name} ({accounts[0]?.username})</p>
-            <p><strong>System Status:</strong> {status}</p>
-
-            <div style={{ marginTop: 20, display: 'flex', gap: '10px' }}>
-                <a href="/operations" style={{ textDecoration: 'none' }}>
-                    <button style={{ padding: '10px 20px', cursor: 'pointer' }}>Go to Operations Dashboard</button>
-                </a>
-                <a href="/admin/company-configs" style={{ textDecoration: 'none' }}>
-                    <button style={{ padding: '10px 20px', cursor: 'pointer' }}>Manage Company Configs</button>
-                </a>
+        <div className={styles.root}>
+            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                <div>
+                    <Title1>Dashboard Principal</Title1>
+                    <p>Bienvenido, {accounts[0]?.name}</p>
+                </div>
+                <Button appearance="primary" icon={<ArrowTrendingRegular />} onClick={() => navigate('/operations')}>Ir a Operaciones</Button>
             </div>
 
-            <div style={{ marginTop: 20 }}>
-                <h2>Create Team</h2>
-                {/* Form to provision team manually */}
-            </div>
-
-            <div style={{ marginTop: 20 }}>
-                <h2>Sections</h2>
-                {sections.length === 0 ? <p>No sections found.</p> : (
-                    <ul>
-                        {sections.map((s, i) => (
-                            <li key={i}>{JSON.stringify(s)}</li>
-                        ))}
-                    </ul>
-                )}
-            </div>
+            {loading ? (
+                <p>Cargando estadísticas...</p>
+            ) : stats ? (
+                <div className={styles.grid}>
+                    <Card className={styles.card}>
+                        <CardHeader header={<Title3>Total Secciones Activas</Title3>} />
+                        <CardPreview>
+                            <Text size={1000} weight="bold">{stats.equipos}</Text>
+                            <p>Teams Creados: {stats.equiposActivos} ({Math.round(porTeams)}%)</p>
+                        </CardPreview>
+                    </Card>
+                    <Card className={styles.card}>
+                        <CardHeader header={<Title3>Alumnos Matriculados</Title3>} />
+                        <CardPreview>
+                            <Text size={1000} weight="bold">{stats.alumnos}</Text>
+                            <p>Estudiantes en Teams: {stats.enTeams} ({Math.round(porAlumnos)}%)</p>
+                        </CardPreview>
+                    </Card>
+                </div>
+            ) : (
+                <p>No se encontraron datos para los periodos activos.</p>
+            )}
         </div>
     );
 };

@@ -47,5 +47,39 @@ namespace APITeamsV3.API.Controllers
             var result = await _mediator.Send(new GetTenancyStatsQuery());
             return Ok(result);
         }
+        [HttpGet("logs")]
+        public async Task<ActionResult<List<TeamsLogOperativoDto>>> GetLogs([FromQuery] int page = 1, [FromQuery] int pageSize = 50, [FromQuery] string? tipo = null)
+        {
+            var result = await _mediator.Send(new GetLogsQuery { Page = page, PageSize = pageSize, TipoFiltro = tipo });
+            return Ok(result);
+        }
+
+        [HttpGet("report-schedules")]
+        public async Task<ActionResult<List<ScheduleReportDto>>> GetScheduleReport()
+        {
+            var result = await _mediator.Send(new GetScheduleReportQuery());
+            return Ok(result);
+        }
+
+        [HttpGet("report-team-members")]
+        public async Task<ActionResult<List<TeamMemberReportDto>>> GetTeamMembersReport([FromQuery] string? idTeamsGroup)
+        {
+            var result = await _mediator.Send(new GetTeamMembersReportQuery { IdTeamsGroup = idTeamsGroup });
+            return Ok(result);
+        }
+
+        [HttpGet("report-smart-vs-teams")]
+        public async Task<ActionResult<List<SmartVsTeamsReportDto>>> GetSmartVsTeamsReport()
+        {
+            var result = await _mediator.Send(new GetSmartVsTeamsReportQuery());
+            return Ok(result);
+        }
+
+        [HttpGet("report-sync-progress")]
+        public async Task<ActionResult<List<SyncProgressReportDto>>> GetSyncProgressReport()
+        {
+            var result = await _mediator.Send(new GetSyncProgressReportQuery());
+            return Ok(result);
+        }
     }
 }

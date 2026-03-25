@@ -28,17 +28,32 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
     );
 
     // --- Queries ---
-    public record GetCompanyConfigsQuery : IRequest<List<CompanyConfigDto>>;
-    public record GetCompanyConfigByIdQuery(int Id) : IRequest<CompanyConfigDto?>;
+    public record GetCompanyConfigsQuery(bool IsAdminView = false) : IRequest<List<CompanyConfigDto>>;
+    public record GetCompanyConfigByIdQuery(int Id, bool IsAdminView = false) : IRequest<CompanyConfigDto?>;
 
     public class GetCompanyConfigsQueryHandler : IRequestHandler<GetCompanyConfigsQuery, List<CompanyConfigDto>>
     {
         private readonly ICentralDbContext _context;
-        public GetCompanyConfigsQueryHandler(ICentralDbContext context) => _context = context;
+        private readonly ITenantProvider _tenantProvider;
+
+        public GetCompanyConfigsQueryHandler(ICentralDbContext context, ITenantProvider tenantProvider)
+        {
+            _context = context;
+            _tenantProvider = tenantProvider;
+        }
 
         public async Task<List<CompanyConfigDto>> Handle(GetCompanyConfigsQuery request, CancellationToken cancellationToken)
         {
-            var configs = await _context.CompanyConfigs.ToListAsync(cancellationToken);
+            var tenant = _tenantProvider.GetCurrentTenant();
+            var query = _context.CompanyConfigs.AsQueryable();
+
+            if (!request.IsAdminView && !string.IsNullOrEmpty(tenant.CompanyKey))
+            {
+                var key = tenant.CompanyKey.ToLower();
+                query = query.Where(c => c.CompanyKey.ToLower() == key);
+            }
+
+            var configs = await query.ToListAsync(cancellationToken);
             var dtos = new List<CompanyConfigDto>();
             foreach (var c in configs)
             {
@@ -52,12 +67,26 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
     public class GetCompanyConfigByIdQueryHandler : IRequestHandler<GetCompanyConfigByIdQuery, CompanyConfigDto?>
     {
         private readonly ICentralDbContext _context;
-        public GetCompanyConfigByIdQueryHandler(ICentralDbContext context) => _context = context;
+        private readonly ITenantProvider _tenantProvider;
+
+        public GetCompanyConfigByIdQueryHandler(ICentralDbContext context, ITenantProvider tenantProvider)
+        {
+            _context = context;
+            _tenantProvider = tenantProvider;
+        }
 
         public async Task<CompanyConfigDto?> Handle(GetCompanyConfigByIdQuery request, CancellationToken cancellationToken)
         {
-            var c = await _context.CompanyConfigs.FindAsync(new object[] { request.Id }, cancellationToken);
+            var tenant = _tenantProvider.GetCurrentTenant();
+            var c = await _context.CompanyConfigs.FirstOrDefaultAsync(x => x.Id == request.Id, cancellationToken);
+            
             if (c == null) return null;
+
+            // Security check: ensure the config belongs to the current tenant if not admin
+            if (!request.IsAdminView && !string.IsNullOrEmpty(tenant.CompanyKey) && c.CompanyKey != tenant.CompanyKey)
+            {
+                return null;
+            }
             // Mask the connection string
             return new CompanyConfigDto(c.Id, c.CompanyKey, c.DisplayName, c.FrontHost, c.ApiHost, c.SpaClientId, c.SpaTenantId, "********", c.TimeZoneId, c.IsActive, c.GraphTenantId, c.GraphClientId, c.GraphClientSecretRef, c.DefaultChannelName, c.MeetingPolicyMode);
         }
@@ -128,24 +157,35 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
         bool IsActive,
         string GraphTenantId,
         string GraphClientId,
-        string GraphClientSecretRef
+        string GraphClientSecretRef,
+        bool IsAdminView = false
     ) : IRequest<bool>;
 
     public class UpdateCompanyConfigCommandHandler : IRequestHandler<UpdateCompanyConfigCommand, bool>
     {
         private readonly ICentralDbContext _context;
         private readonly IEncryptionService _encryptionService;
+        private readonly ITenantProvider _tenantProvider;
 
-        public UpdateCompanyConfigCommandHandler(ICentralDbContext context, IEncryptionService encryptionService)
+        public UpdateCompanyConfigCommandHandler(ICentralDbContext context, IEncryptionService encryptionService, ITenantProvider tenantProvider)
         {
             _context = context;
             _encryptionService = encryptionService;
+            _tenantProvider = tenantProvider;
         }
 
         public async Task<bool> Handle(UpdateCompanyConfigCommand request, CancellationToken cancellationToken)
         {
+            var tenant = _tenantProvider.GetCurrentTenant();
             var entity = await _context.CompanyConfigs.FindAsync(new object[] { request.Id }, cancellationToken);
+            
             if (entity == null) return false;
+
+            // Security check: ensure the config belongs to the current tenant if not admin
+            if (!request.IsAdminView && !string.IsNullOrEmpty(tenant.CompanyKey) && entity.CompanyKey != tenant.CompanyKey)
+            {
+                return false;
+            }
 
             entity.CompanyKey = request.CompanyKey;
             entity.DisplayName = request.DisplayName;
@@ -171,17 +211,31 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
         }
     }
 
-    public record DeleteCompanyConfigCommand(int Id) : IRequest<bool>;
+    public record DeleteCompanyConfigCommand(int Id, bool IsAdminView = false) : IRequest<bool>;
 
     public class DeleteCompanyConfigCommandHandler : IRequestHandler<DeleteCompanyConfigCommand, bool>
     {
         private readonly ICentralDbContext _context;
-        public DeleteCompanyConfigCommandHandler(ICentralDbContext context) => _context = context;
+        private readonly ITenantProvider _tenantProvider;
+
+        public DeleteCompanyConfigCommandHandler(ICentralDbContext context, ITenantProvider tenantProvider)
+        {
+            _context = context;
+            _tenantProvider = tenantProvider;
+        }
 
         public async Task<bool> Handle(DeleteCompanyConfigCommand request, CancellationToken cancellationToken)
         {
+            var tenant = _tenantProvider.GetCurrentTenant();
             var entity = await _context.CompanyConfigs.FindAsync(new object[] { request.Id }, cancellationToken);
+            
             if (entity == null) return false;
+
+            // Security check: ensure the config belongs to the current tenant if not admin
+            if (!request.IsAdminView && !string.IsNullOrEmpty(tenant.CompanyKey) && entity.CompanyKey != tenant.CompanyKey)
+            {
+                return false;
+            }
 
             _context.CompanyConfigs.Remove(entity);
             await _context.SaveChangesAsync(cancellationToken);

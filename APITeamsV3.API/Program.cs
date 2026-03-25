@@ -12,6 +12,7 @@ using Microsoft.Identity.Web;
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
+builder.Services.AddHttpContextAccessor();
 builder.Services.AddMicrosoftIdentityWebApiAuthentication(builder.Configuration);
 
 builder.Services.Configure<Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerOptions>(
@@ -76,18 +77,24 @@ builder.Services.AddSwaggerGen(c =>
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
+
+// 1. Enable CORS for ALL responses (including errors)
+app.UseCors("AllowAll");
+
+// 2. Global Exception Handling (ensure JSON response on crash)
+app.UseMiddleware<APITeamsV3.API.Middleware.ExceptionHandlingMiddleware>();
+
+app.UseSwagger();
+app.UseSwaggerUI(c =>
 {
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "APITeamsV3.API v1");
+    c.RoutePrefix = "swagger"; // This ensures it's at /swagger
+});
 
 // Hangfire Dashboard
 app.UseHangfireDashboard();
 
-// app.UseHttpsRedirection(); // Force HTTPS
-
-app.UseCors("AllowAll");
+app.UseHttpsRedirection(); // Force HTTPS
 
 app.UseAuthentication();
 app.UseAuthorization();
@@ -97,7 +104,7 @@ app.UseMiddleware<TenantResolutionMiddleware>();
 
 app.MapControllers();
 
-// Ensure DB Created and Seeded (Basic check for dev)
+// Ensure Central DB is ready (Essential for tenant resolution)
 using (var scope = app.Services.CreateScope())
 {
     var services = scope.ServiceProvider;
@@ -105,88 +112,13 @@ using (var scope = app.Services.CreateScope())
     {
         var context = services.GetRequiredService<CentralDbContext>();
         var encryptionService = services.GetRequiredService<IEncryptionService>();
-        context.Database.Migrate();
+        context.Database.Migrate(); // SQLite migration is fast
         await APITeamsV3.Infrastructure.Persistence.CentralDbContextSeed.SeedAsync(context, encryptionService);
-        
-        // Update View for SmartDbContext for ALL active tenants
-        var configs = await context.CompanyConfigs.Where(c => c.IsActive).ToListAsync();
-        foreach (var config in configs)
-        {
-            try 
-            {
-                var connectionString = encryptionService.Decrypt(config.SmartConnectionString);
-                
-                var optionsBuilder = new DbContextOptionsBuilder<SmartDbContext>();
-                optionsBuilder.UseSqlServer(connectionString);
-                
-                using (var directSmartContext = new SmartDbContext(optionsBuilder.Options, null!)) 
-                {
-                    var viewSql = @"
-CREATE OR ALTER VIEW [dbo].[vw_MatriculasActivas] AS
-SELECT SE.IdSeccion,
-    SE.Codigo,
-    SE.IdCurso,
-    SE.IdPromocion,
-    PE.IdPeriodo,
-    SE.FechaInicio,
-    SE.FechaFin,
-    -- Extended Info
-    CU.CursoNombre,
-    PD.ProductoCodigo,
-    PD.ProductoNombre,
-    SD.Nombre AS SedeNombre,
-    UN.Nombre AS UnidadNegocioNombre,
-    UA.Nombre AS UnidadAcademicaNombre,
-    PE.Codigo AS CodigoPeriodo,
-    PG.GrupoCodigo,
-    -- Date Filter Logic
-    PR.TipoServicio,
-    PE.Inicio AS PeriodoInicio,
-    PE.Fin AS PeriodoFin,
-    -- Facilitador
-    ISNULL(FC.CodigoAnterior, '') AS CodigoFacilitador,
-    ISNULL(
-        REPLACE(REPLACE(AT2.Nombres, 'Ñ', 'N'), '''', '') + ' ' + REPLACE(REPLACE(AT2.Paterno, 'Ñ', 'N'), '''', '') + ' ' + ISNULL(
-            REPLACE(REPLACE(AT2.Materno, 'Ñ', 'N'), '''', ''),
-            ''
-        ),
-        ''
-    ) AS NombresFacilitador,
-    ISNULL(FC.EmailInstitucion, '') AS EmailFacilitador,
-    -- Flags
-    CAST(ISNULL(PE.EsTeams, 0) AS BIT) AS EsTeams,
-    -- Calculated Placeholders (EF requires them if mapped)
-    CAST('' AS NVARCHAR(100)) AS CalculatedMailNickname,
-    CAST('' AS NVARCHAR(100)) AS CalculatedDisplayName
-FROM Seccion SE WITH (NOLOCK)
-    LEFT JOIN Promocion PR WITH (NOLOCK) ON SE.IdPromocion = PR.IdPromocion
-    LEFT JOIN Sede SD WITH (NOLOCK) ON PR.IdSede = SD.IdSede
-    LEFT JOIN UnidadNegocio UN WITH (NOLOCK) ON PR.IdUnidadNegocio = UN.IdUnidadNegocio
-    LEFT JOIN UnidadAcademica UA WITH (NOLOCK) ON PR.IdUnidadAcademica = UA.IdUnidadAcademica
-    LEFT JOIN Periodo PE WITH (NOLOCK) ON PR.IdPeriodo = PE.IdPeriodo
-    LEFT JOIN Producto PD WITH (NOLOCK) ON PR.IdProducto = PD.IdProducto
-    LEFT JOIN PromocionGrupo PG WITH (NOLOCK) ON SE.IdPromocion = PG.IdPromocion
-    AND SE.IdGrupo = PG.IdGrupo
-    LEFT JOIN Curso CU WITH (NOLOCK) ON SE.IdCurso = CU.IdCurso
-    LEFT JOIN SeccionProfesor SP WITH (NOLOCK) ON SP.IdSeccion = SE.IdSeccion
-    AND SP.EsResponsable = 1
-    LEFT JOIN Actor AT2 WITH (NOLOCK) ON SP.IdActor = AT2.IdActor
-    LEFT JOIN Facilitador FC WITH (NOLOCK) ON SP.IdActor = FC.IdFacilitador;";
-
-                    await directSmartContext.Database.ExecuteSqlRawAsync(viewSql);
-                }
-            }
-            catch (Exception ex)
-            {
-                var logger = services.GetRequiredService<ILogger<Program>>();
-                logger.LogWarning($"Could not update view for tenant {config.CompanyKey}: {ex.Message}");
-            }
-        }
     }
     catch (Exception ex)
     {
         var logger = services.GetRequiredService<ILogger<Program>>();
-        logger.LogError(ex, "An error occurred creating the DB.");
+        logger.LogError(ex, "An error occurred migrating the central DB.");
     }
 }
 

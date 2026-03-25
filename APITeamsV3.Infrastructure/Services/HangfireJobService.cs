@@ -120,6 +120,12 @@ namespace APITeamsV3.Infrastructure.Services
             return j1;
         }
 
+        public string EnqueueSyncSectionTeam(int idSeccion)
+        {
+            var key = GetCurrentCompanyKey();
+            return _backgroundJobClient.Enqueue(() => SendSyncSectionTeam(idSeccion, key, null));
+        }
+
         // ── Send methods (resolve tenant, then dispatch command) ──
 
         [JobDisplayName("Generate Schedule: Section {0} [{1}]")]
@@ -181,6 +187,13 @@ namespace APITeamsV3.Infrastructure.Services
         {
             await ResolveTenantAsync(companyKey);
             await _mediator.Send(new SyncRenamedTeamsCommand(idSeccion));
+        }
+
+        [JobDisplayName("Sync Section Team V3: Section {0} [{1}]")]
+        public async Task SendSyncSectionTeam(int idSeccion, string companyKey, string? jobId)
+        {
+            await ResolveTenantAsync(companyKey);
+            await _mediator.Send(new SyncSectionTeamCommand(idSeccion, companyKey, jobId));
         }
     }
 }

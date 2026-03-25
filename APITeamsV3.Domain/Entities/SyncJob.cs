@@ -13,5 +13,6 @@ namespace APITeamsV3.Domain.Entities
         public string? LastError { get; set; }
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime? UpdatedAt { get; set; }
+        public string? HangfireJobId { get; set; }
     }
 }

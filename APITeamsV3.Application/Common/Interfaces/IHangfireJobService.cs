@@ -11,5 +11,6 @@ namespace APITeamsV3.Application.Common.Interfaces
         string EnqueueSyncObsoleteStudents(int idSeccion);
         string EnqueueSyncRenamedTeams(int idSeccion);
         string EnqueueFullSectionSync(int idSeccion);
+        string EnqueueSyncSectionTeam(int idSeccion);
     }
 }

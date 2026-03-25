@@ -11,10 +11,12 @@ namespace APITeamsV3.Application.UseCases.Teams.Queries
     public class GetSectionDetailsQueryHandler : IRequestHandler<GetSectionDetailsQuery, List<SectionDetailsDto>>
     {
         private readonly ISmartDbContext _context;
+        private readonly IGraphClientFactory _graphFactory;
 
-        public GetSectionDetailsQueryHandler(ISmartDbContext context)
+        public GetSectionDetailsQueryHandler(ISmartDbContext context, IGraphClientFactory graphFactory)
         {
             _context = context;
+            _graphFactory = graphFactory;
         }
 
         public async Task<List<SectionDetailsDto>> Handle(GetSectionDetailsQuery request, CancellationToken cancellationToken)
@@ -130,7 +132,43 @@ namespace APITeamsV3.Application.UseCases.Teams.Queries
             // but kept the logic identical to existing patterns.
             // Also checking if I missed any params. The original SQL uses @IdSeccion.
 
-            return await _context.Database.SqlQueryRaw<SectionDetailsDto>(sql, request.IdSeccion).ToListAsync(cancellationToken);
+            var results = await _context.Database.SqlQueryRaw<SectionDetailsDto>(sql, request.IdSeccion).ToListAsync(cancellationToken);
+
+            // Populate Graph Status
+            if (results.Count > 0)
+            {
+                var graphClient = await _graphFactory.CreateClientAsync();
+                foreach (var result in results)
+                {
+                    if (!string.IsNullOrEmpty(result.IdTeamsGroup))
+                    {
+                        try
+                        {
+                            var group = await graphClient.Groups[result.IdTeamsGroup].GetAsync(requestConfiguration =>
+                            {
+                                requestConfiguration.QueryParameters.Select = new[] { "id", "displayName", "description" };
+                            }, cancellationToken);
+
+                            if (group != null)
+                            {
+                                result.ExisteEnGraph = true;
+                                result.GraphName = group.DisplayName ?? string.Empty;
+                                result.GraphDescription = group.Description ?? string.Empty;
+                            }
+                        }
+                        catch (Microsoft.Graph.Models.ODataErrors.ODataError ex) when (ex.ResponseStatusCode == 404)
+                        {
+                            result.ExisteEnGraph = false;
+                        }
+                        catch (System.Exception)
+                        {
+                            result.ExisteEnGraph = false;
+                        }
+                    }
+                }
+            }
+
+            return results;
         }
     }
 }

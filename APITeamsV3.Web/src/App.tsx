@@ -5,6 +5,8 @@ import CompanyConfigsPage from './pages/CompanyConfigsPage';
 import OperationsPage from './pages/OperationsPage';
 import JobsPage from './pages/JobsPage';
 import SchedulesPage from './pages/SchedulesPage';
+import LogsPage from './pages/LogsPage';
+import ReportsPage from './pages/ReportsPage';
 import MainLayout from './components/layout/MainLayout';
 
 import { PublicClientApplication } from "@azure/msal-browser";
@@ -43,7 +45,9 @@ function App({ spaConfig }: AppProps) {
                 <Route element={<RequiredRoleRoute allowedRoles={['ADMIN', 'IT']} />}>
                   <Route path="/admin/company-configs" element={<CompanyConfigsPage />} />
                   <Route path="/jobs" element={<JobsPage />} />
+                  <Route path="/logs" element={<LogsPage />} />
                   <Route path="/schedules" element={<SchedulesPage />} />
+                  <Route path="/reports" element={<ReportsPage />} />
                 </Route>
               </Route>
               <Route path="/auth/callback" element={<Navigate to="/" />} />

@@ -54,12 +54,32 @@ const SchedulesPage: React.FC = () => {
     const loadData = async () => {
         setLoading(true);
         try {
-            const [schedulesRes, companiesRes] = await Promise.all([
-                api.get('/sync-schedules'),
-                api.get('/admin/company-configs')
+            const [schedulesRes, companiesRes, configRes] = await Promise.all([
+                api.get('/admin/sync-schedules'),
+                api.get('/admin/company-configs'),
+                api.get('/config')
             ]);
+            
             setSchedules(schedulesRes.data);
-            setCompanies(companiesRes.data);
+            
+            let fetchedCompanies = companiesRes.data || [];
+            
+            // If the admin list is empty, but we have current tenant info, use it!
+            if (fetchedCompanies.length === 0 && configRes.data?.companyKey) {
+                fetchedCompanies = [{
+                    id: configRes.data.companyId,
+                    companyKey: configRes.data.companyKey,
+                    displayName: configRes.data.displayName || configRes.data.companyKey,
+                    // Fill other fields with dummies if needed, but mainly we need id and displayName
+                } as CompanyConfig];
+            }
+
+            setCompanies(fetchedCompanies);
+            
+            // Auto-select if there's only one company
+            if (fetchedCompanies.length === 1) {
+                setFormCompanyId(fetchedCompanies[0].id);
+            }
         } catch (error) {
             console.error(error);
         } finally {
@@ -100,9 +120,9 @@ const SchedulesPage: React.FC = () => {
 
         try {
             if (isEditing && editId != null) {
-                await api.put(`/sync-schedules/${editId}`, { ...data, id: editId });
+                await api.put(`/admin/sync-schedules/${editId}`, { ...data, id: editId });
             } else {
-                await api.post('/sync-schedules', data);
+                await api.post('/admin/sync-schedules', data);
             }
             setDialogOpen(false);
             loadData();
@@ -115,7 +135,7 @@ const SchedulesPage: React.FC = () => {
     const handleDelete = async (id: number) => {
         if (!confirm('¿Eliminar esta programación?')) return;
         try {
-            await api.delete(`/sync-schedules/${id}`);
+            await api.delete(`/admin/sync-schedules/${id}`);
             loadData();
         } catch (error) {
             console.error(error);
@@ -124,7 +144,7 @@ const SchedulesPage: React.FC = () => {
 
     const handleToggle = async (s: SyncSchedule) => {
         try {
-            await api.patch(`/sync-schedules/${s.id}/toggle?enabled=${!s.isEnabled}`);
+            await api.patch(`/admin/sync-schedules/${s.id}/toggle`, { isEnabled: !s.isEnabled });
             setSchedules(prev => prev.map(item => item.id === s.id ? { ...item, isEnabled: !item.isEnabled } : item));
         } catch (error) {
             console.error(error);
@@ -302,14 +322,21 @@ const SchedulesPage: React.FC = () => {
                             {/* Company */}
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                                 <Label required>Empresa</Label>
-                                <Select
-                                    value={formCompanyId.toString()}
-                                    onChange={(_, data) => setFormCompanyId(Number(data.value))}
-                                >
-                                    {companies.map(c => (
-                                        <option key={c.id} value={c.id}>{c.displayName}</option>
-                                    ))}
-                                </Select>
+                                {companies.length === 1 ? (
+                                    <div style={{ padding: '8px 12px', background: '#f5f5f5', borderRadius: '4px', border: '1px solid #ddd', fontWeight: 600 }}>
+                                        {companies[0].displayName}
+                                    </div>
+                                ) : (
+                                    <Select
+                                        value={formCompanyId.toString()}
+                                        onChange={(_, data) => setFormCompanyId(Number(data.value))}
+                                    >
+                                        <option value="0">Seleccionar empresa...</option>
+                                        {companies.map(c => (
+                                            <option key={c.id} value={c.id}>{c.displayName}</option>
+                                        ))}
+                                    </Select>
+                                )}
                             </div>
 
                             {/* Days */}

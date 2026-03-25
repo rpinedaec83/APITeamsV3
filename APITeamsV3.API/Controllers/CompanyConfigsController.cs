@@ -25,13 +25,15 @@ namespace APITeamsV3.API.Controllers
         [HttpGet]
         public async Task<ActionResult<List<CompanyConfigDto>>> GetAll()
         {
-            return await _mediator.Send(new GetCompanyConfigsQuery());
+            var isAdminView = User.IsInRole("IT") || User.IsInRole("ADMIN");
+            return await _mediator.Send(new GetCompanyConfigsQuery(isAdminView));
         }
 
         [HttpGet("{id}")]
         public async Task<ActionResult<CompanyConfigDto>> GetById(int id)
         {
-            var config = await _mediator.Send(new GetCompanyConfigByIdQuery(id));
+            var isAdminView = User.IsInRole("IT") || User.IsInRole("ADMIN");
+            var config = await _mediator.Send(new GetCompanyConfigByIdQuery(id, isAdminView));
             if (config == null) return NotFound();
             return config;
         }
@@ -54,7 +56,9 @@ namespace APITeamsV3.API.Controllers
                 _logger.LogWarning("ID Mismatch. URL: {Id}, Body: {CommandId}", id, command.Id);
                 return BadRequest();
             }
-            var success = await _mediator.Send(command);
+
+            var isAdminView = User.IsInRole("IT") || User.IsInRole("ADMIN");
+            var success = await _mediator.Send(command with { IsAdminView = isAdminView });
             if (!success) return NotFound();
             return NoContent();
         }
@@ -62,7 +66,8 @@ namespace APITeamsV3.API.Controllers
         [HttpDelete("{id}")]
         public async Task<IActionResult> Delete(int id)
         {
-            var success = await _mediator.Send(new DeleteCompanyConfigCommand(id));
+            var isAdminView = User.IsInRole("IT") || User.IsInRole("ADMIN");
+            var success = await _mediator.Send(new DeleteCompanyConfigCommand(id, isAdminView));
             if (!success) return NotFound();
             return NoContent();
         }

@@ -6,5 +6,7 @@ export const getBaseApiUrl = () => {
     if (window.location.hostname.includes('localhost')) {
         return 'http://localhost:5000/api';
     }
-    return `https://api.${window.location.hostname}/api`;
+    // boards teams.zegel.edu.pe -> apiteams.zegel.edu.pe
+    const domain = window.location.hostname.replace('teams.', '');
+    return `https://apiteams.${domain}/api`;
 };

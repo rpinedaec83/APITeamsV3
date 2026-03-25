@@ -22,7 +22,7 @@ namespace APITeamsV3.Infrastructure.Persistence
                         CompanyKey = "zegel",
                         DisplayName = "Zegel",
                         FrontHost = "teams.zegel.edu.pe",
-                        ApiHost = "api.teams.zegel.edu.pe",
+                        ApiHost = "apiteams.zegel.edu.pe",
                         SpaClientId = "spa-client-id-placeholder",
                         SmartConnectionString = encryptionService.Encrypt("Server=localhost;Database=Smart_Zegel;User Id=SA;Password=StrongP@ssword1;TrustServerCertificate=True;MultipleActiveResultSets=true"),
                         IsActive = true,
@@ -35,7 +35,7 @@ namespace APITeamsV3.Infrastructure.Persistence
                         CompanyKey = "idat",
                         DisplayName = "IDAT",
                         FrontHost = "teams.idat.edu.pe",
-                        ApiHost = "api.teams.idat.edu.pe",
+                        ApiHost = "apiteams.idat.edu.pe",
                         SmartConnectionString = encryptionService.Encrypt("Server=10.1.3.21;Database=AcademicoIDAT;User Id=smart_prueba;Password=qwerty123456;TrustServerCertificate=True;MultipleActiveResultSets=true"),
                         IsActive = true,
                         GraphTenantId = "be6becf1-4fef-4388-a21c-7184584d38cb", // Real Tenant ID (IDAT.PE)
@@ -49,7 +49,7 @@ namespace APITeamsV3.Infrastructure.Persistence
                         CompanyKey = "corrientealterna",
                         DisplayName = "Corriente Alterna",
                         FrontHost = "teams.corrientealterna.edu.pe",
-                        ApiHost = "api.teams.corrientealterna.edu.pe",
+                        ApiHost = "apiteams.corrientealterna.edu.pe",
                         SmartConnectionString = encryptionService.Encrypt("Server=localhost;Database=Smart_CA;User Id=SA;Password=StrongP@ssword1;TrustServerCertificate=True;MultipleActiveResultSets=true"),
                         IsActive = true,
                         GraphTenantId = "common",
@@ -61,7 +61,7 @@ namespace APITeamsV3.Infrastructure.Persistence
                         CompanyKey = "its",
                         DisplayName = "ITS",
                         FrontHost = "teams.its.edu.pe",
-                        ApiHost = "api.teams.its.edu.pe",
+                        ApiHost = "apiteams.its.edu.pe",
                         SmartConnectionString = encryptionService.Encrypt("Server=localhost;Database=Smart_ITS;User Id=SA;Password=StrongP@ssword1;TrustServerCertificate=True;MultipleActiveResultSets=true"),
                         IsActive = true,
                         GraphTenantId = "common",
@@ -73,7 +73,7 @@ namespace APITeamsV3.Infrastructure.Persistence
                         CompanyKey = "cdi",
                         DisplayName = "CDI",
                         FrontHost = "teams.centrodelaimagen.pe",
-                        ApiHost = "api.teams.centrodelaimagen.pe",
+                        ApiHost = "apiteams.centrodelaimagen.pe",
                         SmartConnectionString = encryptionService.Encrypt("Server=localhost;Database=Smart_CDI;User Id=SA;Password=StrongP@ssword1;TrustServerCertificate=True;MultipleActiveResultSets=true"),
                         IsActive = true,
                         GraphTenantId = "common",
@@ -97,6 +97,18 @@ namespace APITeamsV3.Infrastructure.Persistence
                 idat.GraphClientId = "c356c453-9a02-48ae-90fe-6a55af698a60";
                 await context.SaveChangesAsync();
             }
+            // Update existing ApiHost entries to use new apiteams. pattern
+            var allCompanies = await context.CompanyConfigs.ToListAsync();
+            bool changed = false;
+            foreach (var company in allCompanies)
+            {
+                if (company.ApiHost != null && company.ApiHost.StartsWith("api.teams."))
+                {
+                    company.ApiHost = company.ApiHost.Replace("api.teams.", "apiteams.");
+                    changed = true;
+                }
+            }
+            if (changed) await context.SaveChangesAsync();
         }
     }
 }

@@ -14,6 +14,7 @@ import {
     SignOutRegular,
     TimerRegular,
     CalendarClockRegular,
+    DocumentSearchRegular
 } from '@fluentui/react-icons';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useMsal } from "@azure/msal-react";
@@ -142,6 +143,8 @@ const MainLayout: React.FC = () => {
         { label: 'Operations', icon: <OrganizationRegular />, path: '/operations' },
         { label: 'Hangfire Jobs', icon: <TimerRegular />, path: '/jobs', allowedRoles: ['ADMIN', 'IT'] },
         { label: 'Sync Schedules', icon: <CalendarClockRegular />, path: '/schedules', allowedRoles: ['ADMIN', 'IT'] },
+        { label: 'Logs Operativos', icon: <DocumentSearchRegular />, path: '/logs', allowedRoles: ['ADMIN', 'IT', 'GESTION'] },
+        { label: 'Advanced Reports', icon: <GridDotsRegular />, path: '/reports', allowedRoles: ['ADMIN', 'IT', 'GESTION'] },
         { label: 'Company Configs', icon: <SettingsRegular />, path: '/admin/company-configs', allowedRoles: ['ADMIN', 'IT'] },
     ];
 

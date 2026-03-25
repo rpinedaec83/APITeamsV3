@@ -26,7 +26,6 @@ import {
     CheckmarkRegular,
     AddRegular,
     SaveRegular,
-    PeopleRegular,
     CalendarRegular,
     ArrowUploadRegular,
     GridDotsRegular,
@@ -237,24 +236,65 @@ const OperationsPage: React.FC = () => {
         }
     };
 
+    const getCompanyKey = () => window.location.hostname.includes('zegel') ? 'zegel' : 'idat';
+
     const handleProvisionTeam = async () => {
         if (!seccionData?.idSeccion) return;
-        if (!confirm('¿Estás seguro de crear el equipo para esta sección?')) return;
+        if (!confirm('¿Estás seguro de crear/sincronizar el equipo para esta sección?')) return;
 
         setLoading(true);
         try {
-            const response = await apiClient.post(`/sections/${seccionData.idSeccion}/provision-team`, {
-                ownerEmail: ownerEmail
-            });
-
+            const companyKey = getCompanyKey();
+            const response = await apiClient.post(`/sync/section/${seccionData.idSeccion}?companyKey=${companyKey}`);
             const result = response.data;
-            alert(`Proceso iniciado correctamente (Job ID: ${result.jobId}). El equipo estará listo en breve.`);
-            // Optionally reload data
-            handleSearchSeccion();
-            handleSearchSeccion();
+            alert(`Sincronización finalizada exitosamente. Equipos creados/actualizados: ${result.success}`);
+            await handleSearchSeccion();
         } catch (err: unknown) {
-            const errorMessage = err instanceof Error ? err.message : 'Error desconocido al iniciar aprovisionamiento';
+            const errorMessage = err instanceof Error ? err.message : 'Error desconocido al iniciar sincronización';
             alert(errorMessage);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleVerifyTeam = async () => {
+        if (!seccionData?.idSeccion) return;
+        setLoading(true);
+        try {
+            const response = await apiClient.post(`/sync/verify/${seccionData.idSeccion}`);
+            const result = response.data;
+            alert(`Verificación: ${result.isValid ? 'OK' : 'Inconsistencias halladas'}\n\nDetalle: ${result.summary}`);
+            await handleSearchSeccion();
+        } catch (err: unknown) {
+            alert('Error al verificar equipo.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleRegenerateAgenda = async () => {
+        if (!seccionData?.idSeccion) return;
+        if (!confirm('Esto invalidará las reuniones pasadas y creará una nueva reunión de canal. ¿Proceder?')) return;
+        setLoading(true);
+        try {
+            const companyKey = getCompanyKey();
+            const response = await apiClient.post(`/sync/agenda/regenerate/${seccionData.idSeccion}?companyKey=${companyKey}`);
+            alert(response.data.summary);
+        } catch (err: unknown) {
+            alert('Error al regenerar agenda.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleSyncAlumno = async () => {
+        if (!alumnoData?.codigo) return;
+        setLoading(true);
+        try {
+            const response = await apiClient.post(`/sync/student/${alumnoData.codigo}`);
+            alert(`Sincronización de alumno encolada. ${response.data.message || ''}`);
+        } catch (err: unknown) {
+            alert('Error al sincronizar alumno.');
         } finally {
             setLoading(false);
         }
@@ -317,7 +357,9 @@ const OperationsPage: React.FC = () => {
                             <Button icon={<SearchRegular />} appearance="primary" size="large" onClick={handleSearchSeccion} disabled={loading}>
                                 {loading ? 'Buscando...' : 'Buscar'}
                             </Button>
-                            <Button icon={<CheckmarkRegular />} size="large">Verificar Estado</Button>
+                            <Button icon={<CheckmarkRegular />} size="large" onClick={handleVerifyTeam} disabled={loading || !seccionData}>
+                                Verificar Estado
+                            </Button>
                         </div>
 
                         {error && (
@@ -349,8 +391,8 @@ const OperationsPage: React.FC = () => {
                                             <Title3>Equipo Activo</Title3>
                                         </div>
                                         <span style={{ flex: 1 }}></span>
-                                        <Button icon={<PeopleRegular />}>Miembros</Button>
-                                        <Button icon={<CalendarRegular />}>Agendas</Button>
+                                        <Button icon={<SaveRegular />} onClick={handleProvisionTeam} disabled={loading}>Refrescar Miembros</Button>
+                                        <Button icon={<CalendarRegular />} onClick={handleRegenerateAgenda} disabled={loading}>Regenerar Agendas</Button>
                                     </>
                                 ) : (
                                     <>
@@ -439,8 +481,7 @@ const OperationsPage: React.FC = () => {
                             <Checkbox label="Agregar Miembros" size="large" />
                             <span style={{ flex: 1 }}></span>
                             <Button icon={<AddRegular />} onClick={() => setAlumnoData(null)}>Limpiar</Button>
-                            <Button icon={<SaveRegular />} appearance="primary" disabled={!alumnoData}>Actualizar</Button>
-                            <Button icon={<PeopleRegular />}>Miembros</Button>
+                            <Button icon={<SaveRegular />} appearance="primary" onClick={handleSyncAlumno} disabled={!alumnoData || loading}>Actualizar Teams</Button>
                         </div>
 
                     </div>
