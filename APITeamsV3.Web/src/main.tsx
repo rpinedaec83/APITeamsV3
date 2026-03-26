@@ -18,10 +18,18 @@ const init = async () => {
     const spaConfig = await response.json() as SpaBootstrapConfig;
     window.__APITEAMSV3_CONFIG__ = spaConfig;
 
+    const { PublicClientApplication } = await import("@azure/msal-browser");
+    const { createMsalConfig } = await import("./authConfig");
+    
+    const msalInstance = new PublicClientApplication(
+      createMsalConfig(spaConfig.spaClientId, spaConfig.tenantId, window.location.origin)
+    );
+    await msalInstance.initialize();
+
     ReactDOM.createRoot(document.getElementById('root')!).render(
       <React.StrictMode>
         <FluentProvider theme={webLightTheme}>
-          <App spaConfig={spaConfig} />
+          <App spaConfig={spaConfig} msalInstance={msalInstance} />
         </FluentProvider>
       </React.StrictMode>,
     );

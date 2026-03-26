@@ -63,5 +63,5 @@ export const getApiScopes = (config?: Pick<SpaBootstrapConfig, "apiClientId" | "
 };
 
 export const getLoginRequest = (): RedirectRequest => ({
-    scopes: getApiScopes(window.__APITEAMSV3_CONFIG__)
+    scopes: ["openid", "profile", "offline_access", ...getApiScopes(window.__APITEAMSV3_CONFIG__)]
 });

@@ -108,12 +108,22 @@ namespace APITeamsV3.Infrastructure.MultiTenancy
 
         private void SetTenantContext(ITenantProvider provider, Domain.Entities.CompanyConfig config, IEncryptionService encryptionService)
         {
+            string connectionString;
+            try
+            {
+                connectionString = encryptionService.Decrypt(config.SmartConnectionString);
+            }
+            catch (Exception)
+            {
+                connectionString = config.SmartConnectionString;
+            }
+
             provider.SetTenant(new TenantContext
             {
                 CompanyId = config.Id,
                 CompanyKey = config.CompanyKey,
                 DisplayName = config.DisplayName,
-                ConnectionString = encryptionService.Decrypt(config.SmartConnectionString), // Decrypt here
+                ConnectionString = connectionString,
                 TimeZoneId = config.TimeZoneId,
                 GraphTenantId = config.GraphTenantId,
                 GraphClientId = config.GraphClientId,

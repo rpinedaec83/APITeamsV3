@@ -9,23 +9,19 @@ import LogsPage from './pages/LogsPage';
 import ReportsPage from './pages/ReportsPage';
 import MainLayout from './components/layout/MainLayout';
 
-import { PublicClientApplication } from "@azure/msal-browser";
 import { MsalProvider, AuthenticatedTemplate, UnauthenticatedTemplate } from "@azure/msal-react";
-import { createMsalConfig, type SpaBootstrapConfig } from "./authConfig";
-import { useMemo } from "react";
+import { type SpaBootstrapConfig } from "./authConfig";
 import { Login } from "./components/Login";
 import { CompanyProvider } from "./CompanyContext";
 import RequiredRoleRoute from "./components/RequiredRoleRoute";
+import type { IPublicClientApplication } from "@azure/msal-browser";
 
 interface AppProps {
   spaConfig: SpaBootstrapConfig;
+  msalInstance: IPublicClientApplication;
 }
 
-function App({ spaConfig }: AppProps) {
-  const msalInstance = useMemo(() => {
-    const config = createMsalConfig(spaConfig.spaClientId, spaConfig.tenantId, window.location.origin);
-    return new PublicClientApplication(config);
-  }, [spaConfig]);
+function App({ spaConfig, msalInstance }: AppProps) {
 
   return (
     <CompanyProvider companyKey={spaConfig.companyKey}>

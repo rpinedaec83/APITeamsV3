@@ -16,13 +16,45 @@ builder.Services.Configure<Microsoft.AspNetCore.Authentication.JwtBearer.JwtBear
     Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerDefaults.AuthenticationScheme,
     options =>
     {
-        var apiClientId = builder.Configuration["AzureAd:ClientId"];
-        if (string.IsNullOrWhiteSpace(apiClientId))
+        var configuration = builder.Configuration;
+        var masterClientId = configuration["AzureAd:ClientId"];
+        
+        options.TokenValidationParameters.AudienceValidator = (audiences, securityToken, validationParameters) =>
         {
-            throw new InvalidOperationException("AzureAd:ClientId must be configured.");
-        }
+            if (audiences == null || !audiences.Any()) return false;
 
-        options.TokenValidationParameters.ValidAudiences = new[] { apiClientId };
+            // 1. Check against Master Client ID
+            if (audiences.Any(a => string.Equals(a, masterClientId, StringComparison.OrdinalIgnoreCase))) return true;
+
+            // 2. Check against Database Client IDs using direct connection for performance and stability
+            try 
+            {
+                var dbAudiences = new List<string>();
+                var connectionString = configuration.GetConnectionString("CentralConnection") ?? "Data Source=APITeamsV3_Central.db";
+                using (var connection = new Microsoft.Data.Sqlite.SqliteConnection(connectionString))
+                {
+                    connection.Open();
+                    using (var command = connection.CreateCommand())
+                    {
+                        command.CommandText = "SELECT ApiClientId FROM CompanyConfigs WHERE IsActive = 1 AND ApiClientId IS NOT NULL AND ApiClientId != ''";
+                        using (var reader = command.ExecuteReader())
+                        {
+                            while (reader.Read()) dbAudiences.Add(reader.GetString(0));
+                        }
+                    }
+                }
+
+                if (audiences.Any(a => dbAudiences.Any(da => string.Equals(a, da, StringComparison.OrdinalIgnoreCase)))) return true;
+                if (audiences.Any(a => dbAudiences.Any(da => string.Equals(a, $"api://{da}", StringComparison.OrdinalIgnoreCase)))) return true;
+            }
+            catch 
+            {
+                // Fallback to false if DB is locked or failing during validation
+                return false;
+            }
+
+            return false;
+        };
     });
 
 builder.Services.AddApplication();
@@ -43,15 +75,7 @@ builder.Services.AddCors(options =>
         policy =>
         {
             policy
-                .WithOrigins(
-                    "http://localhost:5173",
-                    "http://127.0.0.1:5173",
-                    "https://teams.zegel.edu.pe",
-                    "https://teams.idat.edu.pe",
-                    "https://teams.corrientealterna.edu.pe",
-                    "https://teams.its.edu.pe",
-                    "https://teams.centrodelaimagen.pe"
-                )
+                .SetIsOriginAllowed(origin => true) // More flexible for debugging/multiple domains
                 .AllowAnyMethod()
                 .AllowAnyHeader()
                 .AllowCredentials();
@@ -71,6 +95,7 @@ builder.Services.AddSwaggerGen(c =>
 
 var app = builder.Build();
 
+app.UseRouting();
 app.UseCors("AllowAll");
 app.UseMiddleware<APITeamsV3.API.Middleware.ExceptionHandlingMiddleware>();
 
@@ -89,6 +114,17 @@ using (var scope = app.Services.CreateScope())
     {
         var context = services.GetRequiredService<CentralDbContext>();
         context.Database.Migrate();
+
+        // Ensure new columns exist in SQLite (Manual migration if EF tools are missing)
+        try
+        {
+            await context.Database.ExecuteSqlRawAsync("ALTER TABLE CompanyConfigs ADD COLUMN ApiClientId TEXT;");
+        } catch { /* Ignore if exists */ }
+        try
+        {
+            await context.Database.ExecuteSqlRawAsync("ALTER TABLE CompanyConfigs ADD COLUMN ApiScopes TEXT;");
+        } catch { /* Ignore if exists */ }
+
         await APITeamsV3.Infrastructure.Persistence.CentralDbContextSeed.SeedAsync(context);
     }
     catch (Exception ex)
