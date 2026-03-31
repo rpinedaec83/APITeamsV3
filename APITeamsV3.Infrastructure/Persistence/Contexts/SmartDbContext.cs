@@ -7,6 +7,7 @@ namespace APITeamsV3.Infrastructure.Persistence.Contexts
     {
         public DbSet<APITeamsV3.Domain.Entities.Parametro> Parametro { get; set; }
         public DbSet<APITeamsV3.Domain.Entities.TeamsLogOperativo> TeamsLogOperativo { get; set; }
+        public DbSet<APITeamsV3.Domain.Entities.SeccionTable> SeccionTable { get; set; }
         private readonly ITenantProvider _tenantProvider;
 
         public SmartDbContext(DbContextOptions<SmartDbContext> options, ITenantProvider tenantProvider) 
@@ -87,6 +88,13 @@ namespace APITeamsV3.Infrastructure.Persistence.Contexts
             modelBuilder.Entity<APITeamsV3.Domain.Entities.Seccion>(entity =>
             {
                 entity.ToView("vw_MatriculasActivas"); // Conceptual view name
+                entity.HasKey(e => e.IdSeccion);
+            });
+
+            // SeccionTable (Physical Table)
+            modelBuilder.Entity<APITeamsV3.Domain.Entities.SeccionTable>(entity =>
+            {
+                entity.ToTable("Seccion");
                 entity.HasKey(e => e.IdSeccion);
             });
 

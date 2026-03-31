@@ -24,7 +24,25 @@ namespace APITeamsV3.Application.UseCases.Sections
                 .AsNoTracking()
                 .FirstOrDefaultAsync(s => s.GrupoCodigo == request.Code || s.Codigo == request.Code, cancellationToken);
 
-            if (section == null) return null;
+            if (section == null)
+            {
+                // Fallback: Search in Physical Seccion Table if not in Active view
+                var sectionTable = await _context.Set<SeccionTable>()
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(s => s.Codigo == request.Code, cancellationToken);
+                
+                if (sectionTable == null) return null;
+
+                // Create a lightweight section object from the table data
+                section = new Seccion
+                {
+                    IdSeccion = sectionTable.IdSeccion,
+                    Codigo = sectionTable.Codigo,
+                    GrupoCodigo = sectionTable.Codigo, // Use same for display if no group code available
+                    CursoNombre = "Información limitada (No está en vista activa)",
+                    EsTeams = false // Assuming no team if not active
+                };
+            }
 
             // 2. Check if Team exists
             var team = await _context.Set<TeamEntity>()

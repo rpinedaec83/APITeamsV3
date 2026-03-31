@@ -15,9 +15,11 @@ namespace APITeamsV3.Infrastructure.Services
         private const string DevelopmentFallbackKey = "b14ca5898a4e4133bbce2ea2315a1916";
         private readonly byte[] _key;
         private readonly ILogger<EncryptionService> _logger;
+        private readonly IConfiguration _configuration;
 
         public EncryptionService(IConfiguration configuration, IHostEnvironment environment, ILogger<EncryptionService> logger)
         {
+            _configuration = configuration;
             _logger = logger;
 
             var configuredKey =
@@ -78,6 +80,49 @@ namespace APITeamsV3.Infrastructure.Services
         {
             if (string.IsNullOrEmpty(cipherText)) return cipherText;
 
+            try
+            {
+                return DecryptWithKey(cipherText, _key);
+            }
+            catch (CryptographicException)
+            {
+                // Resilience: If the primary key fails (padding issue), try the alternative normalization if the original key was 32 chars.
+                var configuredKey = _configuration["EncryptionKey"] ?? DevelopmentFallbackKey;
+                if (configuredKey?.Length == 32)
+                {
+                    // If _key is Hex (16 bytes), try UTF8 (32 bytes)
+                    // If _key is UTF8 (32 bytes), try Hex (16 bytes)
+                    byte[] altKey = null;
+                    byte[] hexBytes;
+                    bool isHex = TryDecodeHex(configuredKey, out hexBytes) && hexBytes.Length == 16;
+                    
+                    if (isHex && _key.Length == 16) 
+                    {
+                        altKey = Encoding.UTF8.GetBytes(configuredKey);
+                    }
+                    else if (!isHex && _key.Length == 32)
+                    {
+                        if (TryDecodeHex(configuredKey, out hexBytes)) altKey = hexBytes;
+                    }
+
+                    if (altKey != null)
+                    {
+                        try
+                        {
+                            return DecryptWithKey(cipherText, altKey);
+                        }
+                        catch
+                        {
+                            // Fall through to original exception
+                        }
+                    }
+                }
+                throw;
+            }
+        }
+
+        private string DecryptWithKey(string cipherText, byte[] key)
+        {
             if (cipherText.StartsWith(VersionPrefix, StringComparison.Ordinal))
             {
                 var payload = Convert.FromBase64String(cipherText[VersionPrefix.Length..]);
@@ -91,17 +136,17 @@ namespace APITeamsV3.Infrastructure.Services
                 Buffer.BlockCopy(payload, 0, iv, 0, iv.Length);
                 Buffer.BlockCopy(payload, iv.Length, buffer, 0, buffer.Length);
 
-                return DecryptInternal(buffer, iv);
+                return DecryptInternal(buffer, iv, key);
             }
 
-            return DecryptInternal(Convert.FromBase64String(cipherText), new byte[16]);
+            return DecryptInternal(Convert.FromBase64String(cipherText), new byte[16], key);
         }
 
-        private string DecryptInternal(byte[] buffer, byte[] iv)
+        private string DecryptInternal(byte[] buffer, byte[] iv, byte[] key)
         {
             using (var aes = Aes.Create())
             {
-                aes.Key = _key;
+                aes.Key = key;
                 aes.IV = iv;
                 var decryptor = aes.CreateDecryptor(aes.Key, aes.IV);
 
