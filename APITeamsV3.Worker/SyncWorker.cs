@@ -89,9 +89,7 @@ namespace APITeamsV3.Worker
                                         // Payload expected to be SeccionId or JSON. Assuming TargetId has the ID.
                                         if (int.TryParse(job.TargetId, out int seccionId))
                                         {
-                                            // ProvisionTeamAsync(Seccion seccion, string ownerEmail)
-                                            // Fetch Seccion from SmartDB first.
-                                            
+                                            // Fetch section from SmartDB view
                                             var smartContext = scope.ServiceProvider.GetRequiredService<ISmartDbContext>();
                                             // Seccion is a View.
                                             var seccion = await smartContext.Set<Seccion>()
@@ -100,9 +98,7 @@ namespace APITeamsV3.Worker
                                             if (seccion == null)
                                                 throw new Exception($"Section {seccionId} not found in SmartDB.");
 
-                                            var ownerEmail = "admin@Test.com"; // Placeholder or extract from payload
-                                            
-                                            await provisioningService.ProvisionTeamAsync(seccion, ownerEmail);
+                                            await provisioningService.ProvisionTeamAsync(seccion);
                                         }
                                         else
                                         {

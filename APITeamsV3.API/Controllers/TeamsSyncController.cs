@@ -104,5 +104,18 @@ namespace APITeamsV3.API.Controllers
             var result = await _mediator.Send(new RegenerateAgendaCommand(idSeccion, companyKey));
             return Ok(result);
         }
+
+        /// <summary>
+        /// Recreates a team: deletes from Graph, soft-deletes local records,
+        /// provisions a brand new team, and syncs students.
+        /// </summary>
+        [HttpPost("recreate/{idSeccion}")]
+        public async Task<IActionResult> RecreateTeam(int idSeccion, [FromQuery] string companyKey = "idat")
+        {
+            var result = await _mediator.Send(new RecreateTeamCommand(idSeccion, companyKey));
+            if (result.Success)
+                return Ok(result);
+            return BadRequest(result);
+        }
     }
 }

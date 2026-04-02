@@ -14,5 +14,7 @@ namespace APITeamsV3.Domain.Entities
         public string Estado { get; set; } = "A";
         public DateTime FechaCreacion { get; set; }
         public DateTime? FechaModificacion { get; set; }
+        public int UsuarioCreacion { get; set; } = 1; // System ID
+        public int? UsuarioModificacion { get; set; }
     }
 }

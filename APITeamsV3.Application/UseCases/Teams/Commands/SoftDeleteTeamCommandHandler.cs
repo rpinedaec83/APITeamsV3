@@ -1,6 +1,9 @@
 using MediatR;
 using APITeamsV3.Application.Common.Interfaces;
+using APITeamsV3.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -17,27 +20,40 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
 
         public async Task<Unit> Handle(SoftDeleteTeamCommand request, CancellationToken cancellationToken)
         {
-            // Option 29 Logic: ELIMINA LOS EQUIPOS (Soft Delete)
-            var sql = @"
-                UPDATE TeamsEquipos
-                SET EstadoTeam = 'I',
-                  UsuarioModificacion = 1,
-                  FechaModificacion = GETDATE()
-                WHERE IdTeamsGroup = {0};
+            // 1. Soft-delete TeamsEquipos
+            var team = await _context.Set<TeamEntity>()
+                .FirstOrDefaultAsync(t => t.IdTeamsGroup == request.IdTeamsGroup, cancellationToken);
 
-                UPDATE TeamsUsuarios
-                SET Estado = 'I',
-                  UsuarioModificacion = 1,
-                  FechaModificacion = GETDATE()
-                WHERE IdTeams = {0};
+            if (team != null)
+            {
+                team.EstadoTeam = "I";
+                team.IsActive = "I";
+                team.FechaModificacion = DateTime.UtcNow;
+            }
 
-                UPDATE TeamsHorarios
-                SET Estado = 'I',
-                  UsuarioModificacion = 1,
-                  FechaModificacion = GETDATE()
-                WHERE IdTeams = {0};";
+            // 2. Soft-delete TeamsUsuarios
+            var members = await _context.Set<TeamMember>()
+                .Where(m => m.IdTeams == request.IdTeamsGroup && m.Estado == "A")
+                .ToListAsync(cancellationToken);
 
-            await _context.Database.ExecuteSqlRawAsync(sql, request.IdTeamsGroup);
+            foreach (var member in members)
+            {
+                member.Estado = "I";
+                member.FechaModificacion = DateTime.UtcNow;
+            }
+
+            // 3. Soft-delete TeamsHorarios
+            var sessions = await _context.Set<TeamSession>()
+                .Where(s => s.IdTeams == request.IdTeamsGroup && s.Estado == "A")
+                .ToListAsync(cancellationToken);
+
+            foreach (var session in sessions)
+            {
+                session.Estado = "I";
+                session.FechaModificacion = DateTime.UtcNow;
+            }
+
+            await _context.SaveChangesAsync(cancellationToken);
 
             return Unit.Value;
         }

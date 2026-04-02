@@ -50,6 +50,21 @@ export const createMsalConfig = (clientId: string, tenantId: string, redirectUri
     };
 };
 
+/**
+ * Clears stale MSAL interaction state from sessionStorage.
+ * Call this before initializing MSAL to prevent "interaction_in_progress" errors
+ * caused by a previously interrupted redirect flow.
+ */
+export const clearStaleInteractionState = () => {
+    const keys = Object.keys(sessionStorage);
+    for (const key of keys) {
+        if (key.includes("msal.interaction.status")) {
+            console.warn("Clearing stale MSAL interaction state:", key);
+            sessionStorage.removeItem(key);
+        }
+    }
+};
+
 export const getApiScopes = (config?: Pick<SpaBootstrapConfig, "apiClientId" | "apiScopes">): string[] => {
     if (config?.apiScopes?.length) {
         return config.apiScopes;

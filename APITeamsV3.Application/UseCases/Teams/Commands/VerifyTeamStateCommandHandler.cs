@@ -52,6 +52,16 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                 {
                     bool requiresUpdate = false;
                     
+                    // If the team exists in Graph but is locally marked as inactive, reactivate it
+                    if (team.EstadoTeam == "I")
+                    {
+                        _logger.LogInformation($"Team {team.IdTeamsGroup} exists in Graph but was locally inactive. Reactivating.");
+                        team.EstadoTeam = "A";
+                        team.IsActive = "A";
+                        requiresUpdate = true;
+                        result.Summary += " Team reactivado (existía en Graph pero estaba inactivo en BD).";
+                    }
+
                     if (group.DisplayName != team.NombreTeam || group.Description != team.DescripcionTeam)
                     {
                         // Graph es la fuente de verdad (o Smart). Dependiendo de reglas, 

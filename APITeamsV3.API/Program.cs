@@ -115,16 +115,6 @@ using (var scope = app.Services.CreateScope())
         var context = services.GetRequiredService<CentralDbContext>();
         context.Database.Migrate();
 
-        // Ensure new columns exist in SQLite (Manual migration if EF tools are missing)
-        try
-        {
-            await context.Database.ExecuteSqlRawAsync("ALTER TABLE CompanyConfigs ADD COLUMN ApiClientId TEXT;");
-        } catch { /* Ignore if exists */ }
-        try
-        {
-            await context.Database.ExecuteSqlRawAsync("ALTER TABLE CompanyConfigs ADD COLUMN ApiScopes TEXT;");
-        } catch { /* Ignore if exists */ }
-
         await APITeamsV3.Infrastructure.Persistence.CentralDbContextSeed.SeedAsync(context);
     }
     catch (Exception ex)

@@ -1,8 +1,14 @@
 using MediatR;
 using APITeamsV3.Application.Common.Interfaces;
 using APITeamsV3.Application.UseCases.Teams.DTOs;
+using APITeamsV3.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Microsoft.Graph;
+using Microsoft.Graph.Models;
+using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -11,145 +17,122 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
     public class SyncMissingStudentsCommandHandler : IRequestHandler<SyncMissingStudentsCommand, List<MissingStudentDto>>
     {
         private readonly ISmartDbContext _context;
+        private readonly IGraphClientFactory _graphFactory;
+        private readonly ILogger<SyncMissingStudentsCommandHandler> _logger;
 
-        public SyncMissingStudentsCommandHandler(ISmartDbContext context)
+        public SyncMissingStudentsCommandHandler(
+            ISmartDbContext context,
+            IGraphClientFactory graphFactory,
+            ILogger<SyncMissingStudentsCommandHandler> logger)
         {
             _context = context;
+            _graphFactory = graphFactory;
+            _logger = logger;
         }
 
         public async Task<List<MissingStudentDto>> Handle(SyncMissingStudentsCommand request, CancellationToken cancellationToken)
         {
-            // Re-generates TeamsProgramacionGeneral and TeamsProgramacionAlumnos for the section (Option 1 logic)
-            // then returns the missing students (Option 4 logic).
-            // Step 1: Refresh the programming tables
-            var refreshSql = @"
-                DELETE TeamsProgramacionGeneral WHERE IdCurso = {0};
-                DELETE TeamsProgramacionAlumnos WHERE IdCurso = {0};";
-            await _context.Database.ExecuteSqlRawAsync(refreshSql, request.IdSeccion);
+            // Step 1: Query Delta DIRECTLY from Academic Source of Truth (Views/Main Tables)
+            // We no longer populate staging tables (TeamsProgramacionAlumnos) before syncing.
+            
+            var missingStudents = await (from ac in _context.Set<AlumnoCurso>()
+                                         join al in _context.Set<Alumno>() on ac.IdAlumno equals al.IdAlumno
+                                         join te in _context.TeamsEquipos on ac.IdSeccion equals te.IdSeccionSmart
+                                         where ac.IdSeccion == request.IdSeccion
+                                            && ac.EsMatricula == true // Active Enrollments only
+                                            && te.EstadoTeam == "A"
+                                            && !string.IsNullOrEmpty(al.EmailInstitucion)
+                                            && !_context.TeamsUsuarios.Any(tu => tu.IdTeams == te.IdTeamsGroup 
+                                                                             && tu.CodigoAlumno == al.Codigo 
+                                                                             && tu.Tipo == "A"
+                                                                             && tu.Estado == "A")
+                                         select new MissingStudentDto
+                                         {
+                                             IdTeamsGroup = te.IdTeamsGroup,
+                                             CodigoAlumno = al.Codigo,
+                                             NombresAlumno = al.Nombre,
+                                             ApellidosAlumno = "", // Alumno view often returns composite names
+                                             EmailAlumno = al.EmailInstitucion
+                                         })
+                                         .Distinct()
+                                         .ToListAsync(cancellationToken);
 
-            // Step 2: Re-populate TeamsProgramacionGeneral (Option 1 - General)
-            var insertGeneralSql = @"
-                DECLARE @FechaIniDias INT = 14, @FechaFinDias INT = 14;
-                SELECT @FechaIniDias = CONVERT(INT, Valor), @FechaFinDias = CONVERT(INT, Valor)
-                FROM Parametro WITH(NOLOCK) WHERE Nombre = 'EsTeams';
+            if (!missingStudents.Any())
+            {
+                _logger.LogInformation($"All students for section {request.IdSeccion} are already synchronized from Academic Source.");
+                return missingStudents;
+            }
 
-                INSERT INTO TeamsProgramacionGeneral
-                SELECT DISTINCT SD.IdSede, SD.Nombre, FA.IdFacultad, FA.Nombre,
-                  UN.IdUnidadNegocio, UN.Nombre, UA.IdUnidadAcademica, UA.Nombre,
-                  PE.IdPeriodo, PE.Codigo, PD.IdProducto, PD.ProductoNombre,
-                  PR.IdPromocion, ISNULL(MTR.Nombre, 'MODULO 0'),
-                  PG.IdGrupo, PG.GrupoCodigo, SE.IdSeccion,
-                  PD.ProductoCodigo + '.' + ISNULL(CAST(PR.IdCurricula AS VARCHAR(10)), '00') + '.' + CAST(CU.IdCurso AS VARCHAR(10)) + '.' + REPLACE(PE.Codigo, '-', '') + '-' + CAST(SE.IdSeccion AS VARCHAR(10)),
-                  PG.GrupoCodigo + ' ' + CU.CursoNombre, CU.CursoNombre,
-                  ISNULL(FC.CodigoAnterior, ''),
-                  ISNULL(REPLACE(REPLACE(AT2.Nombres, 'Ñ', 'N'), '''', ''), ''),
-                  ISNULL(REPLACE(REPLACE(AT2.Paterno, 'Ñ', 'N'), '''', ''), '') + ' ' + ISNULL(REPLACE(REPLACE(AT2.Materno, 'Ñ', 'N'), '''', ''), ''),
-                  ISNULL(FC.EmailInstitucion, ''), 1, 1, GETDATE()
-                FROM Seccion SE WITH (NOLOCK)
-                  INNER JOIN Promocion PR WITH (NOLOCK) ON SE.IdPromocion = PR.IdPromocion
-                  INNER JOIN Empresa EM WITH (NOLOCK) ON PR.IdEmpresa = EM.IdEmpresa
-                  INNER JOIN Sede SD WITH (NOLOCK) ON PR.IdSede = SD.IdSede
-                  INNER JOIN Facultad FA WITH (NOLOCK) ON PR.IdFacultad = FA.IdFacultad
-                  INNER JOIN UnidadNegocio UN WITH (NOLOCK) ON PR.IdUnidadNegocio = UN.IdUnidadNegocio
-                  INNER JOIN UnidadAcademica UA WITH (NOLOCK) ON PR.IdUnidadAcademica = UA.IdUnidadAcademica
-                  INNER JOIN Periodo PE WITH (NOLOCK) ON PR.IdPeriodo = PE.IdPeriodo
-                  INNER JOIN Producto PD WITH (NOLOCK) ON PR.IdProducto = PD.IdProducto
-                  LEFT JOIN Curriculamodulo CM WITH (NOLOCK) ON PR.IdModulo = CM.IdModulo AND PR.IdCurricula = CM.IdCurricula
-                  LEFT JOIN MaestroTablaRegistro MTR WITH (NOLOCK) ON CM.IdTipoModulo = MTR.IdMaestroRegistro
-                  LEFT JOIN PromocionGrupo PG WITH (NOLOCK) ON SE.IdPromocion = PG.IdPromocion AND SE.IdGrupo = PG.IdGrupo
-                  LEFT JOIN Curso CU WITH (NOLOCK) ON SE.IdCurso = CU.IdCurso
-                  LEFT JOIN SeccionProfesor SP WITH (NOLOCK) ON SP.IdSeccion = SE.IdSeccion AND SP.EsResponsable = 1
-                  LEFT JOIN Actor AT2 WITH (NOLOCK) ON SP.IdActor = AT2.IdActor
-                  LEFT JOIN Facilitador FC WITH (NOLOCK) ON SP.IdActor = FC.IdFacilitador
-                WHERE PE.EsTeams = 1
-                  AND ((
-                    (PR.TipoServicio = 'P' OR PR.TipoServicio = 'L')
-                    AND CONVERT(VARCHAR, GETDATE(), 112) BETWEEN CONVERT(VARCHAR, DATEADD(DAY, @FechaIniDias * -1, SE.FechaInicio), 112) AND CONVERT(VARCHAR, DATEADD(DAY, @FechaFinDias, SE.FechaFin), 112)
-                  ) OR (
-                    PR.TipoServicio = 'C'
-                    AND CONVERT(VARCHAR, GETDATE(), 112) BETWEEN CONVERT(VARCHAR, DATEADD(DAY, @FechaIniDias * -1, PE.Inicio), 112) AND CONVERT(VARCHAR, DATEADD(DAY, @FechaFinDias, PE.Fin), 112)
-                  ))
-                  AND SE.IdSeccion = {0};";
-            await _context.Database.ExecuteSqlRawAsync(insertGeneralSql, request.IdSeccion);
+            // Step 3: Actuation (Graph API + DB Persistence)
+            var graphClient = await _graphFactory.CreateClientAsync();
+            var syncedCount = 0;
 
-            // Step 3: Re-populate TeamsProgramacionAlumnos (Option 1 - Alumnos)
-            var insertAlumnosSql = @"
-                DECLARE @FechaIniDias INT = 14, @FechaFinDias INT = 14;
-                SELECT @FechaIniDias = CONVERT(INT, Valor), @FechaFinDias = CONVERT(INT, Valor)
-                FROM Parametro WITH(NOLOCK) WHERE Nombre = 'EsTeams';
+            foreach (var student in missingStudents)
+            {
+                try
+                {
+                    _logger.LogDebug($"Syncing student {student.CodigoAlumno} ({student.EmailAlumno}) to Team {student.IdTeamsGroup}");
 
-                INSERT INTO TeamsProgramacionAlumnos
-                SELECT DISTINCT SD.IdSede, SD.Nombre, FA.IdFacultad, FA.Nombre,
-                  UN.IdUnidadNegocio, UN.Nombre, UA.IdUnidadAcademica, UA.Nombre,
-                  PE.IdPeriodo, PE.Codigo, PD.IdProducto, PD.ProductoNombre,
-                  PR.IdPromocion, ISNULL(MTR.Nombre, 'MODULO 0'),
-                  PG.IdGrupo, PG.GrupoCodigo, SE.IdSeccion,
-                  PD.ProductoCodigo + '.' + ISNULL(CAST(PR.IdCurricula AS VARCHAR(10)), '00') + '.' + CAST(CU.IdCurso AS VARCHAR(10)) + '.' + REPLACE(PE.Codigo, '-', '') + '-' + CAST(SE.IdSeccion AS VARCHAR(10)),
-                  PG.GrupoCodigo + ' ' + CU.CursoNombre, CU.CursoNombre,
-                  AL.CodigoAnterior,
-                  REPLACE(REPLACE(AT.Nombres, 'Ñ', 'N'), '''', ''),
-                  REPLACE(REPLACE(AT.Paterno, 'Ñ', 'N'), '''', '') + ' ' + ISNULL(REPLACE(REPLACE(AT.Materno, 'Ñ', 'N'), '''', ''), ''),
-                  AL.EmailInstitucion,
-                  ISNULL(FC.CodigoAnterior, ''),
-                  ISNULL(REPLACE(REPLACE(AT2.Nombres, 'Ñ', 'N'), '''', ''), ''),
-                  ISNULL(REPLACE(REPLACE(AT2.Paterno, 'Ñ', 'N'), '''', ''), '') + ' ' + ISNULL(REPLACE(REPLACE(AT2.Materno, 'Ñ', 'N'), '''', ''), ''),
-                  ISNULL(FC.EmailInstitucion, ''),
-                  AC.Estado, 1, 1, GETDATE()
-                FROM Seccion SE WITH (NOLOCK)
-                  INNER JOIN Promocion PR WITH (NOLOCK) ON SE.IdPromocion = PR.IdPromocion
-                  INNER JOIN Empresa EM WITH (NOLOCK) ON PR.IdEmpresa = EM.IdEmpresa
-                  INNER JOIN Sede SD WITH (NOLOCK) ON PR.IdSede = SD.IdSede
-                  INNER JOIN Facultad FA WITH (NOLOCK) ON PR.IdFacultad = FA.IdFacultad
-                  INNER JOIN UnidadNegocio UN WITH (NOLOCK) ON PR.IdUnidadNegocio = UN.IdUnidadNegocio
-                  INNER JOIN UnidadAcademica UA WITH (NOLOCK) ON PR.IdUnidadAcademica = UA.IdUnidadAcademica
-                  INNER JOIN Periodo PE WITH (NOLOCK) ON PR.IdPeriodo = PE.IdPeriodo
-                  INNER JOIN Producto PD WITH (NOLOCK) ON PR.IdProducto = PD.IdProducto
-                  LEFT JOIN Curriculamodulo CM WITH (NOLOCK) ON PR.IdModulo = CM.IdModulo AND PR.IdCurricula = CM.IdCurricula
-                  LEFT JOIN MaestroTablaRegistro MTR WITH (NOLOCK) ON CM.IdTipoModulo = MTR.IdMaestroRegistro
-                  LEFT JOIN PromocionGrupo PG WITH (NOLOCK) ON SE.IdPromocion = PG.IdPromocion AND SE.IdGrupo = PG.IdGrupo
-                  LEFT JOIN Curso CU WITH (NOLOCK) ON SE.IdCurso = CU.IdCurso
-                  LEFT JOIN AlumnoCurso AC WITH (NOLOCK) ON SE.IdSeccion = AC.IdSeccion
-                  LEFT JOIN Matricula M WITH (NOLOCK) ON M.IdMatricula = AC.IdMatricula AND M.EsMatricula = 1
-                  LEFT JOIN Alumno AL WITH (NOLOCK) ON AC.IdAlumno = AL.IdAlumno
-                  LEFT JOIN Actor AT WITH (NOLOCK) ON AC.IdAlumno = AT.IdActor
-                  LEFT JOIN SeccionProfesor SP WITH (NOLOCK) ON SP.IdSeccion = SE.IdSeccion AND SP.EsResponsable = 1
-                  LEFT JOIN Actor AT2 WITH (NOLOCK) ON SP.IdActor = AT2.IdActor
-                  LEFT JOIN Facilitador FC WITH (NOLOCK) ON SP.IdActor = FC.IdFacilitador
-                WHERE PE.EsTeams = 1
-                  AND ((
-                    (PR.TipoServicio = 'P' OR PR.TipoServicio = 'L')
-                    AND CONVERT(VARCHAR, GETDATE(), 112) BETWEEN CONVERT(VARCHAR, DATEADD(DAY, @FechaIniDias * -1, SE.FechaInicio), 112) AND CONVERT(VARCHAR, DATEADD(DAY, @FechaFinDias, SE.FechaFin), 112)
-                  ) OR (
-                    PR.TipoServicio = 'C'
-                    AND CONVERT(VARCHAR, GETDATE(), 112) BETWEEN CONVERT(VARCHAR, DATEADD(DAY, @FechaIniDias * -1, PE.Inicio), 112) AND CONVERT(VARCHAR, DATEADD(DAY, @FechaFinDias, PE.Fin), 112)
-                  ))
-                  AND SE.IdSeccion = {0}
-                  AND AC.EsMatricula = 1
-                  AND ISNULL(FC.CodigoAnterior, '') <> '';";
-            await _context.Database.ExecuteSqlRawAsync(insertAlumnosSql, request.IdSeccion);
+                    // 3.1 Resolve Azure AD User ID
+                    var user = await graphClient.Users[student.EmailAlumno].GetAsync(cancellationToken: cancellationToken);
+                    if (user == null || string.IsNullOrEmpty(user.Id))
+                    {
+                        _logger.LogWarning($"Student {student.EmailAlumno} not found in Azure AD. Skipping...");
+                        continue;
+                    }
 
-            // Step 4: Return missing students (Option 4 logic)
-            var querySql = @"
-                SELECT TE.IdTeamsGroup,
-                  MPG.CodigoAlumno,
-                  MPG.NombresAlumno,
-                  MPG.ApellidosAlumno,
-                  MPG.EmailAlumno
-                FROM TeamsProgramacionAlumnos MPG WITH (NOLOCK)
-                  LEFT JOIN TeamsEquipos TE WITH (NOLOCK) ON (TE.IdSeccionSmart = MPG.IdCurso)
-                WHERE TE.IdSeccionSmart = {0}
-                  AND NOT EXISTS (
-                    SELECT 1
-                    FROM TeamsUsuarios TU WITH (NOLOCK)
-                    WHERE TU.CodigoAlumno = MPG.CodigoAlumno
-                      AND TU.idTeams = TE.IdTeamsGroup
-                      AND TU.Tipo = 'A'
-                      AND TU.Estado = 'A'
-                  )
-                  AND ISNULL(MPG.CodigoFacilitador, '') <> ''
-                  AND TE.EstadoTeam = 'A'";
+                    // 3.2 Add Member to Group/Team
+                    var requestBody = new Microsoft.Graph.Models.ReferenceCreate
+                    {
+                        OdataId = $"https://graph.microsoft.com/v1.0/users/{user.Id}",
+                    };
 
-            return await _context.Database.SqlQueryRaw<MissingStudentDto>(querySql, request.IdSeccion).ToListAsync(cancellationToken);
+                    try 
+                    {
+                        await graphClient.Groups[student.IdTeamsGroup].Members.Ref.PostAsync(requestBody, cancellationToken: cancellationToken);
+                    }
+                    catch (Exception graphEx) when (graphEx.Message.Contains("already exist", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _logger.LogDebug($"Student {student.EmailAlumno} is already a member of the group ({graphEx.Message}).");
+                    }
+
+                    // 3.3 Persistence in TeamsUsuarios
+                    var userEntity = new TeamMember
+                    {
+                        IdTeams = student.IdTeamsGroup,
+                        CodigoAlumno = student.CodigoAlumno,
+                        Nombres = student.NombresAlumno,
+                        Apellidos = student.ApellidosAlumno,
+                        Email = student.EmailAlumno,
+                        Tipo = "A", // Alumno
+                        Estado = "A", // Activo
+                        FechaCreacion = DateTime.UtcNow,
+                        UsuarioCreacion = 1 // System/Automation ID
+                    };
+
+                    await _context.TeamsUsuarios.AddAsync(userEntity, cancellationToken);
+                    syncedCount++;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, $"Failed to sync student {student.EmailAlumno} for section {request.IdSeccion}.");
+                }
+            }
+
+            if (syncedCount > 0)
+            {
+                try 
+                {
+                    await _context.SaveChangesAsync(cancellationToken);
+                    _logger.LogInformation($"Successfully synchronized {syncedCount} missing students for section {request.IdSeccion}.");
+                }
+                catch (Exception dbEx)
+                {
+                    _logger.LogError(dbEx, $"Failed to persist student sync status in DB for section {request.IdSeccion}.");
+                }
+            }
+
+            return missingStudents;
         }
     }
 }

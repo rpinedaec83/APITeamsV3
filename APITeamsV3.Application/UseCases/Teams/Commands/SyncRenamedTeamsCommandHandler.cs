@@ -19,45 +19,52 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
 
         public async Task<List<RenamedTeamDto>> Handle(SyncRenamedTeamsCommand request, CancellationToken cancellationToken)
         {
-            // Option 7 Logic: Find teams where the name or description has changed
-            // compared to the expected naming convention from Smart data.
-            // Returns the list so the caller can update the Teams display name via Graph API.
+            // 1. Obtener la sección y calcular el nombre deseado
+            // Nota: En un sistema real, esto coincidiría con INamingService.
+            // Aquí replicamos la lógica del SP sp_GetRenamedTeams.
+            
+            var query = from mpg in _context.TeamsProgramacionAlumnos // Usamos Alumnos para obtener los datos de la sección
+                        join es in _context.EmpresaSedeParametro on mpg.IdSede equals es.IdSede
+                        join s in _context.SeccionTable on mpg.IdCurso equals s.IdSeccion
+                        where mpg.IdCurso == request.IdSeccion 
+                           && es.Nombre == "PROPIETARIOTINA"
+                           && mpg.IdUnidadNegocio.ToString() == es.Valor3
+                        select new 
+                        {
+                            mpg.IdCurso,
+                            DesiredName = mpg.NombreCurso + " [" + mpg.NombreProducto + "][" + s.Codigo + "]",
+                            DesiredDescription = "SEDE: " + mpg.NombreSede + " --> DIVISION: " + mpg.NombreUnidadNegocio + " --> PROGRAMA: " + mpg.NombreUnidadAcademica + "-" + mpg.CodigoPeriodo + " --> PRODUCTO: " + mpg.NombreProducto + " --> SEMESTRE: " + mpg.Semestre + " --> SECCION: " + mpg.GrupoCodigo + " --> CURSO: " + (mpg.NombreCurso.Length > 20 ? mpg.NombreCurso.Substring(0, 20) : mpg.NombreCurso) + " - " + mpg.IdCurso + " --> PROFESOR: " + mpg.CodigoFacilitador + " - " + mpg.NombresFacilitador
+                        };
 
-            var sql = @"
-                WITH dtDetailTeam AS (
-                  SELECT TE.IdSeccionSmart,
-                    TE.NombreTeam,
-                    TE.DescripcionTeam
-                  FROM TeamsEquipos TE WITH (NOLOCK)
-                  WHERE TE.IdSeccionSmart = {0}
-                  EXCEPT
-                  SELECT DISTINCT M.IdCurso,
-                    NombreCurso + ' [' + M.NombreProducto + '][' + S.Codigo + ']' AS Nombre,
-                    'Descripcion' = CASE
-                      WHEN LEN(
-                        'SEDE: ' + NombreSede + ' --> DIVISION: ' + NombreUnidadNegocio + ' --> PROGRAMA: ' + NombreUnidadAcademica + '-' + CodigoPeriodo + ' --> PRODUCTO: ' + NombreProducto + ' --> SEMESTRE: ' + Semestre + ' --> SECCION: ' + GrupoCodigo + ' --> CURSO: ' + SUBSTRING(NombreCurso, 1, 20) + ' - ' + CAST(M.IdCurso AS NVARCHAR) + ' --> PROFESOR: ' + CodigoFacilitador + ' - ' + NombresFacilitador
-                      ) >= 250 THEN SUBSTRING(
-                        'SEDE: ' + NombreSede + ' --> DIVISION: ' + NombreUnidadNegocio + ' --> PROGRAMA: ' + NombreUnidadAcademica + '-' + CodigoPeriodo + ' --> PRODUCTO: ' + NombreProducto + ' --> SEMESTRE: ' + Semestre + ' --> SECCION: ' + GrupoCodigo + ' --> CURSO: ' + SUBSTRING(NombreCurso, 1, 20) + ' - ' + CAST(M.IdCurso AS NVARCHAR) + ' --> PROFESOR: ' + CodigoFacilitador + ' - ' + NombresFacilitador,
-                        1,
-                        250
-                      )
-                      ELSE 'SEDE: ' + NombreSede + ' --> DIVISION: ' + NombreUnidadNegocio + ' --> PROGRAMA: ' + NombreUnidadAcademica + '-' + CodigoPeriodo + ' --> PRODUCTO: ' + NombreProducto + ' --> SEMESTRE: ' + Semestre + ' --> SECCION: ' + GrupoCodigo + ' --> CURSO: ' + SUBSTRING(NombreCurso, 1, 20) + ' - ' + CAST(M.IdCurso AS NVARCHAR) + ' --> PROFESOR: ' + CodigoFacilitador + ' - ' + NombresFacilitador
-                    END
-                  FROM TeamsProgramacionGeneral M WITH (NOLOCK)
-                    LEFT JOIN EmpresaSedeParametro ES WITH (NOLOCK) ON (ES.IdSede = M.IdSede)
-                    LEFT JOIN Seccion S WITH (NOLOCK) ON (S.IdSeccion = M.IdCurso)
-                  WHERE ES.Nombre = 'PROPIETARIOTINA'
-                    AND ISNULL(S.IdSeccion, '') <> ''
-                )
-                SELECT TE.IdTeamsGroup,
-                  DT.NombreTeam,
-                  DT.DescripcionTeam
-                FROM dtDetailTeam DT WITH (NOLOCK)
-                  INNER JOIN TeamsEquipos TE WITH (NOLOCK) ON (DT.IdSeccionSmart = TE.IdSeccionSmart)
-                WHERE ISNULL(TE.IdTeamsGroup, '') <> ''
-                  AND TE.EstadoTeam = 'A'";
+            var desired = await query.Distinct().FirstOrDefaultAsync(cancellationToken);
+            if (desired == null) return new List<RenamedTeamDto>();
 
-            return await _context.Database.SqlQueryRaw<RenamedTeamDto>(sql, request.IdSeccion).ToListAsync(cancellationToken);
+            // 2. Comparar con el TeamEntity actual
+            var existingTeams = await _context.TeamsEquipos
+                .Where(te => te.IdSeccionSmart == request.IdSeccion && te.EstadoTeam == "A")
+                .ToListAsync(cancellationToken);
+
+            var renamed = new List<RenamedTeamDto>();
+
+            foreach (var team in existingTeams)
+            {
+                // Limitar descripción a 250 caracteres como hace el SP
+                string finalDescription = desired.DesiredDescription.Length > 250 
+                    ? desired.DesiredDescription.Substring(0, 250) 
+                    : desired.DesiredDescription;
+
+                if (team.NombreTeam != desired.DesiredName || team.DescripcionTeam != finalDescription)
+                {
+                    renamed.Add(new RenamedTeamDto
+                    {
+                        IdTeamsGroup = team.IdTeamsGroup,
+                        NombreTeam = desired.DesiredName,
+                        DescripcionTeam = finalDescription
+                    });
+                }
+            }
+
+            return renamed;
         }
     }
 }

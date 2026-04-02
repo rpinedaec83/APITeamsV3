@@ -7,7 +7,8 @@ namespace APITeamsV3.Domain.Entities
         public string IdTeamsGroup { get; set; } = string.Empty; // PK (Guid as string)
         public string Propietario1 { get; set; } = string.Empty; // Facilitator Email
         public string Propietario2 { get; set; } = string.Empty; // Service Account
-        public string Propietario3 { get; set; } = string.Empty; // Facilitator Code?
+        public string? Propietario3 { get; set; } // Facilitator Code? (nullable)
+        public string? Propietario4 { get; set; } // New Facilitator Code/Owner (nullable)
         public string NombreTeam { get; set; } = string.Empty;
         public string DescripcionTeam { get; set; } = string.Empty;
         public string MailNickName { get; set; } = string.Empty;
@@ -16,6 +17,8 @@ namespace APITeamsV3.Domain.Entities
         public string IsActive { get; set; } = "A"; // Using string 'A'/'I'
         public DateTime FechaCreacion { get; set; }
         public DateTime? FechaModificacion { get; set; }
+        public int UsuarioCreacion { get; set; } = 1;
+        public int? UsuarioModificacion { get; set; }
 
         // Navigation
         public Seccion? Seccion { get; set; }

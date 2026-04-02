@@ -19,8 +19,16 @@ const init = async () => {
     window.__APITEAMSV3_CONFIG__ = spaConfig;
 
     const { PublicClientApplication } = await import("@azure/msal-browser");
-    const { createMsalConfig } = await import("./authConfig");
+    const { createMsalConfig, clearStaleInteractionState } = await import("./authConfig");
     
+    // Only clear stale interaction state if we are NOT returning from a redirect
+    // (i.e., URL does not contain auth code/state parameters)
+    const urlHasAuthResponse = window.location.hash.includes("code=") || 
+                                window.location.search.includes("code=");
+    if (!urlHasAuthResponse) {
+      clearStaleInteractionState();
+    }
+
     const msalInstance = new PublicClientApplication(
       createMsalConfig(spaConfig.spaClientId, spaConfig.tenantId, window.location.origin)
     );

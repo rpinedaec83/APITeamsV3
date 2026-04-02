@@ -31,6 +31,7 @@ namespace APITeamsV3.Domain.Entities
         public string CodigoFacilitador { get; set; } = string.Empty;
         public string NombresFacilitador { get; set; } = string.Empty;
         public string EmailFacilitador { get; set; } = string.Empty;
+        public string ApellidosFacilitador { get; set; } = string.Empty; // Agregado para compatibilidad con SQL legado
         public string Estado { get; set; } = "A";
         public int UsuarioCreacion { get; set; }
         public int UsuarioModificacion { get; set; }

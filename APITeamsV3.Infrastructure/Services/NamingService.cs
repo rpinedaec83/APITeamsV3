@@ -25,9 +25,7 @@ namespace APITeamsV3.Infrastructure.Services
 
             var sb = new StringBuilder();
             sb.Append($"{seccion.ProductoCodigo}.");
-            sb.Append($"{(seccion.IdPromocion)}."); // Mapping issue: IdCurricula is likely via Promocion. 
-                                                     // For this implementation, I will assume Seccion DTO has it. 
-                                                     // I need to update Seccion Entity to include IdCurricula if missing.
+            sb.Append($"{seccion.IdCurricula}."); // Plan de estudios (Promocion.IdCurricula)
             sb.Append($"{seccion.IdCurso}.");
             sb.Append($"{seccion.CodigoPeriodo}-");
             sb.Append($"{seccion.IdSeccion}");

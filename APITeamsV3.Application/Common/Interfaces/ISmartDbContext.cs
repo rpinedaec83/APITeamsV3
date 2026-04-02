@@ -10,6 +10,14 @@ namespace APITeamsV3.Application.Common.Interfaces
     {
         DatabaseFacade Database { get; }
         DbSet<TEntity> Set<TEntity>() where TEntity : class;
+        DbSet<SeccionTable> SeccionTable { get; }
+        DbSet<EmpresaSedeParametro> EmpresaSedeParametro { get; }
+        DbSet<TeamsProgramacionGeneral> TeamsProgramacionGeneral { get; }
+        DbSet<TeamsProgramacionAlumnos> TeamsProgramacionAlumnos { get; }
+        DbSet<TeamEntity> TeamsEquipos { get; }
+        DbSet<TeamMember> TeamsUsuarios { get; }
+        DbSet<APITeamsV3.Domain.Entities.TeamSession> TeamsHorarios { get; set; }
+        DbSet<APITeamsV3.Domain.Entities.AplicativoTeams> AplicativosTeams { get; set; }
         Task<int> SaveChangesAsync(CancellationToken cancellationToken);
     }
 }

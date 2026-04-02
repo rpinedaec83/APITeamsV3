@@ -7,7 +7,7 @@ https://teams.zegel.edu.pe {
   reverse_proxy localhost:5173
 }
 
-https://api.teams.zegel.edu.pe {
+https://apiteams.zegel.edu.pe {
   tls ./teams.zegel.edu.pe+9.pem ./teams.zegel.edu.pe+9-key.pem
   reverse_proxy localhost:5000
 }
@@ -17,7 +17,7 @@ https://teams.idat.edu.pe {
   reverse_proxy localhost:5173
 }
 
-https://api.teams.idat.edu.pe {
+https://apiteams.idat.edu.pe {
   tls ./teams.zegel.edu.pe+9.pem ./teams.zegel.edu.pe+9-key.pem
   reverse_proxy localhost:5000
 }
@@ -27,7 +27,7 @@ https://teams.corrientealterna.edu.pe {
   reverse_proxy localhost:5173
 }
 
-https://api.teams.corrientealterna.edu.pe {
+https://apiteams.corrientealterna.edu.pe {
   tls ./teams.zegel.edu.pe+9.pem ./teams.zegel.edu.pe+9-key.pem
   reverse_proxy localhost:5000
 }
@@ -37,7 +37,7 @@ https://teams.its.edu.pe {
   reverse_proxy localhost:5173
 }
 
-https://api.teams.its.edu.pe {
+https://apiteams.its.edu.pe {
   tls ./teams.zegel.edu.pe+9.pem ./teams.zegel.edu.pe+9-key.pem
   reverse_proxy localhost:5000
 }
@@ -47,7 +47,7 @@ https://teams.centrodelaimagen.pe {
   reverse_proxy localhost:5173
 }
 
-https://api.teams.centrodelaimagen.pe {
+https://apiteams.centrodelaimagen.pe {
   tls ./teams.zegel.edu.pe+9.pem ./teams.zegel.edu.pe+9-key.pem
   reverse_proxy localhost:5000
 }

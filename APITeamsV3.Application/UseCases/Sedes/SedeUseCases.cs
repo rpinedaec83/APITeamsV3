@@ -2,17 +2,17 @@ using APITeamsV3.Application.Common.Interfaces;
 using APITeamsV3.Domain.Entities;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace APITeamsV3.Application.UseCases.Sedes
 {
     public record SedeDto(int Id, int CompanyConfigId, int IdSede, string Codigo, string Nombre, bool IsActive);
 
-    public record SmartSedeDto
-    {
-        public int IdSede { get; set; }
-        public string Codigo { get; set; } = string.Empty;
-        public string Nombre { get; set; } = string.Empty;
-    }
+    // GetSedesByCompanyQuery defined below...
 
     public record GetSedesByCompanyQuery(int CompanyConfigId, bool AllowCrossTenant = false) : IRequest<List<SedeDto>>;
 
@@ -109,8 +109,11 @@ namespace APITeamsV3.Application.UseCases.Sedes
                 SpaTenantId = companyConfig.SpaTenantId ?? companyConfig.GraphTenantId
             });
 
+            // Incluimos WHERE Activo = 1 si solo queremos importar las vigentes inicialmente, 
+            // pero para sincronizar estados de desactivación es mejor traer todas y mapear el flag.
+            // Utilizar SmartSedeImport (mapeado en SmartDbContext) para evitar el error 500
             var smartSedes = await _smartContext.Database
-                .SqlQueryRaw<SmartSedeDto>("SELECT IdSede, Codigo, Nombre FROM Sede WITH(NOLOCK)")
+                .SqlQueryRaw<SmartSedeImport>("SELECT IdSede, Codigo, Nombre, Activo FROM Sede WITH(NOLOCK)")
                 .ToListAsync(cancellationToken);
 
             var existingSedes = await _centralContext.CompanySedes
@@ -120,13 +123,16 @@ namespace APITeamsV3.Application.UseCases.Sedes
             foreach (var smart in smartSedes)
             {
                 var existing = existingSedes.FirstOrDefault(e => e.IdSede == smart.IdSede);
+                bool shouldBeActive = smart.Activo; // Ahora es bool
+
                 if (existing != null)
                 {
                     existing.Codigo = smart.Codigo;
                     existing.Nombre = smart.Nombre;
+                    existing.IsActive = shouldBeActive; // Sincronizamos el estado Activo
                     existing.ImportedAt = DateTime.UtcNow;
                 }
-                else
+                else if (shouldBeActive) // Solo agregar nuevas si están activas
                 {
                     _centralContext.CompanySedes.Add(new CompanySede
                     {

@@ -18,6 +18,7 @@ import {
     Tooltip,
 } from '@fluentui/react-components';
 import { DeleteRegular, AddRegular, EditRegular, CalendarClockRegular } from '@fluentui/react-icons';
+import { showError, showConfirm } from '../utils/alerts';
 
 const ALL_DAYS = [
     { key: 'Mon', label: 'Lun' },
@@ -128,12 +129,13 @@ const SchedulesPage: React.FC = () => {
             loadData();
         } catch (error) {
             console.error(error);
-            alert('Error al guardar');
+            showError('Error al guardar');
         }
     };
 
     const handleDelete = async (id: number) => {
-        if (!confirm('¿Eliminar esta programación?')) return;
+        const result = await showConfirm('¿Eliminar esta programación?');
+        if (!result.isConfirmed) return;
         try {
             await api.delete(`/admin/sync-schedules/${id}`);
             loadData();

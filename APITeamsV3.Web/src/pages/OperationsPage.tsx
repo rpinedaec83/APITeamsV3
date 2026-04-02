@@ -29,8 +29,12 @@ import {
     CalendarRegular,
     ArrowUploadRegular,
     GridDotsRegular,
+    ArrowSyncRegular,
+    DeleteRegular,
 } from '@fluentui/react-icons';
 import { useApiClient } from '../hooks/useApiClient';
+import { showSuccess, showError, showConfirm } from '../utils/alerts';
+import Swal from 'sweetalert2';
 
 interface Member {
     name: string;
@@ -49,6 +53,7 @@ interface SectionData {
     profesor?: string; // Optional/Nullable in API
     unidadNegocio: string;
     hasTeam: boolean;
+    esTeams: boolean; // Added to enforce academic flag check
     members: Member[];
 }
 
@@ -196,7 +201,6 @@ const OperationsPage: React.FC = () => {
     // Form State (Seccion)
     const [seccionCodigo, setSeccionCodigo] = useState('');
     const [seccionData, setSeccionData] = useState<SectionData | null>(null);
-    const [ownerEmail, setOwnerEmail] = useState('admin@idat.edu.pe');
 
     // Form State (Alumno)
     const [alumnoCodigo, setAlumnoCodigo] = useState('');
@@ -211,7 +215,7 @@ const OperationsPage: React.FC = () => {
             const response = await apiClient.get(`/sections/search?code=${seccionCodigo}`);
             setSeccionData(response.data);
             if (!response.data.esTeams) {
-                setError('Esta sección no está marcada para Teams (EsTeams = 0). Procede con precaución.');
+                setError('Esta sección no está marcada como "EsTeams = 1" en el sistema académico. El aprovisionamiento ha sido bloqueado para esta sección.');
             }
         } catch (err: any) {
             setError(err.message || 'Error al buscar sección');
@@ -240,18 +244,19 @@ const OperationsPage: React.FC = () => {
 
     const handleProvisionTeam = async () => {
         if (!seccionData?.idSeccion) return;
-        if (!confirm('¿Estás seguro de crear/sincronizar el equipo para esta sección?')) return;
+        const result = await showConfirm('¿Estás seguro de crear/sincronizar el equipo para esta sección?');
+        if (!result.isConfirmed) return;
 
         setLoading(true);
         try {
             const companyKey = getCompanyKey();
             const response = await apiClient.post(`/sync/section/${seccionData.idSeccion}?companyKey=${companyKey}`);
             const result = response.data;
-            alert(`Sincronización finalizada exitosamente. Equipos creados/actualizados: ${result.success}`);
+            showSuccess(`Sincronización finalizada exitosamente. Equipos creados/actualizados: ${result.success}`);
             await handleSearchSeccion();
         } catch (err: unknown) {
             const errorMessage = err instanceof Error ? err.message : 'Error desconocido al iniciar sincronización';
-            alert(errorMessage);
+            showError(errorMessage);
         } finally {
             setLoading(false);
         }
@@ -263,10 +268,14 @@ const OperationsPage: React.FC = () => {
         try {
             const response = await apiClient.post(`/sync/verify/${seccionData.idSeccion}`);
             const result = response.data;
-            alert(`Verificación: ${result.isValid ? 'OK' : 'Inconsistencias halladas'}\n\nDetalle: ${result.summary}`);
+            if (result.isValid) {
+                showSuccess(result.summary, 'Verificación OK');
+            } else {
+                showError(result.summary, 'Inconsistencias halladas');
+            }
             await handleSearchSeccion();
         } catch (err: unknown) {
-            alert('Error al verificar equipo.');
+            showError('Error al verificar equipo.');
         } finally {
             setLoading(false);
         }
@@ -274,14 +283,73 @@ const OperationsPage: React.FC = () => {
 
     const handleRegenerateAgenda = async () => {
         if (!seccionData?.idSeccion) return;
-        if (!confirm('Esto invalidará las reuniones pasadas y creará una nueva reunión de canal. ¿Proceder?')) return;
+        const confirmResult = await showConfirm('Esto invalidará las reuniones pasadas y creará una nueva reunión de canal. ¿Proceder?');
+        if (!confirmResult.isConfirmed) return;
         setLoading(true);
         try {
             const companyKey = getCompanyKey();
             const response = await apiClient.post(`/sync/agenda/regenerate/${seccionData.idSeccion}?companyKey=${companyKey}`);
-            alert(response.data.summary);
+            showSuccess(response.data.summary, 'Agenda regenerada');
         } catch (err: unknown) {
-            alert('Error al regenerar agenda.');
+            showError('Error al regenerar agenda.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleRecreateTeam = async () => {
+        if (!seccionData?.idSeccion) return;
+
+        // Step 1: Initial warning
+        const step1 = await Swal.fire({
+            icon: 'warning',
+            title: '⚠️ Acción destructiva',
+            html: `
+                <p>Esta acción <b>ELIMINARÁ permanentemente</b> el equipo de Microsoft Teams para la sección <b>${seccionData.idSeccion}</b>.</p>
+                <ul style="text-align:left; margin-top:12px; color:#666;">
+                    <li>Se borrarán todos los mensajes y archivos</li>
+                    <li>Se eliminarán las agendas asociadas</li>
+                    <li>Se creará un equipo completamente nuevo</li>
+                </ul>
+            `,
+            showCancelButton: true,
+            confirmButtonColor: '#d13438',
+            cancelButtonColor: '#6c757d',
+            confirmButtonText: 'Sí, quiero continuar',
+            cancelButtonText: 'Cancelar',
+        });
+        if (!step1.isConfirmed) return;
+
+        // Step 2: Type confirmation
+        const step2 = await Swal.fire({
+            icon: 'error',
+            title: 'Confirmación final',
+            html: '<p>Escribe <b>RECREAR</b> para confirmar la eliminación y recreación del equipo:</p>',
+            input: 'text',
+            inputPlaceholder: 'Escribe RECREAR aquí',
+            showCancelButton: true,
+            confirmButtonColor: '#d13438',
+            cancelButtonColor: '#6c757d',
+            confirmButtonText: 'Recrear equipo',
+            cancelButtonText: 'Cancelar',
+            inputValidator: (value: string) => {
+                if (value !== 'RECREAR') {
+                    return 'Debes escribir RECREAR exactamente para continuar';
+                }
+                return null;
+            },
+        });
+        if (!step2.isConfirmed) return;
+
+        setLoading(true);
+        try {
+            const companyKey = getCompanyKey();
+            const response = await apiClient.post(`/sync/recreate/${seccionData.idSeccion}?companyKey=${companyKey}`);
+            showSuccess(response.data.summary, 'Equipo recreado');
+            await handleSearchSeccion();
+        } catch (err: unknown) {
+            const errorMessage = err instanceof Error ? err.message : 'Error al recrear equipo.';
+            showError(errorMessage);
         } finally {
             setLoading(false);
         }
@@ -292,9 +360,9 @@ const OperationsPage: React.FC = () => {
         setLoading(true);
         try {
             const response = await apiClient.post(`/sync/student/${alumnoData.codigo}`);
-            alert(`Sincronización de alumno encolada. ${response.data.message || ''}`);
+            showSuccess(`Sincronización de alumno encolada. ${response.data.message || ''}`);
         } catch (err: unknown) {
-            alert('Error al sincronizar alumno.');
+            showError('Error al sincronizar alumno.');
         } finally {
             setLoading(false);
         }
@@ -393,35 +461,65 @@ const OperationsPage: React.FC = () => {
                                         <span style={{ flex: 1 }}></span>
                                         <Button icon={<SaveRegular />} onClick={handleProvisionTeam} disabled={loading}>Refrescar Miembros</Button>
                                         <Button icon={<CalendarRegular />} onClick={handleRegenerateAgenda} disabled={loading}>Regenerar Agendas</Button>
+                                        <Button
+                                            icon={<ArrowSyncRegular />}
+                                            onClick={handleRecreateTeam}
+                                            disabled={loading}
+                                            style={{ color: tokens.colorPaletteRedForeground1, borderColor: tokens.colorPaletteRedBorderActive }}
+                                        >
+                                            Recrear Equipo
+                                        </Button>
                                     </>
                                 ) : (
                                     <>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: tokens.colorPaletteRedForeground1 }}>
-                                            <Title3>No existe Equipo</Title3>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: tokens.colorPaletteRedForeground1 }}>
+                                                <Title3>No existe Equipo</Title3>
+                                            </div>
+                                            <div style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground2 }}>
+                                                Esta sección no tiene un equipo de Teams vinculado en la base de datos local.
+                                            </div>
                                         </div>
                                         <span style={{ flex: 1 }}></span>
-                                        <div style={{ display: 'flex', gap: '8px', alignItems: 'end' }}>
-                                            <div className={styles.inputGroup} style={{ maxWidth: '250px' }}>
-                                                <Label size="small">Owner Email</Label>
-                                                <Input
-                                                    value={ownerEmail}
-                                                    onChange={(_e, d) => setOwnerEmail(d.value)}
-                                                    type="email"
-                                                    placeholder="admin@idat.edu.pe"
-                                                />
-                                            </div>
+                                        <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+                                            <Button
+                                                appearance="secondary"
+                                                size="large"
+                                                icon={<DeleteRegular />}
+                                                onClick={() => {
+                                                    setSeccionData(null);
+                                                    setError('');
+                                                    setSeccionCodigo('');
+                                                }}
+                                                style={{ 
+                                                    fontWeight: '600',
+                                                    padding: '0 24px',
+                                                    borderColor: tokens.colorNeutralStroke1,
+                                                    transition: 'all 0.2s ease',
+                                                }}
+                                            >
+                                                Limpiar
+                                            </Button>
                                             <Button
                                                 appearance="primary"
-                                                style={{ backgroundColor: tokens.colorPaletteBlueBackground2 }}
+                                                size="large"
+                                                icon={<AddRegular />}
+                                                style={{ 
+                                                    background: `linear-gradient(135deg, ${tokens.colorBrandBackground} 0%, #4B53E7 100%)`,
+                                                    color: 'white',
+                                                    fontWeight: '600',
+                                                    padding: '0 32px',
+                                                    boxShadow: '0 4px 14px 0 rgba(75, 83, 231, 0.39)',
+                                                    transition: 'all 0.2s ease',
+                                                }}
                                                 onClick={handleProvisionTeam}
-                                                disabled={loading || !ownerEmail}
+                                                disabled={loading || !seccionData.esTeams}
                                             >
-                                                Crear Equipo en Teams
+                                                {loading ? 'Aprovisionando...' : 'Aprovisionar Equipo en Teams'}
                                             </Button>
                                         </div>
                                     </>
                                 )}
-                                <Button icon={<AddRegular />} onClick={() => setSeccionData(null)}>Limpiar</Button>
                             </div>
                         )}
 
@@ -480,7 +578,11 @@ const OperationsPage: React.FC = () => {
                             <Checkbox label="Generar Agendas" size="large" />
                             <Checkbox label="Agregar Miembros" size="large" />
                             <span style={{ flex: 1 }}></span>
-                            <Button icon={<AddRegular />} onClick={() => setAlumnoData(null)}>Limpiar</Button>
+                            <Button icon={<AddRegular />} onClick={() => {
+                                setAlumnoData(null);
+                                setError('');
+                                setAlumnoCodigo('');
+                            }}>Limpiar</Button>
                             <Button icon={<SaveRegular />} appearance="primary" onClick={handleSyncAlumno} disabled={!alumnoData || loading}>Actualizar Teams</Button>
                         </div>
 

@@ -3,7 +3,7 @@ import axios from "axios";
 import { getApiScopes, getLoginRequest } from "../authConfig";
 import { useMemo } from "react";
 import { getBaseApiUrl } from "../utils/config";
-import { InteractionRequiredAuthError } from "@azure/msal-browser";
+import { InteractionRequiredAuthError, BrowserAuthError } from "@azure/msal-browser";
 
 export const useApiClient = () => {
     const { instance, accounts } = useMsal();
@@ -30,7 +30,16 @@ export const useApiClient = () => {
                 } catch (error) {
                     console.error("Token acquisition failed", error);
                     if (error instanceof InteractionRequiredAuthError) {
-                        instance.loginRedirect(getLoginRequest());
+                        try {
+                            await instance.handleRedirectPromise();
+                            await instance.loginRedirect(getLoginRequest());
+                        } catch (redirectError) {
+                            if (redirectError instanceof BrowserAuthError && redirectError.errorCode === "interaction_in_progress") {
+                                console.warn("Redirect skipped: interaction already in progress.");
+                            } else {
+                                console.error("Redirect failed", redirectError);
+                            }
+                        }
                     }
                 }
             }
@@ -39,10 +48,19 @@ export const useApiClient = () => {
 
         api.interceptors.response.use(
             (response) => response,
-            (error) => {
+            async (error) => {
                 if (error.response && error.response.status === 401) {
                     console.warn("Unauthorized request, redirecting to login...");
-                    instance.loginRedirect(getLoginRequest());
+                    try {
+                        await instance.handleRedirectPromise();
+                        await instance.loginRedirect(getLoginRequest());
+                    } catch (redirectError) {
+                        if (redirectError instanceof BrowserAuthError && redirectError.errorCode === "interaction_in_progress") {
+                            console.warn("Redirect skipped: interaction already in progress.");
+                        } else {
+                            console.error("Redirect failed", redirectError);
+                        }
+                    }
                 }
                 return Promise.reject(error);
             }

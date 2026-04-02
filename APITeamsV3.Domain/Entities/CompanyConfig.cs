@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace APITeamsV3.Domain.Entities
 {
@@ -26,5 +27,9 @@ namespace APITeamsV3.Domain.Entities
         // Policies
         public string DefaultChannelName { get; set; } = "General";
         public string MeetingPolicyMode { get; set; } = "app-only";
+
+        // Pilot Mode
+        public bool IsPilotMode { get; set; } = false;
+        public ICollection<CompanyPilotSection> PilotSections { get; set; } = new List<CompanyPilotSection>();
     }
 }

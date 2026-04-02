@@ -11,6 +11,7 @@ namespace APITeamsV3.Application.Common.Interfaces
         DbSet<CompanySede> CompanySedes { get; }
         DbSet<SyncSchedule> SyncSchedules { get; }
         DbSet<SyncJob> SyncJobs { get; }
+        DbSet<CompanyPilotSection> CompanyPilotSections { get; }
         Task<int> SaveChangesAsync(CancellationToken cancellationToken);
     }
 }

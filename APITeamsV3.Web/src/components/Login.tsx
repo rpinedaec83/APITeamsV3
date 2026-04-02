@@ -1,7 +1,8 @@
 import React from "react";
 import { useMsal } from "@azure/msal-react";
+import { InteractionStatus, BrowserAuthError } from "@azure/msal-browser";
 import { getLoginRequest } from "../authConfig";
-import { Button, Card, CardHeader, CardPreview, Text, makeStyles, tokens } from "@fluentui/react-components";
+import { Button, Card, CardHeader, CardPreview, Text, Spinner, makeStyles, tokens } from "@fluentui/react-components";
 import { LockClosedRegular } from "@fluentui/react-icons";
 
 const useStyles = makeStyles({
@@ -28,14 +29,33 @@ const useStyles = makeStyles({
 });
 
 export const Login: React.FC = () => {
-    const { instance } = useMsal();
+    const { instance, inProgress } = useMsal();
     const styles = useStyles();
 
     const handleLogin = () => {
+        if (inProgress !== InteractionStatus.None) {
+            console.warn("Login skipped: interaction already in progress, status:", inProgress);
+            return;
+        }
         instance.loginRedirect(getLoginRequest()).catch((e) => {
-            console.error(e);
+            if (e instanceof BrowserAuthError && e.errorCode === "interaction_in_progress") {
+                console.warn("Login skipped: interaction_in_progress (race condition).");
+            } else {
+                console.error("Login failed:", e);
+            }
         });
     };
+
+    // Show loading spinner while MSAL is processing a redirect or other interaction
+    if (inProgress !== InteractionStatus.None) {
+        return (
+            <div className={styles.container}>
+                <Card className={styles.card}>
+                    <Spinner label="Signing in..." size="large" />
+                </Card>
+            </div>
+        );
+    }
 
     return (
         <div className={styles.container}>
@@ -60,3 +80,4 @@ export const Login: React.FC = () => {
         </div>
     );
 };
+

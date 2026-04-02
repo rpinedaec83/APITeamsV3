@@ -34,168 +34,351 @@ namespace APITeamsV3.Infrastructure.Services
             _tenantProvider = tenantProvider;
         }
 
-        public async Task<string> ProvisionTeamAsync(Seccion seccion, string ownerEmail)
+        public async Task<string> ProvisionTeamAsync(Seccion seccion)
         {
             var graphClient = await _graphFactory.CreateClientAsync();
 
-            // 1. Calculate Names
+            // 1. Fetch Programacion General for metadata
+            var progGeneral = await _smartContext.TeamsProgramacionGeneral
+                .FirstOrDefaultAsync(p => p.IdCurso == seccion.IdSeccion);
+
+            if (progGeneral == null)
+            {
+                throw new Exception($"Cannot provision team: Metadata (TeamsProgramacionGeneral) not found for section {seccion.IdSeccion}.");
+            }
+
+            if (string.IsNullOrEmpty(progGeneral.EmailFacilitador))
+            {
+                throw new Exception($"Cannot provision team: EmailFacilitador is required but missing for section {seccion.IdSeccion}.");
+            }
+
+            // 2. Calculate Names & Complex Description
             var mailNickname = _namingService.GetMailNickname(seccion);
             var displayName = _namingService.GetDisplayName(seccion);
-            var description = $"Course: {seccion.CursoNombre}";
+            var rawDescription = BuildDescription(progGeneral);
+            var description = rawDescription.Length >= 250 ? rawDescription.Substring(0, 250) : rawDescription;
 
-            // 2. Check DB if exists
-            var existingTeam = await _smartContext.Set<TeamEntity>()
-                .FirstOrDefaultAsync(t => t.IdSeccionSmart == seccion.IdSeccion && t.EstadoTeam == "A");
+            // 3. Resolve Owners
+            var owners = await ResolveOwnersAsync(progGeneral);
 
-            if (existingTeam != null)
+            _logger.LogInformation($"Resolving Primary Owner ID for {owners.PrimaryEmail}...");
+            var primaryUser = await graphClient.Users[owners.PrimaryEmail].GetAsync();
+            if (primaryUser?.Id == null)
             {
-                _logger.LogInformation($"Team already exists in DB for section {seccion.IdSeccion}: {existingTeam.IdTeamsGroup}");
-                return existingTeam.IdTeamsGroup;
+                throw new Exception($"Cannot provision team: Primary owner {owners.PrimaryEmail} not found in Azure AD.");
             }
 
-            // 3. Check Graph if exists (by MailNickname)
-            // Strategy: "Si existe, lo elimina" (If it exists in Graph but not in DB, it's an orphan/conflict. Delete it to start fresh.)
-            var groups = await graphClient.Groups.GetAsync(requestConfiguration =>
+            string classId = string.Empty;
+
+            // STEP 0: Check if Education Class already exists (Idempotent Check)
+            var existingClasses = await graphClient.Education.Classes.GetAsync(q =>
             {
-                requestConfiguration.QueryParameters.Filter = $"mailNickname eq '{mailNickname}'";
-                requestConfiguration.QueryParameters.Select = new[] { "id", "displayName", "mailNickname" };
+                q.QueryParameters.Filter = $"mailNickname eq '{mailNickname}'";
             });
 
-            if (groups?.Value?.Count > 0)
+            if (existingClasses?.Value?.Count > 0)
             {
-                var conflictGroup = groups.Value[0];
-                var conflictGroupId = conflictGroup.Id;
-                _logger.LogWarning($"Conflict: Group with mailNickname '{mailNickname}' exists in Graph ({conflictGroupId}) but not in DB. Deleting it to re-provision.");
-                
-                try 
+                classId = existingClasses.Value[0].Id!;
+                _logger.LogWarning($"Found existing Education Class '{mailNickname}' with ID: {classId}. Recovering...");
+            }
+            else 
+            {
+                // STEP 0.1: Check for conflicting standard Groups
+                var existingGroups = await graphClient.Groups.GetAsync(q => q.QueryParameters.Filter = $"mailNickname eq '{mailNickname}'");
+                if (existingGroups?.Value?.Count > 0)
                 {
-                    await graphClient.Groups[conflictGroupId].DeleteAsync();
-                    // Wait for deletion to propagate? Graph deletion is usually fast but consistency is eventual.
-                     await Task.Delay(5000); 
+                    string orphanGroupId = existingGroups.Value[0].Id!;
+                    _logger.LogWarning($"Conflict: Standard group '{mailNickname}' exists. Deleting orphan group...");
+                    try { await graphClient.Groups[orphanGroupId].DeleteAsync(); await Task.Delay(5000); } catch { }
                 }
-                catch (Exception ex)
+
+                // STEP 1: Create Education Class
+                var newClass = new Microsoft.Graph.Models.EducationClass
                 {
-                    _logger.LogError(ex, $"Failed to delete conflicting group {conflictGroupId}. Provisioning might fail.");
-                    throw; // Fail fast if we can't clean up
-                }
+                    DisplayName = displayName,
+                    Description = description,
+                    MailNickname = mailNickname,
+                    ExternalSource = EducationExternalSource.Manual
+                };
+                var createdClass = await graphClient.Education.Classes.PostAsync(newClass);
+                classId = createdClass?.Id ?? throw new Exception("Failed to create Education Class.");
             }
 
-            // 4. Create Group (Unified)
-            _logger.LogInformation($"Creating new Group: {displayName} ({mailNickname})");
-            
-            var newGroup = new Group
+            // STEP 2: Add Owners
+            foreach (var email in owners.AllUniqueEmails)
             {
-                DisplayName = displayName,
-                Description = description,
-                MailNickname = mailNickname,
-                MailEnabled = true,
-                SecurityEnabled = true,
-                GroupTypes = new List<string> { "Unified" },
-                Visibility = "HiddenMembership" 
-            };
-            
-            var createdGroup = await graphClient.Groups.PostAsync(newGroup);
-            var teamId = createdGroup?.Id ?? string.Empty;
-            
-            if (string.IsNullOrEmpty(teamId)) throw new Exception("Failed to create group or retrieve ID.");
-
-            // 5. Create Team on Group (Retry Logic)
-            _logger.LogInformation($"Group created ({teamId}). Creating Team...");
-            
-            var team = new Team
-            {
-                MemberSettings = new TeamMemberSettings { AllowCreateUpdateChannels = true },
-                MessagingSettings = new TeamMessagingSettings { AllowUserEditMessages = true, AllowUserDeleteMessages = true },
-                FunSettings = new TeamFunSettings { AllowGiphy = true, GiphyContentRating = GiphyRatingType.Strict }
-            };
-
-            int maxRetries = 3;
-            int delay = 10000; // 10s initial delay
-
-            for (int i = 0; i < maxRetries; i++)
-            {
-                try
-                {
-                    // Wait before attempting team creation (Group propagation delay)
-                    await Task.Delay(delay); 
-                    
-                    await graphClient.Groups[teamId].Team.PutAsync(team);
-                    _logger.LogInformation($"Team successfully created for {mailNickname}");
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, $"Attempt {i + 1}/{maxRetries} to create Team on Group {teamId} failed. Retrying...");
-                    if (i == maxRetries - 1) throw new Exception($"Failed to create Team on Group {teamId} after {maxRetries} attempts.", ex);
-                    delay += 5000; // Backoff
-                }
+                try { await AddGroupOwnerAsync(graphClient, classId, email); } catch { }
             }
 
-            // 6. Add Owner (Propietario)
-            if (!string.IsNullOrEmpty(ownerEmail))
-            {
-                try 
-                {
-                    // Ideally check if user exists. For now, assume email is valid UPN or try to find user.
-                    // This is a simplification. Production code needs to look up user ID by email.
-                    
-                    var user = await graphClient.Users[ownerEmail].GetAsync(); // Try to get user by UPN
-                    if (user != null)
-                    {
-                         var ownerReference = new ReferenceCreate
-                         {
-                             OdataId = $"https://graph.microsoft.com/v1.0/users/{user.Id}"
-                         };
-                         await graphClient.Groups[teamId].Owners.Ref.PostAsync(ownerReference);
-                         _logger.LogInformation($"Added owner {ownerEmail} to Team.");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, $"Failed to add owner {ownerEmail}. Continuing.");
-                }
-            }
+            // STEP 3: Upsert in SmartDB
+            await UpsertTeamRecordAsync(seccion.IdSeccion, classId, displayName, description, mailNickname, owners);
 
-            // 7. Save to SmartDB
-            var teamEntity = new TeamEntity
-            {
-                IdTeamsGroup = teamId,
-                NombreTeam = displayName,
-                DescripcionTeam = description,
-                MailNickName = mailNickname,
-                IdSeccionSmart = seccion.IdSeccion,
-                Propietario1 = ownerEmail,
-                FechaCreacion = DateTime.UtcNow,
-                IsActive = "A",
-                EstadoTeam = "A"
-            };
-
-            await _smartContext.Set<TeamEntity>().AddAsync(teamEntity);
-            await _smartContext.SaveChangesAsync();
-
-            return teamId;
+            return classId;
         }
 
         public async Task UpdateTeamAsync(Seccion seccion, bool updateMembers = true, bool updateOwners = true, bool updateAgendas = false)
         {
-            var existingTeam = await _smartContext.Set<TeamEntity>()
+            var existingTeam = await _smartContext.TeamsEquipos
                .FirstOrDefaultAsync(t => t.IdSeccionSmart == seccion.IdSeccion && t.EstadoTeam == "A");
 
             if (existingTeam == null)
             {
-                _logger.LogWarning($"Cannot update team for section {seccion.IdSeccion}: Team not found in DB.");
+                _logger.LogWarning($"Cannot update: Team for section {seccion.IdSeccion} not active in DB.");
                 return;
             }
 
-            _logger.LogInformation($"Updating Team {existingTeam.IdTeamsGroup} for section {seccion.IdSeccion}. Flags: [Members={updateMembers}, Owners={updateOwners}, Agendas={updateAgendas}]");
+            var groupId = existingTeam.IdTeamsGroup;
+            var graphClient = await _graphFactory.CreateClientAsync();
 
-            // TODO: Implement full update logic
-            // 1. Get current members from Graph
-            // 2. Get expected members from DB (View)
-            // 3. Calculate delta (Add/Remove)
-            // 4. Apply changes via Graph Batch API (for performance)
+            _logger.LogInformation($"Starting Delta Sync for Team {groupId} (Section {seccion.IdSeccion})");
+
+            // 1. Sync Metadata (Rename Check)
+            await SyncMetadataAsync(graphClient, existingTeam, seccion);
+
+            // 2. Sync Owners
+            if (updateOwners)
+            {
+                await SyncOwnersDeltaAsync(graphClient, existingTeam, seccion);
+            }
+
+            // 3. Sync Members (Students)
+            if (updateMembers)
+            {
+                await SyncMembersDeltaAsync(graphClient, groupId, seccion.IdSeccion);
+            }
+        }
+
+        // ──────────────────────────────────────────────────────────────────────
+        // Helper Methods
+        // ──────────────────────────────────────────────────────────────────────
+
+        private string BuildDescription(TeamsProgramacionGeneral prog)
+        {
+            return $"SEDE: {prog.NombreSede ?? ""} --> DIVISION: {prog.NombreUnidadNegocio ?? ""} --> PROGRAMA: {prog.NombreUnidadAcademica ?? ""}-{prog.CodigoPeriodo ?? ""} --> PRODUCTO: {prog.NombreProducto ?? ""} --> SEMESTRE: {prog.Semestre ?? ""} --> SECCION: {prog.GrupoCodigo ?? ""} --> CURSO: {(prog.NombreCurso?.Length > 20 ? prog.NombreCurso.Substring(0, 20) : prog.NombreCurso ?? "")}";
+        }
+
+        private async Task<OwnerSet> ResolveOwnersAsync(TeamsProgramacionGeneral prog)
+        {
+            var currentTenant = _tenantProvider.GetCurrentTenant();
+            var companyKey = currentTenant.CompanyKey;
+
+            // P1: Service Account regional
+            var unidadNegocioStr = prog.IdUnidadNegocio?.ToString() ?? "";
+            var prop1Param = await _smartContext.EmpresaSedeParametro
+                .FirstOrDefaultAsync(es => es.IdSede == prog.IdSede 
+                                        && es.Nombre == "PROPIETARIOTINA" 
+                                        && es.Valor3 == unidadNegocioStr);
             
-            await Task.CompletedTask;
+            // P2: Principal Service Account
+            var graphTenantId = currentTenant.GraphTenantId ?? "";
+            var serviceAccount = await _smartContext.AplicativosTeams
+                .FirstOrDefaultAsync(a => a.TenantId == graphTenantId && a.Activo == "A");
+            
+            var primaryEmail = serviceAccount?.UsernameApp ?? (companyKey.Equals("idat", StringComparison.OrdinalIgnoreCase) ? "admin@idat.edu.pe" : "admin@zegel.edu.pe");
+
+            return new OwnerSet
+            {
+                P1 = prop1Param?.Valor ?? "",
+                P2 = primaryEmail,
+                P3 = prog.EmailFacilitador ?? "",
+                P4 = prop1Param?.Valor2 ?? "",
+                PrimaryEmail = primaryEmail
+            };
+        }
+
+        private async Task SyncMetadataAsync(GraphServiceClient graphClient, TeamEntity existingTeam, Seccion seccion)
+        {
+            var desiredName = _namingService.GetDisplayName(seccion);
+            var prog = await _smartContext.TeamsProgramacionGeneral.FirstOrDefaultAsync(p => p.IdCurso == seccion.IdSeccion);
+            var rawDesc = prog != null ? BuildDescription(prog) : existingTeam.DescripcionTeam;
+            var desiredDesc = rawDesc.Length > 250 ? rawDesc.Substring(0, 250) : rawDesc;
+
+            if (existingTeam.NombreTeam != desiredName || existingTeam.DescripcionTeam != desiredDesc)
+            {
+                _logger.LogInformation($"Metadata mismatch for {existingTeam.IdTeamsGroup}. Updating Graph...");
+                try
+                {
+                    await graphClient.Groups[existingTeam.IdTeamsGroup].PatchAsync(new Microsoft.Graph.Models.Group
+                    {
+                        DisplayName = desiredName,
+                        Description = desiredDesc
+                    });
+
+                    existingTeam.NombreTeam = desiredName;
+                    existingTeam.DescripcionTeam = desiredDesc;
+                    existingTeam.FechaModificacion = DateTime.UtcNow;
+                    await _smartContext.SaveChangesAsync();
+                }
+                catch (Exception ex) { _logger.LogError(ex, $"Failed to sync metadata for {existingTeam.IdTeamsGroup}"); }
+            }
+        }
+
+        private async Task SyncOwnersDeltaAsync(GraphServiceClient graphClient, TeamEntity existingTeam, Seccion seccion)
+        {
+            var prog = await _smartContext.TeamsProgramacionGeneral.FirstOrDefaultAsync(p => p.IdCurso == seccion.IdSeccion);
+            if (prog == null) return;
+
+            var owners = await ResolveOwnersAsync(prog);
+            
+            // Update Graph owners
+            foreach (var email in owners.AllUniqueEmails)
+            {
+                try { await AddGroupOwnerAsync(graphClient, existingTeam.IdTeamsGroup, email); } catch { }
+            }
+
+            // Sync DB columns
+            existingTeam.Propietario1 = owners.P1;
+            existingTeam.Propietario2 = owners.P2;
+            existingTeam.Propietario3 = owners.P3;
+            existingTeam.Propietario4 = owners.P4;
+            existingTeam.FechaModificacion = DateTime.UtcNow;
+            await _smartContext.SaveChangesAsync();
+        }
+
+        private async Task SyncMembersDeltaAsync(GraphServiceClient graphClient, string groupId, int idSeccion)
+        {
+            // 1. Expected from Academic Source (View vw_MatriculasActivas or AlumnoCurso)
+            // We use TeamsProgramacionAlumnos which is the current "Snapshot" of academic context
+            var expectedStudents = await _smartContext.TeamsProgramacionAlumnos
+                .Where(a => a.IdCurso == idSeccion && a.Estado == "A" && !string.IsNullOrEmpty(a.EmailAlumno))
+                .Select(a => new { a.EmailAlumno, a.CodigoAlumno, a.NombresAlumno, a.ApellidosAlumno })
+                .Distinct()
+                .ToListAsync();
+
+            var expectedEmails = expectedStudents.Select(e => e.EmailAlumno.ToLower()).ToList();
+
+            // 2. Current from Graph
+            var currentMembersPage = await graphClient.Groups[groupId].Members.GetAsync(c => c.QueryParameters.Select = new[] { "id", "mail", "userPrincipalName" });
+            var currentEmails = (currentMembersPage?.Value ?? new List<DirectoryObject>())
+                .OfType<User>()
+                .Select(u => (u.Mail ?? u.UserPrincipalName ?? "").ToLower())
+                .Where(e => !string.IsNullOrEmpty(e))
+                .ToList();
+
+            // 3. Diff
+            var toAddEmails = expectedEmails.Except(currentEmails, StringComparer.OrdinalIgnoreCase).ToList();
+            var toRemoveEmails = currentEmails.Except(expectedEmails, StringComparer.OrdinalIgnoreCase).ToList();
+
+            _logger.LogInformation($"[DeltaSync] Group {groupId}: adding {toAddEmails.Count}, removing {toRemoveEmails.Count}");
+
+            // 4. Actuation: ADD
+            foreach (var email in toAddEmails)
+            {
+                var studentData = expectedStudents.First(s => s.EmailAlumno.Equals(email, StringComparison.OrdinalIgnoreCase));
+                try
+                {
+                    var user = await graphClient.Users[email].GetAsync();
+                    if (user?.Id != null)
+                    {
+                        await graphClient.Groups[groupId].Members.Ref.PostAsync(new ReferenceCreate { OdataId = $"https://graph.microsoft.com/v1.0/users/{user.Id}" });
+                        
+                        // Update Local DB cache (TeamsUsuarios)
+                        var existingUser = await _smartContext.TeamsUsuarios.FirstOrDefaultAsync(u => u.IdTeams == groupId && u.Email == email);
+                        if (existingUser != null)
+                        {
+                            existingUser.Estado = "A";
+                            existingUser.FechaModificacion = DateTime.UtcNow;
+                        }
+                        else
+                        {
+                            await _smartContext.TeamsUsuarios.AddAsync(new TeamMember
+                            {
+                                IdTeams = groupId,
+                                CodigoAlumno = studentData.CodigoAlumno,
+                                Nombres = studentData.NombresAlumno,
+                                Apellidos = studentData.ApellidosAlumno,
+                                Email = email,
+                                Tipo = "A",
+                                Estado = "A",
+                                FechaCreacion = DateTime.UtcNow
+                            });
+                        }
+                        _logger.LogInformation($"[DeltaSync] Added student {email}");
+                    }
+                }
+                catch (Exception ex) { _logger.LogWarning($"[DeltaSync] Failed to add {email}: {ex.Message}"); }
+            }
+
+            // 5. Actuation: REMOVE
+            foreach (var email in toRemoveEmails)
+            {
+                try
+                {
+                    var user = await graphClient.Users[email].GetAsync();
+                    if (user?.Id != null)
+                    {
+                        await graphClient.Groups[groupId].Members[user.Id].Ref.DeleteAsync();
+
+                        // Update Local DB cache to Inactive
+                        var localUser = await _smartContext.TeamsUsuarios.FirstOrDefaultAsync(u => u.IdTeams == groupId && u.Email == email);
+                        if (localUser != null)
+                        {
+                            localUser.Estado = "I";
+                            localUser.FechaModificacion = DateTime.UtcNow;
+                        }
+                        _logger.LogInformation($"[DeltaSync] Removed/Deactivated student {email}");
+                    }
+                }
+                catch (Exception ex) { _logger.LogWarning($"[DeltaSync] Failed to remove {email}: {ex.Message}"); }
+            }
+
+            await _smartContext.SaveChangesAsync();
+        }
+
+        private async Task AddGroupOwnerAsync(GraphServiceClient client, string groupId, string email)
+        {
+            var user = await client.Users[email].GetAsync();
+            if (user?.Id != null)
+            {
+                await client.Groups[groupId].Owners.Ref.PostAsync(new ReferenceCreate { OdataId = $"https://graph.microsoft.com/v1.0/users/{user.Id}" });
+            }
+        }
+
+        private async Task UpsertTeamRecordAsync(int idSeccion, string groupId, string name, string desc, string nick, OwnerSet owners)
+        {
+            var existing = await _smartContext.TeamsEquipos.FirstOrDefaultAsync(t => t.IdTeamsGroup == groupId);
+            if (existing != null)
+            {
+                existing.NombreTeam = name;
+                existing.DescripcionTeam = desc;
+                existing.MailNickName = nick;
+                existing.Propietario1 = owners.P1;
+                existing.Propietario2 = owners.P2;
+                existing.Propietario3 = owners.P3;
+                existing.Propietario4 = owners.P4;
+                existing.FechaModificacion = DateTime.UtcNow;
+                existing.IsActive = "A";
+                existing.EstadoTeam = "A";
+            }
+            else
+            {
+                await _smartContext.TeamsEquipos.AddAsync(new TeamEntity
+                {
+                    IdTeamsGroup = groupId,
+                    NombreTeam = name,
+                    DescripcionTeam = desc,
+                    MailNickName = nick,
+                    IdSeccionSmart = idSeccion,
+                    Propietario1 = owners.P1,
+                    Propietario2 = owners.P2,
+                    Propietario3 = owners.P3,
+                    Propietario4 = owners.P4,
+                    FechaCreacion = DateTime.UtcNow,
+                    EstadoTeam = "A",
+                    IsActive = "I" // Pending activation logic if needed
+                });
+            }
+            await _smartContext.SaveChangesAsync();
+        }
+
+        private class OwnerSet
+        {
+            public string P1 { get; set; } = "";
+            public string P2 { get; set; } = "";
+            public string P3 { get; set; } = "";
+            public string P4 { get; set; } = "";
+            public string PrimaryEmail { get; set; } = "";
+            public IEnumerable<string> AllUniqueEmails => new[] { P1, P2, P3, P4 }.Where(e => !string.IsNullOrEmpty(e)).Distinct();
         }
     }
 }

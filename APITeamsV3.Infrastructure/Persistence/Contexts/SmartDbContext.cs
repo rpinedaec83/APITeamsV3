@@ -8,6 +8,13 @@ namespace APITeamsV3.Infrastructure.Persistence.Contexts
         public DbSet<APITeamsV3.Domain.Entities.Parametro> Parametro { get; set; }
         public DbSet<APITeamsV3.Domain.Entities.TeamsLogOperativo> TeamsLogOperativo { get; set; }
         public DbSet<APITeamsV3.Domain.Entities.SeccionTable> SeccionTable { get; set; }
+        public DbSet<APITeamsV3.Domain.Entities.EmpresaSedeParametro> EmpresaSedeParametro { get; set; }
+        public DbSet<APITeamsV3.Domain.Entities.TeamsProgramacionGeneral> TeamsProgramacionGeneral { get; set; }
+        public DbSet<APITeamsV3.Domain.Entities.TeamsProgramacionAlumnos> TeamsProgramacionAlumnos { get; set; }
+        public DbSet<APITeamsV3.Domain.Entities.TeamEntity> TeamsEquipos { get; set; }
+        public DbSet<APITeamsV3.Domain.Entities.TeamMember> TeamsUsuarios { get; set; }
+        public DbSet<APITeamsV3.Domain.Entities.TeamSession> TeamsHorarios { get; set; }
+        public DbSet<APITeamsV3.Domain.Entities.AplicativoTeams> AplicativosTeams { get; set; }
         private readonly ITenantProvider _tenantProvider;
 
         public SmartDbContext(DbContextOptions<SmartDbContext> options, ITenantProvider tenantProvider) 
@@ -161,6 +168,27 @@ namespace APITeamsV3.Infrastructure.Persistence.Contexts
             {
                 entity.ToTable("Facilitador");
                 entity.HasKey(e => e.IdFacilitador);
+            });
+
+            // EmpresaSedeParametro
+            modelBuilder.Entity<APITeamsV3.Domain.Entities.EmpresaSedeParametro>(entity =>
+            {
+                entity.ToTable("EmpresaSedeParametro");
+                entity.HasKey(e => new { e.IdEmpresa, e.IdSede, e.IdParametro });
+                entity.Property(e => e.Nombre).IsRequired();
+            });
+
+            // AplicativosTeams
+            modelBuilder.Entity<APITeamsV3.Domain.Entities.AplicativoTeams>(entity =>
+            {
+                entity.ToTable("AplicativosTeams");
+                entity.HasKey(e => e.IdAplicativo);
+            });
+
+            // SmartSedeImport (Keyless for Raw SQL)
+            modelBuilder.Entity<APITeamsV3.Domain.Entities.SmartSedeImport>(entity =>
+            {
+                entity.HasNoKey();
             });
         }
     }

@@ -16,6 +16,7 @@ namespace APITeamsV3.Infrastructure.Persistence.Contexts
         public DbSet<CompanySede> CompanySedes { get; set; }
         public DbSet<SyncSchedule> SyncSchedules { get; set; }
         public DbSet<SyncJob> SyncJobs { get; set; }
+        public DbSet<CompanyPilotSection> CompanyPilotSections { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -35,9 +36,32 @@ namespace APITeamsV3.Infrastructure.Persistence.Contexts
                 entity.HasIndex(e => new { e.CompanyConfigId, e.IdSede }).IsUnique();
             });
 
+            modelBuilder.Entity<CompanyPilotSection>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.HasIndex(e => new { e.CompanyConfigId, e.IdSeccion }).IsUnique();
+                
+                entity.HasOne<CompanyConfig>()
+                      .WithMany(c => c.PilotSections)
+                      .HasForeignKey(e => e.CompanyConfigId)
+                      .OnDelete(DeleteBehavior.Cascade);
+            });
+
             modelBuilder.Entity<SyncSchedule>(entity =>
             {
                 entity.HasKey(e => e.Id);
+            });
+
+            modelBuilder.Entity<SyncJob>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Status).IsRequired();
+                entity.Property(e => e.JobType).IsRequired();
+                entity.Property(e => e.CompanyKey).IsRequired();
+                entity.Property(e => e.TargetId).IsRequired();
+                entity.Property(e => e.LastError).IsRequired(false);
+                entity.Property(e => e.HangfireJobId).IsRequired(false);
+                entity.HasIndex(e => e.Status);
             });
         }
     }

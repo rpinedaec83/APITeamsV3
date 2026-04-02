@@ -16,8 +16,9 @@ namespace APITeamsV3.Infrastructure.Persistence.Repositories
 
         public async Task<TeamEntity?> GetBySeccionIdAsync(int idSeccionSmart)
         {
-            // El Global Query Filter garantiza ignorar los IsDeleted
+            // Buscamos priorizando el estado activo 'A' sobre inactivas 'I'
             return await _context.Set<TeamEntity>()
+                                 .OrderBy(t => t.EstadoTeam) // 'A' asciende sobre 'I'
                                  .FirstOrDefaultAsync(t => t.IdSeccionSmart == idSeccionSmart);
         }
         

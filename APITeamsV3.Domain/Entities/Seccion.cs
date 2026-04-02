@@ -8,6 +8,7 @@ namespace APITeamsV3.Domain.Entities
         public string Codigo { get; set; } = string.Empty;
         public int IdCurso { get; set; }
         public int IdPromocion { get; set; }
+        public int IdCurricula { get; set; } // Plan de estudios (from Promocion.IdCurricula)
         public int IdPeriodo { get; set; }
         public DateTime FechaInicio { get; set; }
         public DateTime FechaFin { get; set; }

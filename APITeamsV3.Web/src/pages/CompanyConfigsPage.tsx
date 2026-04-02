@@ -25,6 +25,7 @@ import {
     Tooltip
 } from '@fluentui/react-components';
 import { DeleteRegular, EditRegular, AddRegular, BuildingRegular, ArrowSyncRegular } from '@fluentui/react-icons';
+import { showError, showConfirm } from '../utils/alerts';
 
 const CompanyConfigsPage: React.FC = () => {
     const api = useApiClient();
@@ -64,12 +65,13 @@ const CompanyConfigsPage: React.FC = () => {
             loadConfigs();
         } catch (error) {
             console.error(error);
-            alert('Failed to save');
+            showError('Failed to save');
         }
     };
 
     const handleDelete = async (id: number) => {
-        if (!confirm('Are you sure?')) return;
+        const result = await showConfirm('Are you sure?');
+        if (!result.isConfirmed) return;
         try {
             await api.delete(`/admin/company-configs/${id}`);
             loadConfigs();
@@ -113,7 +115,7 @@ const CompanyConfigsPage: React.FC = () => {
             setSedes(response.data);
         } catch (error) {
             console.error(error);
-            alert('Failed to import sedes. Make sure the API is connected to Smart DB.');
+            showError('Failed to import sedes. Make sure the API is connected to Smart DB.');
         } finally {
             setImportLoading(false);
         }
@@ -129,7 +131,8 @@ const CompanyConfigsPage: React.FC = () => {
     };
 
     const handleDeleteSede = async (id: number) => {
-        if (!confirm('¿Eliminar esta sede?')) return;
+        const result = await showConfirm('¿Eliminar esta sede?');
+        if (!result.isConfirmed) return;
         try {
             await api.delete(`/admin/sedes/${id}`);
             setSedes(prev => prev.filter(s => s.id !== id));

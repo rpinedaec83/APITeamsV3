@@ -71,22 +71,24 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                 // 3. Revisar existencia local
                 var existingTeam = await _teamRepository.GetBySeccionIdAsync(request.IdSeccion);
 
-                if (existingTeam == null)
+                if (existingTeam == null || existingTeam.EstadoTeam == "I")
                 {
                     // Flujo 3: Crear Team
                     _logger.LogInformation($"Creating Team for section {request.IdSeccion}");
                     
                     // We delegate to the specific ITeamProvisioningService to handle Graph interactions and naming rules
                     // We prioritize the facilitator's email, then a default admin per company
-                    string owner = section.EmailFacilitador;
-                    if (string.IsNullOrEmpty(owner))
+                    // 3.1 Enforce teacher requirement — the section must have a facilitator
+                    if (string.IsNullOrEmpty(section.EmailFacilitador))
                     {
-                        owner = request.CompanyKey.Equals("idat", StringComparison.OrdinalIgnoreCase) 
-                                ? "admin@idat.edu.pe" 
-                                : "admin@zegel.edu.pe";
+                        string warnMsg = "No se puede crear el equipo: La sección no tiene un docente (Facilitador) asignado.";
+                        _logger.LogWarning($"{warnMsg} Section ID: {request.IdSeccion}");
+                        await LogOperativoAsync("Warning", "Seccion", request.IdSeccion.ToString(), warnMsg, request.JobId);
+                        result.Ignored++;
+                        return result;
                     }
 
-                    var newGraphId = await _provisioningService.ProvisionTeamAsync(section, owner);
+                    var newGraphId = await _provisioningService.ProvisionTeamAsync(section);
                     
                     if (string.IsNullOrEmpty(newGraphId)) 
                     {
@@ -95,8 +97,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                         return result;
                     }
 
-                    // For now, TeamProvisioningService in legacy already writes to local DB, or we can use generic Command
-                    await _mediator.Send(new CreateTeamRecordCommand { IdSeccionSmart = request.IdSeccion, IdTeamsGroup = newGraphId }, cancellationToken);
+                    // TeamProvisioningService now handles the DB persistence (Upsert) internally for better atomicity
                     
                     await LogOperativoAsync("Success", "Team", newGraphId, "Equipo creado exitosamente.", request.JobId);
                     result.Success++;

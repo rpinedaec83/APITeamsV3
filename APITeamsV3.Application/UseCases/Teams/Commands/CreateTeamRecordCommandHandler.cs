@@ -1,6 +1,8 @@
 using MediatR;
 using APITeamsV3.Application.Common.Interfaces;
+using APITeamsV3.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -17,49 +19,25 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
 
         public async Task<Unit> Handle(CreateTeamRecordCommand request, CancellationToken cancellationToken)
         {
-            // Option 31 Logic: CREA LOS NUEVOS GRUPOS
-            var sql = @"
-                INSERT INTO TeamsEquipos (
-                    IdTeamsGroup,
-                    Propietario1,
-                    Propietario2,
-                    Propietario3,
-                    Propietario4,
-                    NombreTeam,
-                    DescripcionTeam,
-                    MailNickName,
-                    EstadoTeam,
-                    IdSeccionSmart,
-                    IsActive,
-                    UsuarioCreacion,
-                    FechaCreacion
-                  )
-                VALUES (
-                    {0},
-                    {1},
-                    {2},
-                    {3},
-                    {4},
-                    {5},
-                    {6},
-                    {7},
-                    'A',
-                    {8},
-                    'I',
-                    1,
-                    GETDATE()
-                  );";
+            // Lógica para persistir el nuevo registro de equipo
+            var newTeam = new TeamEntity
+            {
+                IdTeamsGroup = request.IdTeamsGroup,
+                Propietario1 = request.Propietario1 ?? string.Empty,
+                Propietario2 = request.Propietario2 ?? string.Empty,
+                Propietario3 = request.Propietario3,
+                Propietario4 = request.Propietario4,
+                NombreTeam = request.NombreTeam ?? string.Empty,
+                DescripcionTeam = request.DescripcionTeam ?? string.Empty,
+                MailNickName = request.MailNickName ?? string.Empty,
+                EstadoTeam = "A", // Forzamos a Activo al crear
+                IdSeccionSmart = request.IdSeccionSmart,
+                IsActive = "A",
+                FechaCreacion = DateTime.Now
+            };
 
-            await _context.Database.ExecuteSqlRawAsync(sql, 
-                request.IdTeamsGroup, 
-                request.Propietario1, 
-                request.Propietario2, 
-                request.Propietario3, 
-                request.Propietario4, 
-                request.NombreTeam, 
-                request.DescripcionTeam, 
-                request.MailNickName, 
-                request.IdSeccionSmart);
+            _context.TeamsEquipos.Add(newTeam);
+            await _context.SaveChangesAsync(cancellationToken);
 
             return Unit.Value;
         }

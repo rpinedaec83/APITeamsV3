@@ -39,6 +39,7 @@ import {
     ClockRegular,
 } from '@fluentui/react-icons';
 import { useApiClient } from '../hooks/useApiClient';
+import { showWarning } from '../utils/alerts';
 
 // Removed hardcoded API_BASE
 
@@ -264,13 +265,13 @@ const JobsPage: React.FC = () => {
 
     const handleEnqueueJob = async (job: JobDefinition) => {
         if (!idSeccion || !idSeccion.trim()) {
-            alert('Ingrese un ID de Sección válido');
+            showWarning('Ingrese un ID de Sección válido');
             return;
         }
 
         const seccionId = parseInt(idSeccion, 10);
         if (isNaN(seccionId)) {
-            alert('El ID de Sección debe ser numérico');
+            showWarning('El ID de Sección debe ser numérico');
             return;
         }
 
