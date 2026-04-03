@@ -24,6 +24,7 @@ namespace APITeamsV3.Application.UseCases.Sections
         public List<StudentSummaryDto> Members { get; set; } = new();
         public bool HasTeam { get; set; }
         public bool EsTeams { get; set; }
+        public string? IneligibilityReason { get; set; }
     }
 
     public class StudentSummaryDto

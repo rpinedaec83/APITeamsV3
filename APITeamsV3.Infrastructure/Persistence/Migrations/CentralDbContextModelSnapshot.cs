@@ -84,6 +84,9 @@ namespace APITeamsV3.Infrastructure.Persistence.Migrations
                     b.Property<string>("SpaTenantId")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("TeacherAltDomain")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("TimeZoneId")
                         .IsRequired()
                         .HasColumnType("TEXT");

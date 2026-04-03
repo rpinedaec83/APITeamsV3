@@ -1,6 +1,7 @@
 using MediatR;
 using APITeamsV3.Application.Common.Interfaces;
 using APITeamsV3.Application.UseCases.Teams.DTOs;
+using APITeamsV3.Application.UseCases.Provisioning.Commands;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -59,11 +60,10 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                 }
 
                 // 2. Elegibilidad
-                var isEligible = await _eligibilityService.IsEligibleForTeamsAsync(section, request.CompanyKey);
-                if (!isEligible)
+                var eligibility = await _eligibilityService.IsEligibleForTeamsAsync(section, request.CompanyKey);
+                if (!eligibility.IsEligible)
                 {
-                    var reason = await _eligibilityService.GetIneligibilityReasonAsync(section, request.CompanyKey);
-                    await LogOperativoAsync("Info", "Seccion", request.IdSeccion.ToString(), $"Sección no elegible: {reason}", request.JobId);
+                    await LogOperativoAsync("Info", "Seccion", request.IdSeccion.ToString(), $"Sección no elegible: {eligibility.Reason}", request.JobId);
                     result.Ignored++;
                     return result;
                 }
@@ -73,6 +73,16 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
 
                 if (existingTeam == null || existingTeam.EstadoTeam == "I")
                 {
+                    // 3.1 Ensure Snapshot Metadata exists (TeamsProgramacionGeneral)
+                    var metadata = await _context.TeamsProgramacionGeneral
+                        .AnyAsync(p => p.IdCurso == request.IdSeccion, cancellationToken);
+                    
+                    if (!metadata)
+                    {
+                        _logger.LogInformation($"Metadata missing for section {request.IdSeccion}. Forcing generation...");
+                        await _mediator.Send(new GenerateSectionScheduleCommand(request.IdSeccion) { Force = true }, cancellationToken);
+                    }
+
                     // Flujo 3: Crear Team
                     _logger.LogInformation($"Creating Team for section {request.IdSeccion}");
                     
@@ -97,9 +107,14 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                         return result;
                     }
 
-                    // TeamProvisioningService now handles the DB persistence (Upsert) internally for better atomicity
+                    // Keep creation flow aligned with RECREAR:
+                    // owners are already assigned during ProvisionTeamAsync;
+                    // here we only sync students as members.
+                    _logger.LogInformation($"Populating initial members for new team {newGraphId}");
+                    await _mediator.Send(new SyncMissingStudentsCommand(request.IdSeccion), cancellationToken);
+                    await _provisioningService.EnsureMembershipOpenAsync(newGraphId);
                     
-                    await LogOperativoAsync("Success", "Team", newGraphId, "Equipo creado exitosamente.", request.JobId);
+                    await LogOperativoAsync("Success", "Team", newGraphId, "Equipo creado exitosamente con miembros y propietarios.", request.JobId);
                     result.Success++;
                 }
                 else
@@ -118,6 +133,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     // 3. Sync Estudiantes (Miembros)
                     await _mediator.Send(new SyncMissingStudentsCommand(request.IdSeccion), cancellationToken);
                     await _mediator.Send(new SyncObsoleteStudentsCommand(request.IdSeccion), cancellationToken);
+                    await _provisioningService.EnsureMembershipOpenAsync(existingTeam.IdTeamsGroup);
 
                     // If needed, evaluate Agenda (Regenerate)
                     // If team went from Active to Inactive -> SoftDeleteTeamCommand

@@ -1,4 +1,4 @@
-CREATE OR ALTER PROCEDURE cTEAMSGetRenamedTeams
+CREATE OR ALTER PROCEDURE cTeamsGetRenamedTeams
     @IdSeccion INT
 AS
 BEGIN

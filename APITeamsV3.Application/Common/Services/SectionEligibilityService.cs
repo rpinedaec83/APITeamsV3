@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Threading.Tasks;
 using APITeamsV3.Application.Common.Interfaces;
+using APITeamsV3.Application.Common.Models;
 using APITeamsV3.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
@@ -18,12 +19,13 @@ namespace APITeamsV3.Application.Common.Services
             _centralContext = centralContext;
         }
 
-        public async Task<bool> IsEligibleForTeamsAsync(Seccion seccion, string companyKey)
+        public async Task<SectionEligibilityResult> IsEligibleForTeamsAsync(Seccion seccion, string companyKey)
         {
-            if (seccion == null) return false;
+            if (seccion == null) return SectionEligibilityResult.Ineligible("Sección no encontrada.");
 
             // 1. MS Teams Flag checked in SP/View
-            if (!seccion.EsTeams) return false;
+            if (!seccion.EsTeams) 
+                return SectionEligibilityResult.Ineligible("Sincronización deshabilitada en el sistema académico (EsTeams=0).");
 
             // 1.5. Pilot Mode Check
             var companyConfig = await _centralContext.CompanyConfigs
@@ -34,58 +36,16 @@ namespace APITeamsV3.Application.Common.Services
             if (companyConfig != null && companyConfig.IsPilotMode)
             {
                 var isInPilot = companyConfig.PilotSections.Any(ps => ps.IdSeccion == seccion.IdSeccion);
-                if (!isInPilot) return false;
+                if (!isInPilot) 
+                    return SectionEligibilityResult.Ineligible($"El tenant está en Modo Piloto y la sección {seccion.IdSeccion} no está en la lista blanca.");
             }
 
             // 2. Validate Campus (Sede) is active for this company
             var isSedeActive = await CheckSedeActiveAsync(seccion.SedeNombre, companyKey);
-            if (!isSedeActive) return false;
+            if (!isSedeActive) 
+                return SectionEligibilityResult.Ineligible($"La sede '{seccion.SedeNombre}' no está habilitada para equipos de Teams.");
 
             // 3. Validate Date Windows
-            var (backDays, forwardDays) = await GetTeamsDateWindowsAsync();
-            var now = DateTime.UtcNow.Date; // Using UTC Date to avoid timezone issues during comparison
-
-            if (seccion.TipoServicio == "P" || seccion.TipoServicio == "L")
-            {
-                // Pregrado/Licenciatura: Valid compared to section dates
-                var startDate = seccion.FechaInicio.Date.AddDays(-backDays);
-                var endDate = seccion.FechaFin.Date.AddDays(forwardDays);
-                if (now < startDate || now > endDate) return false;
-            }
-            else if (seccion.TipoServicio == "C")
-            {
-                // Educación Continua: Valid compared to period dates
-                if (!seccion.PeriodoInicio.HasValue || !seccion.PeriodoFin.HasValue) return false;
-                var startDate = seccion.PeriodoInicio.Value.Date.AddDays(-backDays);
-                var endDate = seccion.PeriodoFin.Value.Date.AddDays(forwardDays);
-                if (now < startDate || now > endDate) return false;
-            }
-
-            return true;
-        }
-
-        public async Task<string> GetIneligibilityReasonAsync(Seccion seccion, string companyKey)
-        {
-            if (seccion == null) return "Sección no encontrada.";
-
-            if (!seccion.EsTeams) 
-                return "La sección no está marcada para Microsoft Teams (EsTeams flag es falso o el periodo no lo habilita).";
-
-            var companyConfig = await _centralContext.CompanyConfigs
-                .Include(c => c.PilotSections)
-                .AsNoTracking()
-                .FirstOrDefaultAsync(c => c.CompanyKey.ToLower() == companyKey.ToLower());
-
-            if (companyConfig != null && companyConfig.IsPilotMode)
-            {
-                var isInPilot = companyConfig.PilotSections.Any(ps => ps.IdSeccion == seccion.IdSeccion);
-                if (!isInPilot) return $"La sección está inactiva debido a que el tenant está en Modo Piloto (IsPilotMode=true) y el IdSeccion {seccion.IdSeccion} no está en la lista blanca.";
-            }
-
-            var isSedeActive = await CheckSedeActiveAsync(seccion.SedeNombre, companyKey);
-            if (!isSedeActive)
-                return $"La sede '{seccion.SedeNombre}' no está habilitada para equipos de Teams en la configuración de la empresa ({companyKey}).";
-
             var (backDays, forwardDays) = await GetTeamsDateWindowsAsync();
             var now = DateTime.UtcNow.Date;
 
@@ -93,21 +53,27 @@ namespace APITeamsV3.Application.Common.Services
             {
                 var startDate = seccion.FechaInicio.Date.AddDays(-backDays);
                 var endDate = seccion.FechaFin.Date.AddDays(forwardDays);
-                if (now < startDate) return $"Aún no inicia el periodo de creación (Disponible desde {startDate:dd/MM/yyyy}).";
-                if (now > endDate) return $"El periodo de sincronización para esta sección ha finalizado ({endDate:dd/MM/yyyy}).";
+                if (now < startDate) return SectionEligibilityResult.Ineligible($"Aún no inicia el periodo (Disponible desde {startDate:dd/MM/yyyy}).");
+                if (now > endDate) return SectionEligibilityResult.Ineligible($"El periodo de sincronización ha finalizado ({endDate:dd/MM/yyyy}).");
             }
             else if (seccion.TipoServicio == "C")
             {
                 if (!seccion.PeriodoInicio.HasValue || !seccion.PeriodoFin.HasValue) 
-                    return "La sección de Educación Continua no tiene fechas de periodo definidas.";
+                    return SectionEligibilityResult.Ineligible("No tiene fechas de periodo definidas.");
                 
                 var startDate = seccion.PeriodoInicio.Value.Date.AddDays(-backDays);
                 var endDate = seccion.PeriodoFin.Value.Date.AddDays(forwardDays);
-                if (now < startDate) return $"Periodo no iniciado (Disponible desde {startDate:dd/MM/yyyy}).";
-                if (now > endDate) return $"Periodo finalizado ({endDate:dd/MM/yyyy}).";
+                if (now < startDate) return SectionEligibilityResult.Ineligible($"Periodo no iniciado (Disponible desde {startDate:dd/MM/yyyy}).");
+                if (now > endDate) return SectionEligibilityResult.Ineligible($"Periodo finalizado ({endDate:dd/MM/yyyy}).");
             }
 
-            return "La sección no cumple con los criterios académicos para ser sincronizada (Sede, Periodo o Unidad no habilitados).";
+            return SectionEligibilityResult.Eligible();
+        }
+
+        public async Task<string> GetIneligibilityReasonAsync(Seccion seccion, string companyKey)
+        {
+            var result = await IsEligibleForTeamsAsync(seccion, companyKey);
+            return result.Reason;
         }
 
         private async Task<bool> CheckSedeActiveAsync(string sedeNombre, string companyKey)

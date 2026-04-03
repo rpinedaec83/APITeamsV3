@@ -8,7 +8,6 @@ import {
     Button,
     Input,
     Label,
-    Checkbox,
     Title3,
     Divider,
     Table,
@@ -54,6 +53,7 @@ interface SectionData {
     unidadNegocio: string;
     hasTeam: boolean;
     esTeams: boolean; // Added to enforce academic flag check
+    ineligibilityReason?: string;
     members: Member[];
 }
 
@@ -195,8 +195,6 @@ const OperationsPage: React.FC = () => {
     // State for Top Tabs
     const [selectedTab, setSelectedTab] = useState<TabValue>('seccion');
 
-    // State for Bottom Tabs
-    const [selectedBottomTab, setSelectedBottomTab] = useState<TabValue>('reporte');
 
     // Form State (Seccion)
     const [seccionCodigo, setSeccionCodigo] = useState('');
@@ -215,7 +213,7 @@ const OperationsPage: React.FC = () => {
             const response = await apiClient.get(`/sections/search?code=${seccionCodigo}`);
             setSeccionData(response.data);
             if (!response.data.esTeams) {
-                setError('Esta sección no está marcada como "EsTeams = 1" en el sistema académico. El aprovisionamiento ha sido bloqueado para esta sección.');
+                setError(response.data.ineligibilityReason || 'Esta sección no es elegible para aprovisionamiento de Teams.');
             }
         } catch (err: any) {
             setError(err.message || 'Error al buscar sección');
@@ -356,10 +354,11 @@ const OperationsPage: React.FC = () => {
     };
 
     const handleSyncAlumno = async () => {
-        if (!alumnoData?.codigo) return;
+        const codigo = (alumnoData?.codigo || alumnoCodigo || '').trim();
+        if (!codigo) return;
         setLoading(true);
         try {
-            const response = await apiClient.post(`/sync/student/${alumnoData.codigo}`);
+            const response = await apiClient.post(`/sync/student/${codigo}`);
             showSuccess(`Sincronización de alumno encolada. ${response.data.message || ''}`);
         } catch (err: unknown) {
             showError('Error al sincronizar alumno.');
@@ -373,12 +372,6 @@ const OperationsPage: React.FC = () => {
     const onTabSelect = (_: unknown, data: SelectTabData) => {
         if (data?.value) {
             setSelectedTab(data.value);
-        }
-    };
-
-    const onBottomTabSelect = (_: unknown, data: SelectTabData) => {
-        if (data?.value) {
-            setSelectedBottomTab(data.value);
         }
     };
 
@@ -575,15 +568,13 @@ const OperationsPage: React.FC = () => {
                         )}
 
                         <div className={styles.actionsRegion}>
-                            <Checkbox label="Generar Agendas" size="large" />
-                            <Checkbox label="Agregar Miembros" size="large" />
                             <span style={{ flex: 1 }}></span>
                             <Button icon={<AddRegular />} onClick={() => {
                                 setAlumnoData(null);
                                 setError('');
                                 setAlumnoCodigo('');
                             }}>Limpiar</Button>
-                            <Button icon={<SaveRegular />} appearance="primary" onClick={handleSyncAlumno} disabled={!alumnoData || loading}>Actualizar Teams</Button>
+                            <Button icon={<SaveRegular />} appearance="primary" onClick={handleSyncAlumno} disabled={loading || !alumnoCodigo.trim()}>Actualizar Teams</Button>
                         </div>
 
                     </div>
@@ -595,13 +586,9 @@ const OperationsPage: React.FC = () => {
                 <Title3>Resultados y Detalles</Title3>
                 <div className={styles.tableContainer}>
                     <div style={{ padding: '16px' }}>
-                        <TabList selectedValue={selectedBottomTab} onTabSelect={onBottomTabSelect}>
-                            <Tab value="reporte">
-                                {selectedTab === 'seccion' ? `Listado de Alumnos (${seccionData?.members?.length || 0})` : 'Cursos Matriculados'}
-                            </Tab>
-                            <Tab value="smart">Detalle Smart</Tab>
-                            <Tab value="teams">Detalle Teams</Tab>
-                        </TabList>
+                        <div style={{ fontWeight: 600, color: tokens.colorNeutralForeground1 }}>
+                            {selectedTab === 'seccion' ? `Listado de Alumnos (${seccionData?.members?.length || 0})` : 'Cursos Matriculados'}
+                        </div>
                     </div>
 
                     <Divider />

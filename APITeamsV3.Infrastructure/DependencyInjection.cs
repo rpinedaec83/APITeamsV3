@@ -42,6 +42,7 @@ namespace APITeamsV3.Infrastructure
             services.AddSingleton<IEncryptionService, EncryptionService>();
             services.AddSingleton<TenantHangfireRuntime>();
             services.AddTransient<IHangfireJobService, HangfireJobService>();
+            services.AddScoped<IGraphUserLookupService, GraphUserLookupService>();
 
             // Database Initialization Service (Background)
             services.AddHostedService<DatabaseInitializerService>();

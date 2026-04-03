@@ -54,3 +54,33 @@ The script is a thin wrapper over [APITeamsV3.HangfireInstaller](C:/Sources/APIT
 
 - Do not commit `publish_output`, SQLite databases, or other generated artifacts.
 - If credentials were ever committed, rotate them and purge them from git history separately from these code changes.
+
+## Code signing (Windows / WDAC)
+
+`Directory.Build.targets` now signs every built `dll/exe` when code-signing settings are provided.
+
+Set one of these modes before `dotnet build` or `dotnet run`:
+
+```powershell
+# Option A: PFX file
+$env:APITEAMSV3_CODESIGN_CERT_PATH = "C:\certs\company-codesign.pfx"
+$env:APITEAMSV3_CODESIGN_CERT_PASSWORD = "your-pfx-password"
+
+# Optional override
+$env:CodeSignToolPath = "C:\Program Files (x86)\Windows Kits\10\App Certification Kit\signtool.exe"
+$env:CodeSignTimestampUrl = "http://timestamp.digicert.com"
+```
+
+```powershell
+# Option B: certificate in LocalMachine\My by thumbprint
+$env:APITEAMSV3_CODESIGN_CERT_THUMBPRINT = "YOUR_CERT_SHA1_THUMBPRINT"
+```
+
+Build-time switch:
+
+```powershell
+# Force disable signing for a local build
+dotnet build /p:CodeSignEnable=false
+```
+
+For environments with Smart App Control/WDAC, use a signer trusted by enterprise policy.

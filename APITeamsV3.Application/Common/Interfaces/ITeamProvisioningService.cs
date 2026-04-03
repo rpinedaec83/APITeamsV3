@@ -7,5 +7,6 @@ namespace APITeamsV3.Application.Common.Interfaces
     {
         Task<string> ProvisionTeamAsync(Seccion seccion);
         Task UpdateTeamAsync(Seccion seccion, bool updateMembers = true, bool updateOwners = true, bool updateAgendas = false);
+        Task EnsureMembershipOpenAsync(string teamId);
     }
 }

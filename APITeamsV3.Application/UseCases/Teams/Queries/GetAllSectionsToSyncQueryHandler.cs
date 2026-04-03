@@ -79,8 +79,8 @@ namespace APITeamsV3.Application.UseCases.Teams.Queries
                     INNER JOIN UnidadAcademica UA WITH (NOLOCK) ON PR.IdUnidadAcademica = UA.IdUnidadAcademica
                     INNER JOIN Periodo PE WITH (NOLOCK) ON PR.IdPeriodo = PE.IdPeriodo
                     INNER JOIN Producto PD WITH (NOLOCK) ON PR.IdProducto = PD.IdProducto
-                    LEFT JOIN Curriculamodulo CM WITH (NOLOCK) ON PR.IdModulo = CM.IdModulo
-                        AND PR.IdCurricula = CM.IdCurricula
+                    LEFT JOIN CurriculaModulo CM WITH (NOLOCK) ON PR.IdModulo = CM.IdModulo
+                        AND ISNULL(PR.IdCurricula, SE.IdCurricula) = CM.IdCurricula
                     LEFT JOIN MaestroTablaRegistro MTR WITH (NOLOCK) ON CM.IdTipoModulo = MTR.IdMaestroRegistro
                     LEFT JOIN PromocionGrupo PG WITH (NOLOCK) ON SE.IdPromocion = PG.IdPromocion
                         AND SE.IdGrupo = PG.IdGrupo

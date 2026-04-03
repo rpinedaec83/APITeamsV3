@@ -14,6 +14,9 @@ export interface CompanyConfig {
     graphClientSecretRef: string;
     defaultChannelName: string;
     meetingPolicyMode: string;
+    isPilotMode: boolean;
+    pilotSections: number[];
+    teacherAltDomain?: string;
 }
 
 export interface CreateCompanyConfigRequest {
@@ -28,6 +31,9 @@ export interface CreateCompanyConfigRequest {
     graphTenantId: string;
     graphClientId: string;
     graphClientSecretRef: string;
+    isPilotMode: boolean;
+    pilotSections: number[];
+    teacherAltDomain?: string;
 }
 
 export interface UpdateCompanyConfigRequest {
@@ -42,4 +48,7 @@ export interface UpdateCompanyConfigRequest {
     graphTenantId: string;
     graphClientId: string;
     graphClientSecretRef: string;
+    isPilotMode: boolean;
+    pilotSections: number[];
+    teacherAltDomain?: string;
 }

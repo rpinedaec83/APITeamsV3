@@ -151,4 +151,17 @@ app.UseMiddleware<TenantResolutionMiddleware>();
 
 app.MapControllers();
 
+app.MapGet("/inspect-graph/{groupId}", async (string groupId, APITeamsV3.Application.Common.Interfaces.IGraphClientFactory factory) => 
+{
+    var client = await factory.CreateClientAsync();
+    
+    var owners = await client.Groups[groupId].Owners.GetAsync();
+    var members = await client.Groups[groupId].Members.GetAsync();
+    
+    var ownerNames = owners?.Value?.Select(o => o is Microsoft.Graph.Models.User u ? $"{u.DisplayName} ({u.Mail})" : o.Id).ToList();
+    var memberNames = members?.Value?.Select(m => m is Microsoft.Graph.Models.User u ? $"{u.DisplayName} ({u.Mail})" : m.Id).ToList();
+    
+    return Microsoft.AspNetCore.Http.Results.Ok(new { Owners = ownerNames, Members = memberNames });
+});
+
 app.Run();

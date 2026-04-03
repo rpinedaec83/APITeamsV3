@@ -81,7 +81,7 @@ const CompanyConfigsPage: React.FC = () => {
     };
 
     const openCreate = () => {
-        setCurrentConfig({ isActive: true, timeZoneId: 'SA Pacific Standard Time' });
+        setCurrentConfig({ isActive: true, timeZoneId: 'SA Pacific Standard Time', isPilotMode: false, pilotSections: [] });
         setIsEditing(false);
         setIsOpen(true);
     };
@@ -267,6 +267,43 @@ const CompanyConfigsPage: React.FC = () => {
                                     <Label>Client Secret Ref</Label>
                                     <Input value={currentConfig.graphClientSecretRef || ''} onChange={(_, d) => setCurrentConfig({ ...currentConfig, graphClientSecretRef: d.value })} />
                                 </div>
+                            </div>
+
+                            <div style={{ padding: '10px', background: '#e1f5fe', borderRadius: '4px', border: '1px solid #b3e5fc' }}>
+                                <h4 style={{ margin: '0 0 10px 0', color: '#01579b' }}>Academic & Domain Fallback</h4>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                    <Label>Teachers Alternative Domain</Label>
+                                    <Input 
+                                        value={currentConfig.teacherAltDomain || ''} 
+                                        onChange={(_, d) => setCurrentConfig({ ...currentConfig, teacherAltDomain: d.value })} 
+                                        placeholder="e.g. zegel.pe" 
+                                    />
+                                    <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#0277bd' }}>
+                                        Used as a fallback if the primary institutional email is not found in Azure AD.
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div style={{ padding: '10px', background: '#fff3cd', borderRadius: '4px', border: '1px solid #ffeeba' }}>
+                                <h4 style={{ margin: '0 0 10px 0', color: '#856404' }}>Pilot Mode Configuration</h4>
+                                <Switch 
+                                    label={currentConfig.isPilotMode ? "Pilot Mode Enabled" : "Pilot Mode Disabled"} 
+                                    checked={currentConfig.isPilotMode || false} 
+                                    onChange={(_, d) => setCurrentConfig({ ...currentConfig, isPilotMode: d.checked })} 
+                                />
+                                {currentConfig.isPilotMode && (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '10px' }}>
+                                        <Label>Allowed Section IDs (Comma-separated)</Label>
+                                        <Input 
+                                            value={currentConfig.pilotSections?.join(', ') || ''} 
+                                            onChange={(_, d) => {
+                                                const vals = d.value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+                                                setCurrentConfig({ ...currentConfig, pilotSections: vals });
+                                            }} 
+                                            placeholder="e.g. 416734, 415868" 
+                                        />
+                                    </div>
+                                )}
                             </div>
 
                             <div>

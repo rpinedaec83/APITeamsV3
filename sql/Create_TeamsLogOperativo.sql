@@ -1,6 +1,3 @@
-USE [NombreDeTuBaseDeDatos] -- Reemplazar por Smart_Zegel, AcademicoIDAT, etc.
-GO
-
 IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[TeamsLogOperativo]') AND type in (N'U'))
 BEGIN
     CREATE TABLE [dbo].[TeamsLogOperativo](

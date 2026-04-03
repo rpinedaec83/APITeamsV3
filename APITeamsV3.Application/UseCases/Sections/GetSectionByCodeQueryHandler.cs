@@ -2,6 +2,7 @@ using APITeamsV3.Application.Common.Interfaces;
 using APITeamsV3.Domain.Entities;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -11,10 +12,14 @@ namespace APITeamsV3.Application.UseCases.Sections
     public class GetSectionByCodeQueryHandler : IRequestHandler<GetSectionByCodeQuery, SectionDetailDto?>
     {
         private readonly ISmartDbContext _context;
+        private readonly ISectionEligibilityService _eligibilityService;
+        private readonly ITenantProvider _tenantProvider;
 
-        public GetSectionByCodeQueryHandler(ISmartDbContext context)
+        public GetSectionByCodeQueryHandler(ISmartDbContext context, ISectionEligibilityService eligibilityService, ITenantProvider tenantProvider)
         {
             _context = context;
+            _eligibilityService = eligibilityService;
+            _tenantProvider = tenantProvider;
         }
 
         public async Task<SectionDetailDto?> Handle(GetSectionByCodeQuery request, CancellationToken cancellationToken)
@@ -44,12 +49,16 @@ namespace APITeamsV3.Application.UseCases.Sections
                 };
             }
 
-            // 2. Check if Team exists
+            // 2. Check Eligibility Reason
+            var tenant = _tenantProvider.GetCurrentTenant();
+            var eligibility = await _eligibilityService.IsEligibleForTeamsAsync(section, tenant.CompanyKey);
+
+            // 3. Check if Team exists
             var team = await _context.Set<TeamEntity>()
                 .AsNoTracking()
                 .FirstOrDefaultAsync(t => t.IdSeccionSmart == section.IdSeccion && t.EstadoTeam == "A", cancellationToken);
 
-            // 3. Member Status Logic
+            // 4. Member Status Logic
             var memberStatusMap = new Dictionary<string, string>();
             if (team != null)
             {
@@ -65,14 +74,13 @@ namespace APITeamsV3.Application.UseCases.Sections
                 }
             }
 
-            // 4. Fetch Students and Map Status using EF Core (vw_AlumnoMaster)
+            // 5. Fetch Students and Map Status using EF Core (vw_AlumnoMaster)
             var students = await _context.Set<AlumnoCurso>()
                 .AsNoTracking()
                 .Include(ac => ac.Alumno)
                 .Where(ac => ac.IdSeccion == section.IdSeccion && ac.EsMatricula)
                 .Select(ac => new StudentSummaryDto 
                 {
-                    // Alumno view should provide the basic info
                     Code = ac.Alumno != null ? ac.Alumno.Codigo : "N/A",
                     Name = ac.Alumno != null ? ac.Alumno.Nombre : "Unknown",
                     Status = team == null ? "Sin Team" : (memberStatusMap.ContainsKey(ac.Alumno != null ? ac.Alumno.Codigo : "") ? "En Team" : "Pendiente")
@@ -93,7 +101,8 @@ namespace APITeamsV3.Application.UseCases.Sections
                 UnidadNegocio = section.UnidadNegocioNombre,
                 Members = students,
                 HasTeam = team != null,
-                EsTeams = section.EsTeams
+                EsTeams = eligibility.IsEligible,
+                IneligibilityReason = eligibility.IsEligible ? null : eligibility.Reason
             };
         }
     }

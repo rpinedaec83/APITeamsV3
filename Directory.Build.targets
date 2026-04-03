@@ -1,0 +1,41 @@
+<Project>
+  <PropertyGroup>
+    <CodeSignToolPath Condition="'$(CodeSignToolPath)' == ''">$([System.Environment]::GetEnvironmentVariable('APITEAMSV3_CODESIGN_TOOL_PATH'))</CodeSignToolPath>
+    <CodeSignToolPath Condition="'$(CodeSignToolPath)' == ''">signtool.exe</CodeSignToolPath>
+    <CodeSignTimestampUrl Condition="'$(CodeSignTimestampUrl)' == ''">http://timestamp.digicert.com</CodeSignTimestampUrl>
+
+    <CodeSignCertPath Condition="'$(CodeSignCertPath)' == ''">$([System.Environment]::GetEnvironmentVariable('APITEAMSV3_CODESIGN_CERT_PATH'))</CodeSignCertPath>
+    <CodeSignCertPassword Condition="'$(CodeSignCertPassword)' == ''">$([System.Environment]::GetEnvironmentVariable('APITEAMSV3_CODESIGN_CERT_PASSWORD'))</CodeSignCertPassword>
+    <CodeSignCertThumbprint Condition="'$(CodeSignCertThumbprint)' == ''">$([System.Environment]::GetEnvironmentVariable('APITEAMSV3_CODESIGN_CERT_THUMBPRINT'))</CodeSignCertThumbprint>
+    <CodeSignUseMachineStore Condition="'$(CodeSignUseMachineStore)' == ''">false</CodeSignUseMachineStore>
+
+    <CodeSignEnable Condition="'$(CodeSignEnable)' == '' and ('$(CodeSignCertPath)' != '' or '$(CodeSignCertThumbprint)' != '')">true</CodeSignEnable>
+    <CodeSignEnable Condition="'$(CodeSignEnable)' == ''">false</CodeSignEnable>
+  </PropertyGroup>
+
+  <Target
+    Name="CodeSignOutputArtifacts"
+    AfterTargets="Build"
+    Condition="'$(OS)' == 'Windows_NT' and '$(CodeSignEnable)' == 'true' and '$(TargetPath)' != '' and Exists('$(TargetPath)')">
+
+    <Message
+      Importance="High"
+      Text="Code-signing output: $(TargetPath)" />
+
+    <Exec
+      Condition="'$(CodeSignCertPath)' != '' and '$(CodeSignCertPassword)' != ''"
+      Command="&quot;$(CodeSignToolPath)&quot; sign /fd SHA256 /td SHA256 /tr &quot;$(CodeSignTimestampUrl)&quot; /f &quot;$(CodeSignCertPath)&quot; /p &quot;$(CodeSignCertPassword)&quot; &quot;$(TargetPath)&quot;" />
+
+    <Exec
+      Condition="'$(CodeSignCertPath)' != '' and '$(CodeSignCertPassword)' == ''"
+      Command="&quot;$(CodeSignToolPath)&quot; sign /fd SHA256 /td SHA256 /tr &quot;$(CodeSignTimestampUrl)&quot; /f &quot;$(CodeSignCertPath)&quot; &quot;$(TargetPath)&quot;" />
+
+    <Exec
+      Condition="'$(CodeSignCertPath)' == '' and '$(CodeSignCertThumbprint)' != '' and '$(CodeSignUseMachineStore)' == 'true'"
+      Command="&quot;$(CodeSignToolPath)&quot; sign /fd SHA256 /td SHA256 /tr &quot;$(CodeSignTimestampUrl)&quot; /sha1 &quot;$(CodeSignCertThumbprint)&quot; /sm &quot;$(TargetPath)&quot;" />
+
+    <Exec
+      Condition="'$(CodeSignCertPath)' == '' and '$(CodeSignCertThumbprint)' != '' and '$(CodeSignUseMachineStore)' != 'true'"
+      Command="&quot;$(CodeSignToolPath)&quot; sign /fd SHA256 /td SHA256 /tr &quot;$(CodeSignTimestampUrl)&quot; /sha1 &quot;$(CodeSignCertThumbprint)&quot; &quot;$(TargetPath)&quot;" />
+  </Target>
+</Project>

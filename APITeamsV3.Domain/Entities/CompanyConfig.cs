@@ -31,5 +31,8 @@ namespace APITeamsV3.Domain.Entities
         // Pilot Mode
         public bool IsPilotMode { get; set; } = false;
         public ICollection<CompanyPilotSection> PilotSections { get; set; } = new List<CompanyPilotSection>();
+
+        // Customization
+        public string? TeacherAltDomain { get; set; }
     }
 }

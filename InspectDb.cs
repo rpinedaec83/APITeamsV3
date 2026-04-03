@@ -1,25 +1,17 @@
+using Microsoft.EntityFrameworkCore;
+using APITeamsV3.Infrastructure.Persistence.Contexts;
+using Microsoft.Extensions.Configuration;
 using System;
-using Microsoft.Data.Sqlite;
+using System.Linq;
 
-class Program
-{
-    static void Main()
-    {
-        string dbPath = @"E:\APITEAMSV3\publish\api\APITeamsV3_Central.db";
-        using (var connection = new SqliteConnection($"Data Source={dbPath}"))
-        {
-            connection.Open();
-            var command = connection.CreateCommand();
-            command.CommandText = "PRAGMA table_info(CompanyConfigs);";
-            using (var reader = command.ExecuteReader())
-            {
-                Console.WriteLine("Column Name | Type");
-                Console.WriteLine("-------------------");
-                while (reader.Read())
-                {
-                    Console.WriteLine($"{reader["name"]} | {reader["type"]}");
-                }
-            }
-        }
-    }
-}
+var builder = new DbContextOptionsBuilder<CentralDbContext>();
+builder.UseSqlite("Data Source=APITeamsV3.API/APITeamsV3_Central.db");
+
+using var context = new CentralDbContext(builder.Options);
+var applied = context.Database.GetAppliedMigrations();
+Console.WriteLine("Applied Migrations:");
+foreach (var m in applied) Console.WriteLine(m);
+
+var pending = context.Database.GetPendingMigrations();
+Console.WriteLine("\nPending Migrations:");
+foreach (var m in pending) Console.WriteLine(m);

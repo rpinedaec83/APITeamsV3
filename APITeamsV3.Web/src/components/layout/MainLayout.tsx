@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     makeStyles,
     tokens,
@@ -14,12 +14,23 @@ import {
     SignOutRegular,
     TimerRegular,
     CalendarClockRegular,
-    DocumentSearchRegular
+    DocumentSearchRegular,
+    ArrowSyncRegular,
 } from '@fluentui/react-icons';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useMsal } from "@azure/msal-react";
 import { useCompanyKey } from '../../hooks/useCompanyKey';
 import brandLogos from '../../brandLogos';
+import { useApiClient } from '../../hooks/useApiClient';
+
+interface HangfireStorageHealth {
+    companyKey: string;
+    dataSource: string;
+    database: string;
+    isHealthy: boolean;
+    lastError?: string | null;
+    checkedAtUtc: string;
+}
 
 const useStyles = makeStyles({
     root: {
@@ -121,7 +132,34 @@ const useStyles = makeStyles({
         display: 'flex',
         alignItems: 'center',
         gap: '10px',
-    }
+    },
+    headerRight: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '12px',
+    },
+    hangfireAlertInline: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+        maxWidth: '540px',
+        backgroundColor: tokens.colorPaletteRedBackground2,
+        color: tokens.colorPaletteRedForeground1,
+        border: `1px solid ${tokens.colorPaletteRedBorder2}`,
+        ...shorthands.borderRadius(tokens.borderRadiusMedium),
+        ...shorthands.padding('6px', '10px'),
+    },
+    hangfireAlertTitle: {
+        fontWeight: tokens.fontWeightSemibold,
+        fontSize: tokens.fontSizeBase200,
+        whiteSpace: 'nowrap',
+    },
+    hangfireAlertMessage: {
+        fontSize: tokens.fontSizeBase200,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+    },
 });
 
 const MainLayout: React.FC = () => {
@@ -130,11 +168,17 @@ const MainLayout: React.FC = () => {
     const location = useLocation();
     const { instance, accounts } = useMsal();
     const account = accounts[0];
+    const apiClient = useApiClient();
     const companyKey = useCompanyKey();
     const logoSrc = brandLogos[companyKey?.toLowerCase()];
 
     const idTokenClaims = account?.idTokenClaims as { roles?: string[] } | undefined;
     const roles = idTokenClaims?.roles ?? [];
+    const canViewHangfireHealth = roles.includes('IT') || roles.includes('ADMIN');
+
+    const [hangfireHealth, setHangfireHealth] = useState<HangfireStorageHealth[]>([]);
+    const [hangfireHealthError, setHangfireHealthError] = useState('');
+    const [hangfireHealthLoading, setHangfireHealthLoading] = useState(false);
 
     const allMenuItems = [
         { label: 'Dashboard', icon: <HomeRegular />, path: '/' },
@@ -150,6 +194,49 @@ const MainLayout: React.FC = () => {
         if (!item.allowedRoles) return true;
         return item.allowedRoles.some(role => roles.includes(role));
     });
+
+    const fetchHangfireHealth = async (silent: boolean) => {
+        if (!canViewHangfireHealth) return;
+
+        if (!silent) {
+            setHangfireHealthLoading(true);
+        }
+
+        try {
+            const response = await apiClient.get('/diagnostics/hangfire/storage-health');
+            const data = Array.isArray(response.data) ? response.data as HangfireStorageHealth[] : [];
+            setHangfireHealth(data);
+            setHangfireHealthError('');
+        } catch (err: any) {
+            const message = err?.response?.data?.message || err?.message || 'Error de conectividad con Hangfire.';
+            setHangfireHealthError(message);
+        } finally {
+            if (!silent) {
+                setHangfireHealthLoading(false);
+            }
+        }
+    };
+
+    useEffect(() => {
+        if (!canViewHangfireHealth) {
+            return;
+        }
+
+        fetchHangfireHealth(false);
+        const timer = window.setInterval(() => {
+            fetchHangfireHealth(true);
+        }, 30000);
+
+        return () => window.clearInterval(timer);
+    }, [canViewHangfireHealth]);
+
+    const unhealthyStorages = hangfireHealth.filter(item => !item.isHealthy);
+    const hasHangfireIssue = canViewHangfireHealth && (hangfireHealthError.length > 0 || unhealthyStorages.length > 0);
+    const hangfireSummary = hangfireHealthError
+        ? hangfireHealthError
+        : unhealthyStorages.length === 1
+            ? `${unhealthyStorages[0].companyKey}: ${unhealthyStorages[0].lastError || 'Base no disponible'}`
+            : `${unhealthyStorages.length} tenants con error de base Hangfire`;
 
     const handleSignOut = () => {
         instance.logoutRedirect({
@@ -196,12 +283,28 @@ const MainLayout: React.FC = () => {
             {/* Main Content Area */}
             <div className={styles.content}>
                 <header className={styles.header}>
-                    <div className={styles.userProfile}>
-                        <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column' }}>
-                            <span style={{ fontWeight: 600, fontSize: '14px' }}>{account?.name || "User"}</span>
-                            <span style={{ fontSize: '12px', color: tokens.colorNeutralForeground3 }}>{account?.username || ""}</span>
+                    <div className={styles.headerRight}>
+                        {hasHangfireIssue && (
+                            <div className={styles.hangfireAlertInline} title={hangfireSummary}>
+                                <span className={styles.hangfireAlertTitle}>Hangfire</span>
+                                <span className={styles.hangfireAlertMessage}>{hangfireSummary}</span>
+                                <Button
+                                    appearance="subtle"
+                                    size="small"
+                                    icon={<ArrowSyncRegular />}
+                                    onClick={() => fetchHangfireHealth(false)}
+                                    disabled={hangfireHealthLoading}
+                                />
+                            </div>
+                        )}
+
+                        <div className={styles.userProfile}>
+                            <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column' }}>
+                                <span style={{ fontWeight: 600, fontSize: '14px' }}>{account?.name || "User"}</span>
+                                <span style={{ fontSize: '12px', color: tokens.colorNeutralForeground3 }}>{account?.username || ""}</span>
+                            </div>
+                            <Avatar name={account?.name || "User"} color="colorful" />
                         </div>
-                        <Avatar name={account?.name || "User"} color="colorful" />
                     </div>
                 </header>
 

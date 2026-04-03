@@ -19,6 +19,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
         public string CodigoFacilitador { get; set; } = string.Empty;
         public string NombresFacilitador { get; set; } = string.Empty;
         public string ApellidosFacilitador { get; set; } = string.Empty;
+        public string EmailFacilitador { get; set; } = string.Empty;
         public string OldCodigoFacilitador { get; set; } = string.Empty;
     }
 }

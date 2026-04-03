@@ -3,6 +3,7 @@ using APITeamsV3.Application.Common.Interfaces; // Updated namespace
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -29,7 +30,10 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
         string GraphClientId,
         string GraphClientSecretRef,
         string DefaultChannelName,
-        string MeetingPolicyMode
+        string MeetingPolicyMode,
+        bool IsPilotMode,
+        List<int> PilotSections,
+        string? TeacherAltDomain
     );
 
     // --- Queries ---
@@ -50,7 +54,7 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
         public async Task<List<CompanyConfigDto>> Handle(GetCompanyConfigsQuery request, CancellationToken cancellationToken)
         {
             var tenant = _tenantProvider.GetCurrentTenant();
-            var query = _context.CompanyConfigs.AsQueryable();
+            var query = _context.CompanyConfigs.Include(c => c.PilotSections).AsQueryable();
 
             if (!request.IsAdminView && !string.IsNullOrEmpty(tenant.CompanyKey))
             {
@@ -77,7 +81,10 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
                     c.GraphClientId,
                     CompanyConfigMasks.Secret,
                     c.DefaultChannelName,
-                    c.MeetingPolicyMode));
+                    c.MeetingPolicyMode,
+                    c.IsPilotMode,
+                    c.PilotSections?.Select(p => p.IdSeccion).ToList() ?? new List<int>(),
+                    c.TeacherAltDomain));
             }
             return dtos;
         }
@@ -97,7 +104,9 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
         public async Task<CompanyConfigDto?> Handle(GetCompanyConfigByIdQuery request, CancellationToken cancellationToken)
         {
             var tenant = _tenantProvider.GetCurrentTenant();
-            var c = await _context.CompanyConfigs.FirstOrDefaultAsync(x => x.Id == request.Id, cancellationToken);
+            var c = await _context.CompanyConfigs
+                .Include(config => config.PilotSections)
+                .FirstOrDefaultAsync(x => x.Id == request.Id, cancellationToken);
             
             if (c == null) return null;
 
@@ -122,7 +131,10 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
                 c.GraphClientId,
                 CompanyConfigMasks.Secret,
                 c.DefaultChannelName,
-                c.MeetingPolicyMode);
+                c.MeetingPolicyMode,
+                c.IsPilotMode,
+                c.PilotSections?.Select(p => p.IdSeccion).ToList() ?? new List<int>(),
+                c.TeacherAltDomain);
         }
     }
 
@@ -139,7 +151,10 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
         bool IsActive,
         string GraphTenantId,
         string GraphClientId,
-        string GraphClientSecretRef
+        string GraphClientSecretRef,
+        bool IsPilotMode,
+        List<int> PilotSections,
+        string? TeacherAltDomain
     ) : IRequest<int>;
 
     public class CreateCompanyConfigCommandHandler : IRequestHandler<CreateCompanyConfigCommand, int>
@@ -169,7 +184,10 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
                 GraphTenantId = request.GraphTenantId,
                 GraphClientId = request.GraphClientId,
                 GraphClientSecretRef = request.GraphClientSecretRef,
-                LastSyncTimestamp = System.DateTime.UtcNow
+                LastSyncTimestamp = System.DateTime.UtcNow,
+                IsPilotMode = request.IsPilotMode,
+                PilotSections = request.PilotSections?.Select(id => new CompanyPilotSection { IdSeccion = id }).ToList() ?? new List<CompanyPilotSection>(),
+                TeacherAltDomain = request.TeacherAltDomain
             };
 
             _context.CompanyConfigs.Add(entity);
@@ -192,6 +210,9 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
         string GraphTenantId,
         string GraphClientId,
         string GraphClientSecretRef,
+        bool IsPilotMode,
+        List<int> PilotSections,
+        string? TeacherAltDomain,
         bool IsAdminView = false
     ) : IRequest<bool>;
 
@@ -211,7 +232,9 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
         public async Task<bool> Handle(UpdateCompanyConfigCommand request, CancellationToken cancellationToken)
         {
             var tenant = _tenantProvider.GetCurrentTenant();
-            var entity = await _context.CompanyConfigs.FindAsync(new object[] { request.Id }, cancellationToken);
+            var entity = await _context.CompanyConfigs
+                .Include(c => c.PilotSections)
+                .FirstOrDefaultAsync(c => c.Id == request.Id, cancellationToken);
             
             if (entity == null) return false;
 
@@ -241,6 +264,18 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
             if (!string.IsNullOrWhiteSpace(request.GraphClientSecretRef) && request.GraphClientSecretRef != CompanyConfigMasks.Secret)
             {
                 entity.GraphClientSecretRef = request.GraphClientSecretRef;
+            }
+            
+            entity.IsPilotMode = request.IsPilotMode;
+            entity.TeacherAltDomain = request.TeacherAltDomain;
+            
+            if (request.PilotSections != null)
+            {
+                entity.PilotSections.Clear();
+                foreach (var sId in request.PilotSections)
+                {
+                    entity.PilotSections.Add(new CompanyPilotSection { CompanyConfigId = entity.Id, IdSeccion = sId });
+                }
             }
             
             await _context.SaveChangesAsync(cancellationToken);

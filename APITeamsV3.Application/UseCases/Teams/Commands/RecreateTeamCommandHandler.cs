@@ -102,15 +102,9 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     return result;
                 }
 
-                // 8. Create new record in TeamsEquipos (via CreateTeamRecordCommand)
-                await _mediator.Send(new CreateTeamRecordCommand 
-                { 
-                    IdSeccionSmart = request.IdSeccion, 
-                    IdTeamsGroup = newGraphId 
-                }, cancellationToken);
-
                 // 9. Sync students into the new team
                 await _mediator.Send(new SyncMissingStudentsCommand(request.IdSeccion), cancellationToken);
+                await _provisioningService.EnsureMembershipOpenAsync(newGraphId);
 
                 await LogOperativoAsync("Success", "TeamRecreate", newGraphId, 
                     $"Equipo recreado exitosamente. Antiguo eliminado, nuevo creado con ID {newGraphId}.");
