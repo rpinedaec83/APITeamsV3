@@ -2,6 +2,7 @@ using MediatR;
 using APITeamsV3.Application.Common.Interfaces;
 using APITeamsV3.Application.UseCases.Teams.DTOs;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -12,10 +13,20 @@ namespace APITeamsV3.Application.UseCases.Teams.Queries
     public class GetAllSectionsToSyncQueryHandler : IRequestHandler<GetAllSectionsToSyncQuery, List<int>>
     {
         private readonly ISmartDbContext _context;
+        private readonly ICentralDbContext _centralContext;
+        private readonly ITenantProvider _tenantProvider;
+        private readonly ILogger<GetAllSectionsToSyncQueryHandler> _logger;
 
-        public GetAllSectionsToSyncQueryHandler(ISmartDbContext context)
+        public GetAllSectionsToSyncQueryHandler(
+            ISmartDbContext context,
+            ICentralDbContext centralContext,
+            ITenantProvider tenantProvider,
+            ILogger<GetAllSectionsToSyncQueryHandler> logger)
         {
             _context = context;
+            _centralContext = centralContext;
+            _tenantProvider = tenantProvider;
+            _logger = logger;
         }
 
         public async Task<List<int>> Handle(GetAllSectionsToSyncQuery request, CancellationToken cancellationToken)
@@ -136,7 +147,44 @@ namespace APITeamsV3.Application.UseCases.Teams.Queries
                 .SqlQueryRaw<SectionIdDto>(sql, request.Sede)
                 .ToListAsync(cancellationToken);
 
-            return results.Select(r => r.IdCurso).ToList();
+            var sectionIds = results
+                .Select(r => r.IdCurso)
+                .Distinct()
+                .ToList();
+
+            var tenant = _tenantProvider.GetCurrentTenant();
+            if (string.IsNullOrWhiteSpace(tenant.CompanyKey))
+            {
+                return sectionIds;
+            }
+
+            var companyConfig = await _centralContext.CompanyConfigs
+                .Include(c => c.PilotSections)
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    c => c.CompanyKey.ToLower() == tenant.CompanyKey.ToLower() && c.IsActive,
+                    cancellationToken);
+
+            if (companyConfig?.IsPilotMode != true)
+            {
+                return sectionIds;
+            }
+
+            var allowedSections = companyConfig.PilotSections
+                .Select(ps => ps.IdSeccion)
+                .ToHashSet();
+
+            var filteredSections = sectionIds
+                .Where(id => allowedSections.Contains(id))
+                .ToList();
+
+            _logger.LogInformation(
+                "Modo piloto activo para tenant {CompanyKey}. Secciones sincronizables: {Allowed}/{Total}.",
+                tenant.CompanyKey,
+                filteredSections.Count,
+                sectionIds.Count);
+
+            return filteredSections;
         }
     }
 }

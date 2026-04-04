@@ -87,8 +87,8 @@ namespace APITeamsV3.Infrastructure.Persistence.Contexts
             modelBuilder.Entity<APITeamsV3.Domain.Entities.TeamSession>(entity =>
             {
                 entity.ToTable("TeamsHorarios");
-                // Assuming composite key based on usage, or Id if exists. 
-                entity.HasKey(e => new { e.IdTeams, e.IdEvento }); 
+                entity.HasKey(e => e.IdHorarioTeams);
+                entity.Property(e => e.IdHorarioTeams).ValueGeneratedOnAdd();
             });
 
             // Read-Only Views

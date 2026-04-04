@@ -1,4 +1,6 @@
 using APITeamsV3.Application.Common.Interfaces;
+using APITeamsV3.Infrastructure.Services;
+using Hangfire;
 using Microsoft.AspNetCore.Mvc;
 
 namespace APITeamsV3.API.Controllers
@@ -9,10 +11,91 @@ namespace APITeamsV3.API.Controllers
     public class JobsController : ControllerBase
     {
         private readonly IHangfireJobService _jobService;
+        private readonly ITenantProvider _tenantProvider;
+        private readonly TenantHangfireRuntime _tenantHangfireRuntime;
 
-        public JobsController(IHangfireJobService jobService)
+        public JobsController(
+            IHangfireJobService jobService,
+            ITenantProvider tenantProvider,
+            TenantHangfireRuntime tenantHangfireRuntime)
         {
             _jobService = jobService;
+            _tenantProvider = tenantProvider;
+            _tenantHangfireRuntime = tenantHangfireRuntime;
+        }
+
+        [HttpGet("recent")]
+        public async Task<ActionResult<IReadOnlyList<HangfireJobSnapshotDto>>> GetRecentJobs([FromQuery] int take = 50)
+        {
+            var tenant = _tenantProvider.GetCurrentTenant();
+            if (string.IsNullOrWhiteSpace(tenant.CompanyKey))
+            {
+                return BadRequest(new { Message = "No se pudo resolver el tenant actual." });
+            }
+
+            var storage = await _tenantHangfireRuntime.GetStorageAsync(tenant.CompanyKey, HttpContext.RequestAborted);
+            var monitoring = storage.GetMonitoringApi();
+            var pageSize = Math.Clamp(take, 1, 200);
+
+            var snapshots = new Dictionary<string, HangfireJobSnapshotDto>(StringComparer.OrdinalIgnoreCase);
+
+            void AddSnapshot(string jobId, string state, DateTime? stateAt, Hangfire.Common.Job? job, string? error = null)
+            {
+                if (string.IsNullOrWhiteSpace(jobId) || snapshots.ContainsKey(jobId))
+                {
+                    return;
+                }
+
+                var args = job?.Args?.Select(a => a?.ToString() ?? string.Empty).ToArray() ?? Array.Empty<string>();
+                int? idSeccion = null;
+                if (args.Length > 0 && int.TryParse(args[0], out var parsedSection))
+                {
+                    idSeccion = parsedSection;
+                }
+
+                snapshots[jobId] = new HangfireJobSnapshotDto
+                {
+                    JobId = jobId,
+                    State = state,
+                    Method = job?.Method?.Name ?? "Unknown",
+                    IdSeccion = idSeccion,
+                    Arguments = args,
+                    Error = error,
+                    Timestamp = stateAt ?? DateTime.UtcNow
+                };
+            }
+
+            foreach (var item in monitoring.ProcessingJobs(0, pageSize))
+            {
+                AddSnapshot(item.Key, "Processing", item.Value?.StartedAt, item.Value?.Job);
+            }
+
+            foreach (var item in monitoring.EnqueuedJobs("default", 0, pageSize))
+            {
+                AddSnapshot(item.Key, "Enqueued", item.Value?.EnqueuedAt, item.Value?.Job);
+            }
+
+            foreach (var item in monitoring.ScheduledJobs(0, pageSize))
+            {
+                AddSnapshot(item.Key, "Scheduled", item.Value?.EnqueueAt, item.Value?.Job);
+            }
+
+            foreach (var item in monitoring.FailedJobs(0, pageSize))
+            {
+                AddSnapshot(item.Key, "Failed", item.Value?.FailedAt, item.Value?.Job, item.Value?.ExceptionMessage ?? item.Value?.Reason);
+            }
+
+            foreach (var item in monitoring.SucceededJobs(0, pageSize))
+            {
+                AddSnapshot(item.Key, "Succeeded", item.Value?.SucceededAt, item.Value?.Job);
+            }
+
+            var ordered = snapshots.Values
+                .OrderByDescending(x => x.Timestamp)
+                .Take(pageSize)
+                .ToList();
+
+            return Ok(ordered);
         }
 
         [HttpPost("generate-schedule/{idSeccion}")]
@@ -77,5 +160,16 @@ namespace APITeamsV3.API.Controllers
         public int IdSeccion { get; set; }
         public string JoinUrl { get; set; } = string.Empty;
         public string IdEvento { get; set; } = string.Empty;
+    }
+
+    public class HangfireJobSnapshotDto
+    {
+        public string JobId { get; set; } = string.Empty;
+        public string State { get; set; } = string.Empty;
+        public string Method { get; set; } = string.Empty;
+        public int? IdSeccion { get; set; }
+        public DateTime Timestamp { get; set; }
+        public string[] Arguments { get; set; } = Array.Empty<string>();
+        public string? Error { get; set; }
     }
 }

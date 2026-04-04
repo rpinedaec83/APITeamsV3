@@ -7,10 +7,15 @@ namespace APITeamsV3.Application.UseCases.Stats.Queries
 {
     public class GetLogsQuery : IRequest<List<TeamsLogOperativoDto>>
     {
-        // Paginación y filtros básicos
+        // Paginacion y filtros
         public int Page { get; set; } = 1;
         public int PageSize { get; set; } = 50;
         public string? TipoFiltro { get; set; }
+        public string? SeveridadFiltro { get; set; }
+        public string? EntidadFiltro { get; set; }
+        public string? ReferenciaFiltro { get; set; }
+        public string? JobIdFiltro { get; set; }
+        public string? SearchTerm { get; set; }
         public DateTime? FechaDesde { get; set; }
     }
 }

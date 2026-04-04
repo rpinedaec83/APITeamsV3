@@ -102,6 +102,7 @@ namespace APITeamsV3.Application.UseCases.Teams.DTOs
     public class TeamsLogOperativoDto
     {
         public int Id { get; set; }
+        public string CompanyKey { get; set; } = string.Empty;
         public string Tipo { get; set; } = string.Empty;
         public string EntidadAfectada { get; set; } = string.Empty;
         public string Referencia { get; set; } = string.Empty;

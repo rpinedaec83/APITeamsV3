@@ -6,5 +6,6 @@ namespace APITeamsV3.Application.Common.Interfaces
     public interface IGraphClientFactory
     {
         Task<GraphServiceClient> CreateClientAsync();
+        Task<GraphServiceClient> CreateDelegatedClientAsync();
     }
 }

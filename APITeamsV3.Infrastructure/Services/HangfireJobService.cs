@@ -5,6 +5,7 @@ using APITeamsV3.Application.UseCases.Provisioning.Commands;
 using APITeamsV3.Application.UseCases.Teams.Commands;
 using APITeamsV3.Infrastructure.Persistence.Contexts;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace APITeamsV3.Infrastructure.Services
 {
@@ -15,19 +16,22 @@ namespace APITeamsV3.Infrastructure.Services
         private readonly CentralDbContext _centralDb;
         private readonly IEncryptionService _encryptionService;
         private readonly TenantHangfireRuntime _tenantHangfireRuntime;
+        private readonly ILogger<HangfireJobService> _logger;
 
         public HangfireJobService(
             IMediator mediator,
             ITenantProvider tenantProvider,
             CentralDbContext centralDb,
             IEncryptionService encryptionService,
-            TenantHangfireRuntime tenantHangfireRuntime)
+            TenantHangfireRuntime tenantHangfireRuntime,
+            ILogger<HangfireJobService> logger)
         {
             _mediator = mediator;
             _tenantProvider = tenantProvider;
             _centralDb = centralDb;
             _encryptionService = encryptionService;
             _tenantHangfireRuntime = tenantHangfireRuntime;
+            _logger = logger;
         }
 
         private string GetCurrentCompanyKey()
@@ -40,9 +44,15 @@ namespace APITeamsV3.Infrastructure.Services
         /// Resolves and sets the tenant context for a Hangfire background job scope.
         /// Must be called at the start of every Send* method.
         /// </summary>
-        private async Task ResolveTenantAsync(string companyKey)
+        private async Task<APITeamsV3.Domain.Entities.CompanyConfig> ResolveTenantAsync(string companyKey, bool includePilotSections = false)
         {
-            var config = await _centralDb.CompanyConfigs
+            var query = _centralDb.CompanyConfigs.AsQueryable();
+            if (includePilotSections)
+            {
+                query = query.Include(c => c.PilotSections);
+            }
+
+            var config = await query
                 .FirstOrDefaultAsync(c => c.CompanyKey == companyKey && c.IsActive);
 
             if (config == null)
@@ -57,6 +67,32 @@ namespace APITeamsV3.Infrastructure.Services
                 GraphClientId = config.GraphClientId,
                 GraphClientSecret = config.GraphClientSecretRef
             });
+
+            return config;
+        }
+
+        private async Task<bool> ShouldRunForSectionAsync(string companyKey, int idSeccion, string jobName)
+        {
+            var config = await ResolveTenantAsync(companyKey, includePilotSections: true);
+
+            if (!config.IsPilotMode)
+            {
+                return true;
+            }
+
+            var allowed = config.PilotSections.Any(ps => ps.IdSeccion == idSeccion);
+            if (allowed)
+            {
+                return true;
+            }
+
+            _logger.LogWarning(
+                "Hangfire job {JobName} omitido para seccion {IdSeccion} en tenant {CompanyKey}: fuera de la lista piloto.",
+                jobName,
+                idSeccion,
+                companyKey);
+
+            return false;
         }
 
         // Capture tenant key at request time, but enqueue against the tenant's own Hangfire storage.
@@ -144,28 +180,28 @@ namespace APITeamsV3.Infrastructure.Services
         [JobDisplayName("Generate Schedule: Section {0} [{1}]")]
         public async Task SendGenerateSchedule(int idSeccion, string companyKey)
         {
-            await ResolveTenantAsync(companyKey);
+            if (!await ShouldRunForSectionAsync(companyKey, idSeccion, "GenerateSchedule")) return;
             await _mediator.Send(new GenerateSectionScheduleCommand(idSeccion));
         }
 
         [JobDisplayName("Sync Dates: Section {0} [{1}]")]
         public async Task SendSyncDates(int idSeccion, string companyKey)
         {
-            await ResolveTenantAsync(companyKey);
+            if (!await ShouldRunForSectionAsync(companyKey, idSeccion, "SyncDates")) return;
             await _mediator.Send(new SyncSessionDatesCommand(idSeccion));
         }
 
         [JobDisplayName("Sync Facilitator: Section {0} [{1}]")]
         public async Task SendSyncFacilitator(int idSeccion, string companyKey)
         {
-            await ResolveTenantAsync(companyKey);
+            if (!await ShouldRunForSectionAsync(companyKey, idSeccion, "SyncFacilitator")) return;
             await _mediator.Send(new SyncSessionFacilitatorCommand(idSeccion));
         }
 
         [JobDisplayName("Sync Roster: Section {0} (Full: {1}) [{2}]")]
         public async Task SendSyncRoster(int idSeccion, bool fullSync, string companyKey)
         {
-            await ResolveTenantAsync(companyKey);
+            if (!await ShouldRunForSectionAsync(companyKey, idSeccion, "SyncRoster")) return;
             var command = new SyncSessionRosterCommand
             {
                 IdSeccion = idSeccion,
@@ -177,35 +213,35 @@ namespace APITeamsV3.Infrastructure.Services
         [JobDisplayName("Update Join URL: Section {0} [{3}]")]
         public async Task SendUpdateJoinUrl(int idSeccion, string joinUrl, string idEvento, string companyKey)
         {
-            await ResolveTenantAsync(companyKey);
+            if (!await ShouldRunForSectionAsync(companyKey, idSeccion, "UpdateJoinUrl")) return;
             await _mediator.Send(new UpdateSectionJoinUrlCommand(idSeccion, joinUrl, idEvento));
         }
 
         [JobDisplayName("Sync Missing Students: Section {0} [{1}]")]
         public async Task SendSyncMissingStudents(int idSeccion, string companyKey)
         {
-            await ResolveTenantAsync(companyKey);
+            if (!await ShouldRunForSectionAsync(companyKey, idSeccion, "SyncMissingStudents")) return;
             await _mediator.Send(new SyncMissingStudentsCommand(idSeccion));
         }
 
         [JobDisplayName("Sync Obsolete Students: Section {0} [{1}]")]
         public async Task SendSyncObsoleteStudents(int idSeccion, string companyKey)
         {
-            await ResolveTenantAsync(companyKey);
+            if (!await ShouldRunForSectionAsync(companyKey, idSeccion, "SyncObsoleteStudents")) return;
             await _mediator.Send(new SyncObsoleteStudentsCommand(idSeccion));
         }
 
         [JobDisplayName("Sync Renamed Teams: Section {0} [{1}]")]
         public async Task SendSyncRenamedTeams(int idSeccion, string companyKey)
         {
-            await ResolveTenantAsync(companyKey);
+            if (!await ShouldRunForSectionAsync(companyKey, idSeccion, "SyncRenamedTeams")) return;
             await _mediator.Send(new SyncRenamedTeamsCommand(idSeccion));
         }
 
         [JobDisplayName("Sync Section Team V3: Section {0} [{1}]")]
         public async Task SendSyncSectionTeam(int idSeccion, string companyKey, string? jobId)
         {
-            await ResolveTenantAsync(companyKey);
+            if (!await ShouldRunForSectionAsync(companyKey, idSeccion, "SyncSectionTeam")) return;
             await _mediator.Send(new SyncSectionTeamCommand(idSeccion, companyKey, jobId));
         }
     }

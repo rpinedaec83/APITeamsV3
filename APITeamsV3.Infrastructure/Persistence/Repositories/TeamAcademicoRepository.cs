@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using APITeamsV3.Application.Common.Interfaces;
@@ -16,10 +17,13 @@ namespace APITeamsV3.Infrastructure.Persistence.Repositories
 
         public async Task<TeamEntity?> GetBySeccionIdAsync(int idSeccionSmart)
         {
-            // Buscamos priorizando el estado activo 'A' sobre inactivas 'I'
+            // Priorizar equipo activo y, dentro de ellos, el registro mas reciente.
             return await _context.Set<TeamEntity>()
-                                 .OrderBy(t => t.EstadoTeam) // 'A' asciende sobre 'I'
-                                 .FirstOrDefaultAsync(t => t.IdSeccionSmart == idSeccionSmart);
+                                 .Where(t => t.IdSeccionSmart == idSeccionSmart)
+                                 .OrderBy(t => t.EstadoTeam == "A" ? 0 : 1)
+                                 .ThenByDescending(t => t.FechaModificacion ?? t.FechaCreacion)
+                                 .ThenByDescending(t => t.FechaCreacion)
+                                 .FirstOrDefaultAsync();
         }
         
         public async Task<TeamEntity?> GetByIdTeamsAsync(string idTeams)
