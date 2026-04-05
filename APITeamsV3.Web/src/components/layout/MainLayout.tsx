@@ -181,13 +181,13 @@ const MainLayout: React.FC = () => {
     const [hangfireHealthLoading, setHangfireHealthLoading] = useState(false);
 
     const allMenuItems = [
-        { label: 'Dashboard', icon: <HomeRegular />, path: '/' },
-        { label: 'Operations', icon: <OrganizationRegular />, path: '/operations' },
-        { label: 'Hangfire Jobs', icon: <TimerRegular />, path: '/jobs', allowedRoles: ['ADMIN', 'IT'] },
-        { label: 'Sync Schedules', icon: <CalendarClockRegular />, path: '/schedules', allowedRoles: ['ADMIN', 'IT'] },
+        { label: 'Tablero', icon: <HomeRegular />, path: '/' },
+        { label: 'Operaciones', icon: <OrganizationRegular />, path: '/operations' },
+        { label: 'Tareas Programadas', icon: <TimerRegular />, path: '/jobs', allowedRoles: ['ADMIN', 'IT'] },
+        { label: 'Horarios de Sinc.', icon: <CalendarClockRegular />, path: '/schedules', allowedRoles: ['ADMIN', 'IT'] },
         { label: 'Logs Operativos', icon: <DocumentSearchRegular />, path: '/logs', allowedRoles: ['ADMIN', 'IT', 'GESTION'] },
-        { label: 'Advanced Reports', icon: <GridDotsRegular />, path: '/reports', allowedRoles: ['ADMIN', 'IT', 'GESTION'] },
-        { label: 'Company Configs', icon: <SettingsRegular />, path: '/admin/company-configs', allowedRoles: ['ADMIN', 'IT'] },
+        { label: 'Reportes Avanzados', icon: <GridDotsRegular />, path: '/reports', allowedRoles: ['ADMIN', 'IT', 'GESTION'] },
+        { label: 'Configuraciones', icon: <SettingsRegular />, path: '/admin/company-configs', allowedRoles: ['ADMIN', 'IT'] },
     ];
 
     const menuItems = allMenuItems.filter(item => {
@@ -276,7 +276,7 @@ const MainLayout: React.FC = () => {
                 </nav>
 
                 <div className={styles.footer}>
-                    <Button icon={<SignOutRegular />} appearance="subtle" onClick={handleSignOut}>Sign Out</Button>
+                    <Button icon={<SignOutRegular />} appearance="subtle" onClick={handleSignOut}>Cerrar Sesión</Button>
                 </div>
             </div>
 
@@ -300,10 +300,10 @@ const MainLayout: React.FC = () => {
 
                         <div className={styles.userProfile}>
                             <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column' }}>
-                                <span style={{ fontWeight: 600, fontSize: '14px' }}>{account?.name || "User"}</span>
+                                <span style={{ fontWeight: 600, fontSize: '14px' }}>{account?.name || "Usuario"}</span>
                                 <span style={{ fontSize: '12px', color: tokens.colorNeutralForeground3 }}>{account?.username || ""}</span>
                             </div>
-                            <Avatar name={account?.name || "User"} color="colorful" />
+                            <Avatar name={account?.name || "Usuario"} color="colorful" />
                         </div>
                     </div>
                 </header>

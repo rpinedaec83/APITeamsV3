@@ -494,14 +494,14 @@ const Dashboard: React.FC = () => {
                     <div className={styles.heroGlow} />
                     <div className={styles.heroGlowSecondary} />
                     <div className={styles.heroContent}>
-                        <div className={styles.eyebrow}>Operational Overview</div>
+                        <div className={styles.eyebrow}>Resumen Operativo</div>
                         <Title1 style={{ color: '#fff', margin: 0 }}>Dashboard Ejecutivo</Title1>
                         <Text style={{ color: 'rgba(255,255,255,0.78)' }}>
                             {summary?.displayName ?? 'Tenant actual'} · Bienvenido, {accounts[0]?.name}
                         </Text>
                         <div className={styles.heroMeta}>
                             <Badge appearance="filled" color={summary?.isPilotMode ? 'warning' : 'success'}>
-                                {summary?.isPilotMode ? 'Pilot Mode activo' : 'Full rollout'}
+                                {summary?.isPilotMode ? 'Pilot Mode activo' : 'Despliegue total'}
                             </Badge>
                             {summary?.defaultChannelName ? (
                                 <Badge appearance="filled" color="informative">Canal default: {summary.defaultChannelName}</Badge>
@@ -682,7 +682,7 @@ const Dashboard: React.FC = () => {
                         <div className={styles.panelBody}>
                             <div className={styles.filterBar}>
                                 <div className={styles.filterField}>
-                                    <Text size={200} weight="semibold">Busqueda inteligente</Text>
+                                    <Text size={200} weight="semibold">Búsqueda inteligente</Text>
                                     <Input
                                         value={searchTerm}
                                         onChange={(_, data) => setSearchTerm(data.value)}
@@ -735,7 +735,7 @@ const Dashboard: React.FC = () => {
                                         <option value="all">Todas</option>
                                         <option value="high">Alta</option>
                                         <option value="medium">Media</option>
-                                        <option value="low">Critica</option>
+                                        <option value="low">Crítica</option>
                                     </Select>
                                 </div>
                             </div>

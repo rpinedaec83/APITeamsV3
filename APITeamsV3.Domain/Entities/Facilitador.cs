@@ -6,7 +6,7 @@ namespace APITeamsV3.Domain.Entities
     {
         [Key]
         public int IdFacilitador { get; set; }
-        public string CodigoAnterior { get; set; }
-        public string EmailInstitucion { get; set; }
+        public string CodigoAnterior { get; set; } = string.Empty;
+        public string EmailInstitucion { get; set; } = string.Empty;
     }
 }

@@ -173,26 +173,26 @@ const ScheduleExecutionsPage: React.FC = () => {
         <div className={styles.root}>
             <div className={styles.header}>
                 <div>
-                    <Title1 style={{ margin: 0 }}>Detalle de ejecuciones del schedule</Title1>
+                    <Title1 style={{ margin: 0 }}>Detalle de ejecuciones</Title1>
                     <Text>
-                        Revisa el historial de disparos, resultados y jobs encolados por la programación.
+                        Revisa el historial de disparos, resultados y tareas encoladas por la programación.
                     </Text>
                 </div>
                 <Button appearance="secondary" icon={<ArrowLeftRegular />} onClick={() => navigate('/schedules')}>
-                    Volver a schedules
+                    Volver a programaciones
                 </Button>
             </div>
 
             {loading ? (
                 <Card className={styles.card}>
                     <div className={styles.cardBody}>
-                        <Spinner label="Cargando detalle del schedule..." />
+                        <Spinner label="Cargando detalle de la programación..." />
                     </div>
                 </Card>
             ) : !details ? (
                 <Card className={styles.card}>
                     <div className={styles.cardBody}>
-                        <Title3>No se encontró el schedule</Title3>
+                        <Title3>No se encontró la programación</Title3>
                     </div>
                 </Card>
             ) : (
@@ -202,7 +202,7 @@ const ScheduleExecutionsPage: React.FC = () => {
                             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
                                 <div>
                                     <Title3 style={{ margin: 0 }}>{details.companyName}</Title3>
-                                    <Text>Schedule #{details.id} · {details.timeZoneId}</Text>
+                                    <Text>Programación #{details.id} · {details.timeZoneId}</Text>
                                 </div>
                                 <Badge appearance="filled" color={details.isEnabled ? 'success' : 'danger'}>
                                     {details.isEnabled ? 'Activo' : 'Inactivo'}
@@ -250,9 +250,9 @@ const ScheduleExecutionsPage: React.FC = () => {
                                                         : execution.status === 'Failed'
                                                             ? <ErrorCircleRegular color={tokens.colorPaletteRedForeground1} />
                                                             : <ClockRegular color={tokens.colorNeutralForeground3} />}
-                                                    <Text weight="semibold">Run #{execution.id}</Text>
+                                                    <Text weight="semibold">Ejecución #{execution.id}</Text>
                                                     <Badge appearance="filled" color={execution.status === 'Succeeded' ? 'success' : execution.status === 'Failed' ? 'danger' : 'warning'}>
-                                                        {execution.status}
+                                                        {execution.status === 'Succeeded' ? 'Completado' : execution.status === 'Failed' ? 'Fallido' : execution.status}
                                                     </Badge>
                                                 </div>
                                                 <Text size={200}>{formatDateTime(execution.triggeredAtUtc, details.timeZoneId)}</Text>

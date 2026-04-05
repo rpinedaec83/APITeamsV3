@@ -7,7 +7,7 @@ namespace APITeamsV3.Domain.Entities
     {
         [Key]
         public int IdSeccion { get; set; }
-        public string UrlClaseVirtual { get; set; }
-        public string IdEvento { get; set; }
+        public string UrlClaseVirtual { get; set; } = string.Empty;
+        public string IdEvento { get; set; } = string.Empty;
     }
 }

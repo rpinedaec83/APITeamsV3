@@ -104,7 +104,7 @@ const NoAccessPage: React.FC = () => {
                 <Title1>Acceso Restringido</Title1>
                 
                 <div className={styles.userInfo}>
-                    <Avatar name={account?.name || "User"} size={32} color="colorful" />
+                    <Avatar name={account?.name || "Usuario"} size={32} color="colorful" />
                     <div style={{ textAlign: 'left' }}>
                         <div style={{ fontWeight: 600, fontSize: '14px' }}>{account?.name}</div>
                         <div style={{ fontSize: '12px', color: tokens.colorNeutralForeground4 }}>{account?.username}</div>

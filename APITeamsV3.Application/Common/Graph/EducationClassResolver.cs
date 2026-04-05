@@ -62,7 +62,6 @@ namespace APITeamsV3.Application.Common.Graph
                 requestConfiguration =>
                 {
                     requestConfiguration.QueryParameters.Filter = $"mailNickname eq '{escaped}'";
-                    requestConfiguration.QueryParameters.Top = 5;
                 },
                 cancellationToken);
 
@@ -119,7 +118,6 @@ namespace APITeamsV3.Application.Common.Graph
                 {
                     requestConfiguration.QueryParameters.Filter = $"mailNickname eq '{escaped}'";
                     requestConfiguration.QueryParameters.Select = new[] { "id", "mailNickname" };
-                    requestConfiguration.QueryParameters.Top = 5;
                 },
                 cancellationToken);
 

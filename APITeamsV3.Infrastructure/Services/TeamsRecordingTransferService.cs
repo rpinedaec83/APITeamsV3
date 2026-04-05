@@ -468,7 +468,6 @@ namespace APITeamsV3.Infrastructure.Services
                 .GetAsync(
                     requestConfiguration =>
                     {
-                        requestConfiguration.QueryParameters.Top = pageSize;
                         requestConfiguration.QueryParameters.Select = ["id", "name", "file", "size", "webUrl", "createdDateTime", "lastModifiedDateTime"];
                     },
                     cancellationToken);
@@ -656,7 +655,6 @@ namespace APITeamsV3.Infrastructure.Services
                 .GetAsync(
                     requestConfiguration =>
                     {
-                        requestConfiguration.QueryParameters.Top = 200;
                         requestConfiguration.QueryParameters.Select = ["id", "displayName"];
                     },
                     cancellationToken);
@@ -881,7 +879,6 @@ namespace APITeamsV3.Infrastructure.Services
             CancellationToken cancellationToken)
         {
             DriveItemCollectionResponse? response;
-            var pageSize = Math.Max(50, _options.ListPageSize);
 
             if (string.Equals(folderId, "root", StringComparison.OrdinalIgnoreCase))
             {
@@ -891,7 +888,6 @@ namespace APITeamsV3.Infrastructure.Services
                     .GetAsync(
                         requestConfiguration =>
                         {
-                            requestConfiguration.QueryParameters.Top = pageSize;
                             requestConfiguration.QueryParameters.Select = ["id", "name", "file", "size", "webUrl", "createdDateTime", "lastModifiedDateTime"];
                         },
                         cancellationToken);
@@ -904,7 +900,6 @@ namespace APITeamsV3.Infrastructure.Services
                     .GetAsync(
                         requestConfiguration =>
                         {
-                            requestConfiguration.QueryParameters.Top = pageSize;
                             requestConfiguration.QueryParameters.Select = ["id", "name", "file", "size", "webUrl", "createdDateTime", "lastModifiedDateTime"];
                         },
                         cancellationToken);

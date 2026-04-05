@@ -15,6 +15,6 @@ namespace APITeamsV3.Domain.Entities
         // Additional properties that might be useful based on SQL usage
         public int? IdActorProgramado { get; set; }
         public int? IdActorReemplazo { get; set; }
-        public string Estado { get; set; }
+        public string Estado { get; set; } = string.Empty;
     }
 }

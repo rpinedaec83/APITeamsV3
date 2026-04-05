@@ -174,8 +174,8 @@ const CompanyConfigsPage: React.FC = () => {
         <div style={{ padding: '40px', maxWidth: '1200px', margin: '0 auto' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
                 <div>
-                    <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 600 }}>Company Configurations</h1>
-                    <p style={{ margin: '4px 0 0', color: '#666' }}>Manage tenant configurations for the provisioning system.</p>
+                    <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 600 }}>Configuraciones de Empresa</h1>
+                    <p style={{ margin: '4px 0 0', color: '#666' }}>Gestiona las configuraciones de tenant para el sistema de aprovisionamiento.</p>
                 </div>
                 <div style={{ display: 'flex', gap: '12px' }}>
                     <Button
@@ -186,7 +186,7 @@ const CompanyConfigsPage: React.FC = () => {
                     >
                         {validationLoading ? 'Validando...' : 'Validar conexiones'}
                     </Button>
-                    <Button appearance="primary" icon={<AddRegular />} onClick={openCreate}>Add Configuration</Button>
+                    <Button appearance="primary" icon={<AddRegular />} onClick={openCreate}>Agregar Configuración</Button>
                 </div>
             </div>
 
@@ -250,13 +250,13 @@ const CompanyConfigsPage: React.FC = () => {
                     <TableHeader>
                         <TableRow>
                             <TableHeaderCell style={{ width: '40px' }}>ID</TableHeaderCell>
-                            <TableHeaderCell style={{ width: '110px' }}>Key</TableHeaderCell>
-                            <TableHeaderCell style={{ width: '120px' }}>Name</TableHeaderCell>
+                            <TableHeaderCell style={{ width: '110px' }}>Clave</TableHeaderCell>
+                            <TableHeaderCell style={{ width: '120px' }}>Nombre</TableHeaderCell>
                             <TableHeaderCell style={{ width: '180px' }}>Front Host</TableHeaderCell>
                             <TableHeaderCell style={{ width: '200px' }}>API Host</TableHeaderCell>
                             <TableHeaderCell style={{ width: '140px' }}>SPA Tenant</TableHeaderCell>
-                            <TableHeaderCell style={{ width: '70px' }}>Active</TableHeaderCell>
-                            <TableHeaderCell style={{ width: '120px' }}>Actions</TableHeaderCell>
+                            <TableHeaderCell style={{ width: '70px' }}>Estado</TableHeaderCell>
+                            <TableHeaderCell style={{ width: '120px' }}>Acciones</TableHeaderCell>
                         </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -279,12 +279,12 @@ const CompanyConfigsPage: React.FC = () => {
                                             fontSize: '12px',
                                             fontWeight: 600
                                         }}>
-                                            {c.isActive ? 'Active' : 'Inactive'}
+                                            {c.isActive ? 'Activo' : 'Inactivo'}
                                         </span>
                                     </TableCell>
                                     <TableCell>
                                         <div style={{ display: 'flex', gap: '4px' }}>
-                                            <Tooltip content="Manage Sedes" relationship="label">
+                                            <Tooltip content="Gestionar Sedes" relationship="label">
                                                 <Button icon={<BuildingRegular />} appearance="subtle" size="small" onClick={() => openSedes(c)} />
                                             </Tooltip>
                                             <Button icon={<EditRegular />} size="small" onClick={() => openEdit(c)} />
@@ -302,16 +302,16 @@ const CompanyConfigsPage: React.FC = () => {
             <Dialog open={isOpen} onOpenChange={(_, data) => setIsOpen(data.open)}>
                 <DialogSurface>
                     <DialogBody>
-                        <DialogTitle>{isEditing ? 'Edit Configuration' : 'New Configuration'}</DialogTitle>
+                        <DialogTitle>{isEditing ? 'Editar Configuración' : 'Nueva Configuración'}</DialogTitle>
                         <DialogContent style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '10px' }}>
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                    <Label required>Company Key</Label>
-                                    <Input value={currentConfig.companyKey || ''} onChange={(_, d) => setCurrentConfig({ ...currentConfig, companyKey: d.value })} placeholder="e.g. zegel" />
+                                    <Label required>Clave de Empresa</Label>
+                                    <Input value={currentConfig.companyKey || ''} onChange={(_, d) => setCurrentConfig({ ...currentConfig, companyKey: d.value })} placeholder="ej. zegel" />
                                 </div>
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                    <Label required>Display Name</Label>
-                                    <Input value={currentConfig.displayName || ''} onChange={(_, d) => setCurrentConfig({ ...currentConfig, displayName: d.value })} placeholder="e.g. Zegel" />
+                                    <Label required>Nombre Distintivo</Label>
+                                    <Input value={currentConfig.displayName || ''} onChange={(_, d) => setCurrentConfig({ ...currentConfig, displayName: d.value })} placeholder="ej. Zegel" />
                                 </div>
                             </div>
 
@@ -338,7 +338,7 @@ const CompanyConfigsPage: React.FC = () => {
                             </div>
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '16px' }}>
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                    <Label>Smart Connection String</Label>
+                                    <Label>Cadena de Conexión Smart</Label>
                                     <Input
                                         value={currentConfig.smartConnectionString || ''}
                                         type="password"
@@ -354,7 +354,7 @@ const CompanyConfigsPage: React.FC = () => {
                             </div>
 
                             <div style={{ padding: '10px', background: '#f5f5f5', borderRadius: '4px' }}>
-                                <h4 style={{ margin: '0 0 10px 0' }}>Graph API Settings</h4>
+                                <h4 style={{ margin: '0 0 10px 0' }}>Configuración de Graph API</h4>
                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                                         <Label>Tenant ID</Label>
@@ -366,11 +366,11 @@ const CompanyConfigsPage: React.FC = () => {
                                     </div>
                                 </div>
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '10px' }}>
-                                    <Label>Client Secret Ref</Label>
+                                    <Label>Referencia Client Secret</Label>
                                     <Input
                                         value={currentConfig.graphClientSecretRef || ''}
                                         type="password"
-                                        placeholder={isEditing ? 'Dejar vacío para conservar el valor actual' : 'Secret ref o valor configurado'}
+                                        placeholder={isEditing ? 'Dejar vacío para conservar el valor actual' : 'Referencia o valor configurado'}
                                         onChange={(_, d) => setCurrentConfig({ ...currentConfig, graphClientSecretRef: d.value })}
                                     />
                                     {isEditing && (
@@ -382,49 +382,49 @@ const CompanyConfigsPage: React.FC = () => {
                             </div>
 
                             <div style={{ padding: '10px', background: '#e1f5fe', borderRadius: '4px', border: '1px solid #b3e5fc' }}>
-                                <h4 style={{ margin: '0 0 10px 0', color: '#01579b' }}>Academic & Domain Fallback</h4>
+                                <h4 style={{ margin: '0 0 10px 0', color: '#01579b' }}>Respaldo de Dominio Académico</h4>
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                    <Label>Teachers Alternative Domain</Label>
+                                    <Label>Dominio Alternativo para Docentes</Label>
                                     <Input 
                                         value={currentConfig.teacherAltDomain || ''} 
                                         onChange={(_, d) => setCurrentConfig({ ...currentConfig, teacherAltDomain: d.value })} 
-                                        placeholder="e.g. zegel.pe" 
+                                        placeholder="ej. zegel.pe" 
                                     />
                                     <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#0277bd' }}>
-                                        Used as a fallback if the primary institutional email is not found in Azure AD.
+                                        Utilizado como respaldo si el correo institucional principal no se encuentra en Azure AD.
                                     </p>
                                 </div>
                             </div>
 
                             <div style={{ padding: '10px', background: '#fff3cd', borderRadius: '4px', border: '1px solid #ffeeba' }}>
-                                <h4 style={{ margin: '0 0 10px 0', color: '#856404' }}>Pilot Mode Configuration</h4>
+                                <h4 style={{ margin: '0 0 10px 0', color: '#856404' }}>Configuración de Modo Piloto</h4>
                                 <Switch 
-                                    label={currentConfig.isPilotMode ? "Pilot Mode Enabled" : "Pilot Mode Disabled"} 
+                                    label={currentConfig.isPilotMode ? "Modo Piloto Habilitado" : "Modo Piloto Deshabilitado"} 
                                     checked={currentConfig.isPilotMode || false} 
                                     onChange={(_, d) => setCurrentConfig({ ...currentConfig, isPilotMode: d.checked })} 
                                 />
                                 {currentConfig.isPilotMode && (
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '10px' }}>
-                                        <Label>Allowed Section IDs (Comma-separated)</Label>
+                                        <Label>IDs de Sección Permitidos (Separados por coma)</Label>
                                         <Input 
                                             value={currentConfig.pilotSections?.join(', ') || ''} 
                                             onChange={(_, d) => {
                                                 const vals = d.value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
                                                 setCurrentConfig({ ...currentConfig, pilotSections: vals });
                                             }} 
-                                            placeholder="e.g. 416734, 415868" 
+                                            placeholder="ej. 416734, 415868" 
                                         />
                                     </div>
                                 )}
                             </div>
 
                             <div>
-                                <Switch label={currentConfig.isActive ? "Active" : "Inactive"} checked={currentConfig.isActive} onChange={(_, d) => setCurrentConfig({ ...currentConfig, isActive: d.checked })} />
+                                <Switch label={currentConfig.isActive ? "Activo" : "Inactivo"} checked={currentConfig.isActive} onChange={(_, d) => setCurrentConfig({ ...currentConfig, isActive: d.checked })} />
                             </div>
                         </DialogContent>
-                        <DialogActions>
-                            <Button appearance="secondary" onClick={() => setIsOpen(false)}>Cancel</Button>
-                            <Button appearance="primary" onClick={handleSave}>Save Changes</Button>
+                         <DialogActions>
+                            <Button appearance="secondary" onClick={() => setIsOpen(false)}>Cancelar</Button>
+                            <Button appearance="primary" onClick={handleSave}>Guardar Cambios</Button>
                         </DialogActions>
                     </DialogBody>
                 </DialogSurface>

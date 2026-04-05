@@ -381,8 +381,8 @@ const OperationsPage: React.FC = () => {
                 <div className={styles.headerTitle}>
                     <Avatar color="brand" icon={<GridDotsRegular />} size={48} />
                     <div>
-                        <Title3>Operations Dashboard</Title3>
-                        <div style={{ fontSize: '12px', color: tokens.colorNeutralForeground2 }}>Teams Provisioning Management</div>
+                        <Title3>Dashboard de Operaciones</Title3>
+                        <div style={{ fontSize: '12px', color: tokens.colorNeutralForeground2 }}>Gestión de Aprovisionamiento de Teams</div>
                     </div>
                 </div>
                 <div style={{ display: 'flex', gap: '10px' }}>

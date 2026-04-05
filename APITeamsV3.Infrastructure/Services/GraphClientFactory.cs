@@ -91,6 +91,7 @@ namespace APITeamsV3.Infrastructure.Services
                     "La cuenta tecnica activa no tiene UsernameApp/PasswordApp/AppClientId/TenantId completos para token delegado.");
             }
 
+#pragma warning disable CS0618
             var options = new UsernamePasswordCredentialOptions
             {
                 AuthorityHost = AzureAuthorityHosts.AzurePublicCloud
@@ -102,6 +103,7 @@ namespace APITeamsV3.Infrastructure.Services
                 tenantId,
                 clientId,
                 options);
+#pragma warning restore CS0618
 
             var scopes = new[] { "https://graph.microsoft.com/.default" };
             var graphClient = new GraphServiceClient(delegatedCredential, scopes);

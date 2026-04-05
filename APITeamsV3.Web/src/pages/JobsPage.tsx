@@ -207,8 +207,8 @@ interface JobDefinition {
 const JOB_DEFINITIONS: JobDefinition[] = [
     {
         key: 'sync-missing-students',
-        label: 'Sync Alumnos Faltantes',
-        description: 'Busca alumnos en Smart que aun no estan en el Team.',
+        label: 'Sinc. Alumnos Faltantes',
+        description: 'Busca alumnos en Smart que aún no están en el Team.',
         endpoint: '/jobs/sync-missing-students',
         icon: <PeopleRegular />,
         color: tokens.colorPaletteBlueBorderActive,
@@ -216,8 +216,8 @@ const JOB_DEFINITIONS: JobDefinition[] = [
     },
     {
         key: 'sync-obsolete-students',
-        label: 'Sync Alumnos Obsoletos',
-        description: 'Busca alumnos en Team que ya no estan matriculados.',
+        label: 'Sinc. Alumnos Obsoletos',
+        description: 'Busca alumnos en Team que ya no están matriculados.',
         endpoint: '/jobs/sync-obsolete-students',
         icon: <PersonDeleteRegular />,
         color: tokens.colorPaletteRedBorderActive,
@@ -225,8 +225,8 @@ const JOB_DEFINITIONS: JobDefinition[] = [
     },
     {
         key: 'sync-renamed-teams',
-        label: 'Sync Equipos Renombrados',
-        description: 'Alinea nombre y descripcion de Teams con Smart.',
+        label: 'Sinc. Equipos Renombrados',
+        description: 'Alinea nombre y descripción de Teams con Smart.',
         endpoint: '/jobs/sync-renamed-teams',
         icon: <RenameRegular />,
         color: tokens.colorPaletteMarigoldBorderActive,
@@ -234,7 +234,7 @@ const JOB_DEFINITIONS: JobDefinition[] = [
     },
     {
         key: 'sync-facilitator',
-        label: 'Sync Facilitador',
+        label: 'Sinc. Facilitador',
         description: 'Alinea facilitador de Smart con owners del Team.',
         endpoint: '/jobs/sync-facilitator',
         icon: <PersonRegular />,
@@ -243,7 +243,7 @@ const JOB_DEFINITIONS: JobDefinition[] = [
     },
     {
         key: 'sync-roster',
-        label: 'Sincronizacion Operativa Completa',
+        label: 'Sinc. Operativa Completa',
         description: 'Crea o actualiza el Team, sincroniza docentes y alumnos, y ajusta la agenda sin regenerarla manualmente.',
         endpoint: '/jobs/sync-roster',
         icon: <ArrowSyncRegular />,
@@ -253,7 +253,7 @@ const JOB_DEFINITIONS: JobDefinition[] = [
     {
         key: 'generate-schedule',
         label: 'Generar Agendas',
-        description: 'Genera agendas en Teams para la seccion.',
+        description: 'Genera agendas en Teams para la sección.',
         endpoint: '/jobs/generate-schedule',
         icon: <CalendarRegular />,
         color: tokens.colorPaletteGreenBorderActive,
@@ -261,7 +261,7 @@ const JOB_DEFINITIONS: JobDefinition[] = [
     },
     {
         key: 'sync-dates',
-        label: 'Sync Fechas',
+        label: 'Sinc. Fechas',
         description: 'Sincroniza fechas de sesiones Teams con Smart.',
         endpoint: '/jobs/sync-dates',
         icon: <CalendarSyncRegular />,
@@ -395,9 +395,9 @@ const JobsPage: React.FC = () => {
                 <div className={styles.headerTitle}>
                     <Avatar color="brand" icon={<TimerRegular />} size={48} />
                     <div>
-                        <Title3>Hangfire Jobs</Title3>
+                        <Title3>Tareas Programadas (Hangfire)</Title3>
                         <div style={{ fontSize: '12px', color: tokens.colorNeutralForeground2 }}>
-                            Ejecuta tareas y revisa estado real de Hangfire
+                            Ejecuta tareas y revisa estado real de los procesos en segundo plano
                         </div>
                     </div>
                 </div>
