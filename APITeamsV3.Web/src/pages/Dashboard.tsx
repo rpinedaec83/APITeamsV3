@@ -39,8 +39,8 @@ const useStyles = makeStyles({
         padding: '28px',
         display: 'flex',
         flexDirection: 'column',
-        gap: '20px',
-        background: 'linear-gradient(180deg, #eef2f7 0%, #e6ecf5 100%)',
+        gap: '24px',
+        background: 'radial-gradient(circle at 10% 20%, rgba(243, 248, 253, 1) 0%, rgba(228, 237, 248, 1) 90%)',
     },
     hero: {
         display: 'grid',
@@ -52,21 +52,34 @@ const useStyles = makeStyles({
     },
     heroPanel: {
         color: '#fff',
-        background: 'linear-gradient(135deg, #1f2d3d 0%, #2c3e50 55%, #39516b 100%)',
-        ...shorthands.borderRadius('18px'),
-        ...shorthands.padding('24px'),
-        boxShadow: '0 18px 36px rgba(31, 45, 61, 0.24)',
+        background: 'linear-gradient(135deg, rgba(31, 45, 61, 0.95) 0%, rgba(44, 62, 80, 0.9) 55%, rgba(57, 81, 107, 0.85) 100%)',
+        backdropFilter: 'blur(12px)',
+        ...shorthands.borderRadius('24px'),
+        ...shorthands.padding('32px'),
+        boxShadow: '0 24px 48px rgba(31, 45, 61, 0.3)',
         position: 'relative',
         overflow: 'hidden',
+        border: '1px solid rgba(255, 255, 255, 0.08)',
     },
     heroGlow: {
         position: 'absolute',
-        insetInlineEnd: '-80px',
-        insetBlockStart: '-50px',
-        width: '240px',
-        height: '240px',
+        insetInlineEnd: '-60px',
+        insetBlockStart: '-60px',
+        width: '320px',
+        height: '320px',
         borderRadius: '999px',
-        background: 'radial-gradient(circle, rgba(0,192,239,0.28) 0%, rgba(0,192,239,0) 72%)',
+        background: 'radial-gradient(circle, rgba(0,192,239,0.35) 0%, rgba(0,192,239,0.15) 45%, rgba(0,192,239,0) 75%)',
+        filter: 'blur(40px)',
+    },
+    heroGlowSecondary: {
+        position: 'absolute',
+        insetInlineStart: '-40px',
+        insetBlockEnd: '-40px',
+        width: '200px',
+        height: '200px',
+        borderRadius: '999px',
+        background: 'radial-gradient(circle, rgba(142, 68, 173, 0.2) 0%, rgba(142, 68, 173, 0) 70%)',
+        filter: 'blur(30px)',
     },
     heroContent: {
         position: 'relative',
@@ -96,10 +109,21 @@ const useStyles = makeStyles({
         },
     },
     heroMetric: {
-        backgroundColor: 'rgba(255,255,255,0.08)',
-        ...shorthands.borderRadius('14px'),
-        ...shorthands.padding('14px'),
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '6px',
+        backgroundColor: 'rgba(255,255,255,0.1)',
+        ...shorthands.borderRadius('16px'),
+        ...shorthands.padding('20px'),
         border: '1px solid rgba(255,255,255,0.08)',
+        transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+        cursor: 'default',
+        '&:hover': {
+            backgroundColor: 'rgba(255,255,255,0.18)',
+            transform: 'translateY(-4px)',
+            ...shorthands.borderColor('rgba(255,255,255,0.2)'),
+            boxShadow: '0 8px 16px rgba(0,0,0,0.2)',
+        }
     },
     sidePanel: {
         backgroundColor: '#ffffff',
@@ -123,22 +147,29 @@ const useStyles = makeStyles({
     },
     smallBox: {
         position: 'relative',
-        minHeight: '164px',
+        minHeight: '172px',
         color: '#fff',
-        ...shorthands.borderRadius('16px'),
-        ...shorthands.padding('20px'),
-        boxShadow: tokens.shadow8,
+        ...shorthands.borderRadius('20px'),
+        ...shorthands.padding('24px'),
+        boxShadow: '0 8px 16px rgba(44, 62, 80, 0.12)',
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'space-between',
+        transition: 'all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
+        border: '1px solid rgba(255,255,255,0.12)',
+        '&:hover': {
+            transform: 'translateY(-6px)',
+            boxShadow: '0 20px 40px rgba(44, 62, 80, 0.2)',
+        },
     },
     smallBoxIcon: {
         position: 'absolute',
-        insetInlineEnd: '18px',
-        insetBlockStart: '18px',
-        opacity: 0.18,
+        insetInlineEnd: '20px',
+        insetBlockStart: '20px',
+        opacity: 0.15,
         transform: 'scale(1.9)',
+        transition: 'all 0.4s ease',
     },
     smallBoxContent: {
         position: 'relative',
@@ -228,6 +259,23 @@ const useStyles = makeStyles({
     progressBar: {
         height: '100%',
         ...shorthands.borderRadius('999px'),
+        boxShadow: '0 0 10px rgba(255,255,255,0.2)',
+        position: 'relative',
+        overflow: 'hidden',
+        '&::after': {
+            content: '""',
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.2) 50%, rgba(255,255,255,0) 100%)',
+            animation: 'shimmer 2s infinite linear',
+        }
+    },
+    '@keyframes shimmer': {
+        '0%': { transform: 'translateX(-100%)' },
+        '100%': { transform: 'translateX(100%)' },
     },
     insightList: {
         display: 'flex',
@@ -321,10 +369,10 @@ interface AggregateStats {
 }
 
 const smallBoxColors = {
-    teal: 'linear-gradient(135deg, #00c0ef 0%, #0097bc 100%)',
-    green: 'linear-gradient(135deg, #00a65a 0%, #008d4c 100%)',
-    yellow: 'linear-gradient(135deg, #f39c12 0%, #d68910 100%)',
-    red: 'linear-gradient(135deg, #dd4b39 0%, #c0392b 100%)',
+    teal: 'linear-gradient(135deg, #02b3df 0%, #0089a8 100%)',
+    green: 'linear-gradient(135deg, #27ae60 0%, #1e8449 100%)',
+    yellow: 'linear-gradient(135deg, #f39c12 0%, #e67e22 100%)',
+    red: 'linear-gradient(135deg, #e74c3c 0%, #c0392b 100%)',
 };
 
 const Dashboard: React.FC = () => {
@@ -444,6 +492,7 @@ const Dashboard: React.FC = () => {
             <div className={styles.hero}>
                 <div className={styles.heroPanel}>
                     <div className={styles.heroGlow} />
+                    <div className={styles.heroGlowSecondary} />
                     <div className={styles.heroContent}>
                         <div className={styles.eyebrow}>Operational Overview</div>
                         <Title1 style={{ color: '#fff', margin: 0 }}>Dashboard Ejecutivo</Title1>
@@ -455,27 +504,27 @@ const Dashboard: React.FC = () => {
                                 {summary?.isPilotMode ? 'Pilot Mode activo' : 'Full rollout'}
                             </Badge>
                             {summary?.defaultChannelName ? (
-                                <Badge appearance="outline" color="informative">Canal default: {summary.defaultChannelName}</Badge>
+                                <Badge appearance="filled" color="informative">Canal default: {summary.defaultChannelName}</Badge>
                             ) : null}
                             {summary?.meetingPolicyMode ? (
-                                <Badge appearance="outline" color="brand">Agenda: {summary.meetingPolicyMode}</Badge>
+                                <Badge appearance="filled" color="brand">Agenda: {summary.meetingPolicyMode}</Badge>
                             ) : null}
                             {summary?.timeZoneId ? (
-                                <Badge appearance="outline">TZ: {summary.timeZoneId}</Badge>
+                                <Badge appearance="filled">TZ: {summary.timeZoneId}</Badge>
                             ) : null}
                         </div>
                         <div className={styles.heroMetricRow}>
                             <div className={styles.heroMetric}>
-                                <Text size={700} weight="bold">{numberFormatter.format(programsCount)}</Text>
-                                <Text>Programas monitoreados</Text>
+                                <Text size={800} weight="bold">{numberFormatter.format(programsCount)}</Text>
+                                <Text size={200} style={{ color: 'rgba(255,255,255,0.8)' }}>Programas monitoreados</Text>
                             </div>
                             <div className={styles.heroMetric}>
-                                <Text size={700} weight="bold">{numberFormatter.format(sedeCount)}</Text>
-                                <Text>Sedes activas en tablero</Text>
+                                <Text size={800} weight="bold">{numberFormatter.format(sedeCount)}</Text>
+                                <Text size={200} style={{ color: 'rgba(255,255,255,0.8)' }}>Sedes activas en tablero</Text>
                             </div>
                             <div className={styles.heroMetric}>
-                                <Text size={700} weight="bold">{numberFormatter.format(periodCount)}</Text>
-                                <Text>Periodos activos</Text>
+                                <Text size={800} weight="bold">{numberFormatter.format(periodCount)}</Text>
+                                <Text size={200} style={{ color: 'rgba(255,255,255,0.8)' }}>Periodos activos</Text>
                             </div>
                         </div>
                     </div>
@@ -498,9 +547,9 @@ const Dashboard: React.FC = () => {
 
                     <Card>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                                 <Text size={800} weight="bold">{numberFormatter.format(summary?.pilotSectionsConfigured ?? 0)}</Text>
-                                <Text>Secciones en whitelist piloto</Text>
+                                <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>Secciones en whitelist piloto</Text>
                             </div>
                             <WarningRegular fontSize={28} color={summary?.isPilotMode ? '#f39c12' : '#00a65a'} />
                         </div>
@@ -564,9 +613,9 @@ const Dashboard: React.FC = () => {
                     <div className={styles.panels}>
                         <div className={styles.panelCard}>
                             <div className={styles.panelHeader}>
-                                <div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                                     <Title3 style={{ margin: 0 }}>Cobertura Operativa</Title3>
-                                    <Text size={200}>Resumen de salud del tenant con foco en adopcion.</Text>
+                                    <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>Resumen de salud del tenant con foco en adopción.</Text>
                                 </div>
                                 <PulseRegular fontSize={24} color="#00a65a" />
                             </div>
@@ -580,9 +629,9 @@ const Dashboard: React.FC = () => {
 
                         <div className={styles.panelCard}>
                             <div className={styles.panelHeader}>
-                                <div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                                     <Title3 style={{ margin: 0 }}>Focos de Atencion</Title3>
-                                    <Text size={200}>Sedes y programas con mejor y peor comportamiento.</Text>
+                                    <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>Sedes y programas con mejor y peor comportamiento.</Text>
                                 </div>
                                 <BranchCompareRegular fontSize={24} color="#f39c12" />
                             </div>
@@ -624,10 +673,10 @@ const Dashboard: React.FC = () => {
 
                     <div className={styles.panelCard}>
                         <div className={styles.panelHeader}>
-                            <div>
-                                <Title3 style={{ margin: 0 }}>Detalle por Unidad, Programa y Periodo</Title3>
-                                <Text size={200}>Vista tabular para seguimiento operativo fino.</Text>
-                            </div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                    <Title3 style={{ margin: 0 }}>Detalle por Unidad, Programa y Periodo</Title3>
+                                    <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>Vista tabular para seguimiento operativo fino.</Text>
+                                </div>
                             <HatGraduationRegular fontSize={24} color="#3c8dbc" />
                         </div>
                         <div className={styles.panelBody}>

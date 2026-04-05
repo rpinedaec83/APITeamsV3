@@ -10,6 +10,7 @@ $publishDir   = "C:\Users\apoyoexterno15\Documents\Sources\APITeamsV3\publish_ou
 $iisApiPath   = "E:\APITEAMSV3\publish\api"
 $appPool      = "API"
 $dotnet       = "C:\Program Files\dotnet\dotnet.exe"
+$SkipDbRestore = $true  # Set to $true to overwrite production DBs with local ones
 
 # Verificar que dotnet SDK esté disponible
 Write-Host "[1/5] Verificando .NET SDK..." -ForegroundColor Cyan
@@ -90,13 +91,17 @@ if (Test-Path $backupSettings) {
 }
 
 # Restaurar bases de datos de produccion
-foreach ($db in $databases) {
-    $backupDb = Join-Path $env:TEMP "$($db)_backup"
-    if (Test-Path $backupDb) {
-        $prodDb = Join-Path $iisApiPath $db
-        Copy-Item $backupDb $prodDb -Force
-        Write-Host "  $db de produccion restaurado." -ForegroundColor Yellow
+if (-not $SkipDbRestore) {
+    foreach ($db in $databases) {
+        $backupDb = Join-Path $env:TEMP "$($db)_backup"
+        if (Test-Path $backupDb) {
+            $prodDb = Join-Path $iisApiPath $db
+            Copy-Item $backupDb $prodDb -Force
+            Write-Host "  $db de produccion restaurado." -ForegroundColor Yellow
+        }
     }
+} else {
+    Write-Host "  Saltando restauracion de bases de datos. Se usaran las locales publicadas." -ForegroundColor Cyan
 }
 
 Write-Host "  Archivos copiados." -ForegroundColor Green
