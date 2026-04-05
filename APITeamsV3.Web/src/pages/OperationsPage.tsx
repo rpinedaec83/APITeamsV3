@@ -1,5 +1,6 @@
 import type { SelectTabData, TabValue } from '@fluentui/react-components';
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
+import * as XLSX from 'xlsx';
 import {
     TabList,
     Tab,
@@ -30,6 +31,8 @@ import {
     GridDotsRegular,
     ArrowSyncRegular,
     DeleteRegular,
+    TriangleUpRegular,
+    TriangleDownRegular,
 } from '@fluentui/react-icons';
 import { useApiClient } from '../hooks/useApiClient';
 import { showSuccess, showError, showConfirm } from '../utils/alerts';
@@ -204,6 +207,71 @@ const OperationsPage: React.FC = () => {
     const [alumnoCodigo, setAlumnoCodigo] = useState('');
     const [alumnoData, setAlumnoData] = useState<StudentData | null>(null);
 
+    // Grid State (Filtering & Sorting)
+    const [gridSearch, setGridSearch] = useState('');
+    const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'ascending' | 'descending' }>({
+        key: '',
+        direction: 'ascending'
+    });
+
+    const handleSort = (key: string) => {
+        setSortConfig(prev => ({
+            key,
+            direction: prev.key === key && prev.direction === 'ascending' ? 'descending' : 'ascending'
+        }));
+    };
+
+    const processedData = useMemo(() => {
+        if (selectedTab === 'seccion') {
+            let members = [...(seccionData?.members || [])];
+            
+            // Filter
+            if (gridSearch) {
+                const term = gridSearch.toLowerCase();
+                members = members.filter(m => 
+                    (m.name || '').toLowerCase().includes(term) ||
+                    (m.code || '').toLowerCase().includes(term) ||
+                    (m.status || '').toLowerCase().includes(term)
+                );
+            }
+
+            // Sort
+            if (sortConfig.key) {
+                members.sort((a: any, b: any) => {
+                    const valA = a[sortConfig.key] || '';
+                    const valB = b[sortConfig.key] || '';
+                    const cmp = valA.toString().localeCompare(valB.toString());
+                    return sortConfig.direction === 'ascending' ? cmp : -cmp;
+                });
+            }
+            return members;
+        } else {
+            let sections = [...(alumnoData?.enrolledSections || [])];
+            
+            // Filter
+            if (gridSearch) {
+                const term = gridSearch.toLowerCase();
+                sections = sections.filter(s => 
+                    (s.courseName || '').toLowerCase().includes(term) ||
+                    (s.sectionCode || '').toLowerCase().includes(term) ||
+                    (s.teamStatus || '').toLowerCase().includes(term) ||
+                    (s.studentStatus || '').toLowerCase().includes(term)
+                );
+            }
+
+            // Sort
+            if (sortConfig.key) {
+                sections.sort((a: any, b: any) => {
+                    const valA = a[sortConfig.key] || '';
+                    const valB = b[sortConfig.key] || '';
+                    const cmp = valA.toString().localeCompare(valB.toString());
+                    return sortConfig.direction === 'ascending' ? cmp : -cmp;
+                });
+            }
+            return sections;
+        }
+    }, [selectedTab, seccionData, alumnoData, gridSearch, sortConfig]);
+
     const handleSearchSeccion = async () => {
         if (!seccionCodigo) return;
         setLoading(true);
@@ -367,6 +435,76 @@ const OperationsPage: React.FC = () => {
         }
     };
 
+    const handleExportReport = () => {
+        if (selectedTab === 'seccion' && seccionData) {
+            const wb = XLSX.utils.book_new();
+            
+            const metadata = [
+                ['Reporte de Operaciones - Sección'],
+                ['Fecha de exportación:', new Date().toLocaleString()],
+                [''],
+                ['DETALLES DE LA SECCIÓN'],
+                ['Sede', seccionData.sede],
+                ['Producto', seccionData.producto],
+                ['División', seccionData.division],
+                ['Curso', seccionData.curso],
+                ['Programa', seccionData.programa],
+                ['Semestre', seccionData.semestre],
+                ['Facilitador', seccionData.profesor || 'N/A'],
+                ['Unidad Negocio', seccionData.unidadNegocio],
+                [''],
+                ['LISTADO DE ALUMNOS'],
+                ['#', 'Código', 'Nombre', 'Estado']
+            ];
+
+            const dataRows = seccionData.members.map((m, i) => [
+                i + 1,
+                m.code,
+                m.name,
+                m.status
+            ]);
+
+            const ws = XLSX.utils.aoa_to_sheet([...metadata, ...dataRows]);
+            ws['!cols'] = [{ wch: 5 }, { wch: 15 }, { wch: 45 }, { wch: 15 }];
+
+            XLSX.utils.book_append_sheet(wb, ws, 'Reporte');
+            XLSX.writeFile(wb, `Reporte_Seccion_${seccionCodigo || 'Export'}.xlsx`);
+        } else if (selectedTab === 'alumno' && alumnoData) {
+            const wb = XLSX.utils.book_new();
+            
+            const metadata = [
+                ['Reporte de Operaciones - Alumno'],
+                ['Fecha de exportación:', new Date().toLocaleString()],
+                [''],
+                ['DETALLES DEL ALUMNO'],
+                ['Nombre', alumnoData.nombre],
+                ['Código', alumnoData.codigo],
+                ['Sede', alumnoData.sede],
+                ['Producto', alumnoData.producto],
+                ['División', alumnoData.division],
+                ['Programa', alumnoData.programa],
+                ['Semestre', alumnoData.semestre],
+                [''],
+                ['CURSOS MATRICULADOS'],
+                ['#', 'Código de Sección', 'Nombre del Curso', 'Estado Team', 'Estado Alumno']
+            ];
+
+            const dataRows = alumnoData.enrolledSections.map((s, i) => [
+                i + 1,
+                s.sectionCode,
+                s.courseName,
+                s.teamStatus,
+                s.studentStatus
+            ]);
+
+            const ws = XLSX.utils.aoa_to_sheet([...metadata, ...dataRows]);
+            ws['!cols'] = [{ wch: 5 }, { wch: 20 }, { wch: 45 }, { wch: 15 }, { wch: 15 }];
+
+            XLSX.utils.book_append_sheet(wb, ws, 'Reporte');
+            XLSX.writeFile(wb, `Reporte_Alumno_${alumnoCodigo || 'Export'}.xlsx`);
+        }
+    };
+
 
 
     const onTabSelect = (_: unknown, data: SelectTabData) => {
@@ -386,7 +524,14 @@ const OperationsPage: React.FC = () => {
                     </div>
                 </div>
                 <div style={{ display: 'flex', gap: '10px' }}>
-                    <Button icon={<ArrowUploadRegular />} >Exportar Reporte</Button>
+                    <Button 
+                        icon={<ArrowUploadRegular />} 
+                        onClick={handleExportReport}
+                        disabled={selectedTab === 'seccion' ? !seccionData : !alumnoData}
+                        appearance="outline"
+                    >
+                        Exportar Reporte
+                    </Button>
                     <Button appearance="subtle">Ayuda</Button>
                 </div>
             </div>
@@ -585,10 +730,18 @@ const OperationsPage: React.FC = () => {
             <div className={styles.bottomTabs}>
                 <Title3>Resultados y Detalles</Title3>
                 <div className={styles.tableContainer}>
-                    <div style={{ padding: '16px' }}>
+                    <div style={{ padding: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div style={{ fontWeight: 600, color: tokens.colorNeutralForeground1 }}>
-                            {selectedTab === 'seccion' ? `Listado de Alumnos (${seccionData?.members?.length || 0})` : 'Cursos Matriculados'}
+                            {selectedTab === 'seccion' ? `Listado de Alumnos (${processedData.length || 0})` : `Cursos Matriculados (${processedData.length || 0})`}
                         </div>
+                        <Input
+                            placeholder="Filtrar por nombre, código o estado..."
+                            size="small"
+                            contentBefore={<SearchRegular />}
+                            value={gridSearch}
+                            onChange={(_e, d) => setGridSearch(d.value)}
+                            style={{ minWidth: '300px' }}
+                        />
                     </div>
 
                     <Divider />
@@ -596,76 +749,109 @@ const OperationsPage: React.FC = () => {
                     <Table>
                         <TableHeader>
                             <TableRow>
-                                <TableHeaderCell>#</TableHeaderCell>
-                                <TableHeaderCell>Código</TableHeaderCell>
-                                <TableHeaderCell>
-                                    {selectedTab === 'seccion' ? 'Nombre' : 'Curso / Sección'}
+                                <TableHeaderCell style={{ width: '40px' }}>#</TableHeaderCell>
+                                <TableHeaderCell 
+                                    style={{ cursor: 'pointer' }} 
+                                    onClick={() => handleSort(selectedTab === 'seccion' ? 'code' : 'sectionCode')}
+                                >
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                        Código
+                                        {sortConfig.key === (selectedTab === 'seccion' ? 'code' : 'sectionCode') && (
+                                            sortConfig.direction === 'ascending' ? <TriangleUpRegular /> : <TriangleDownRegular />
+                                        )}
+                                    </div>
                                 </TableHeaderCell>
-                                <TableHeaderCell>Estado</TableHeaderCell>
+                                <TableHeaderCell 
+                                    style={{ cursor: 'pointer' }} 
+                                    onClick={() => handleSort(selectedTab === 'seccion' ? 'name' : 'courseName')}
+                                >
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                        {selectedTab === 'seccion' ? 'Nombre' : 'Curso / Sección'}
+                                        {sortConfig.key === (selectedTab === 'seccion' ? 'name' : 'courseName') && (
+                                            sortConfig.direction === 'ascending' ? <TriangleUpRegular /> : <TriangleDownRegular />
+                                        )}
+                                    </div>
+                                </TableHeaderCell>
+                                <TableHeaderCell 
+                                    style={{ cursor: 'pointer' }} 
+                                    onClick={() => handleSort(selectedTab === 'seccion' ? 'status' : 'studentStatus')}
+                                >
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                        Estado
+                                        {sortConfig.key === (selectedTab === 'seccion' ? 'status' : 'studentStatus') && (
+                                            sortConfig.direction === 'ascending' ? <TriangleUpRegular /> : <TriangleDownRegular />
+                                        )}
+                                    </div>
+                                </TableHeaderCell>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            {selectedTab === 'seccion' && seccionData?.members ? (
-                                seccionData.members.map((member, index) => (
+                            {processedData.length > 0 ? (
+                                processedData.map((item: any, index) => (
                                     <TableRow key={index}>
                                         <TableCell>{index + 1}</TableCell>
                                         <TableCell style={{ fontFamily: 'monospace' }}>
-                                            {member.code || 'MISSING'}
+                                            {selectedTab === 'seccion' ? item.code : item.sectionCode}
                                         </TableCell>
                                         <TableCell>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                <Avatar name={member.name} size={24} color="colorful" />
-                                                <span style={{ fontWeight: 600 }}>{member.name || 'MISSING'}</span>
-                                            </div>
+                                            {selectedTab === 'seccion' ? (
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                    <Avatar name={item.name} size={24} color="colorful" />
+                                                    <span style={{ fontWeight: 600 }}>{item.name || 'MISSING'}</span>
+                                                </div>
+                                            ) : (
+                                                <span style={{ fontWeight: 600 }}>{item.courseName}</span>
+                                            )}
                                         </TableCell>
                                         <TableCell>
-                                            <Badge
-                                                appearance="filled"
-                                                color={
-                                                    (member.status === 'En Team') ? 'success' :
-                                                        (member.status === 'Pendiente') ? 'warning' :
-                                                            (member.status === 'Sin Team') ? 'danger' :
-                                                                'brand'
-                                                }
-                                                className={styles.statusBadge}
-                                            >
-                                                {member.status}
-                                            </Badge>
-                                        </TableCell>
-                                    </TableRow>
-                                ))
-                            ) : selectedTab === 'alumno' && alumnoData?.enrolledSections ? (
-                                alumnoData.enrolledSections.map((section, index) => (
-                                    <TableRow key={index}>
-                                        <TableCell>{index + 1}</TableCell>
-                                        <TableCell style={{ fontFamily: 'monospace' }}>
-                                            {section.sectionCode}
-                                        </TableCell>
-                                        <TableCell>
-                                            <span style={{ fontWeight: 600 }}>{section.courseName}</span>
-                                        </TableCell>
-                                        <TableCell>
-                                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                                                <Badge appearance="outline" color={section.teamStatus === 'Activo' ? 'success' : 'important'}>
-                                                    Team: {section.teamStatus}
-                                                </Badge>
+                                            {selectedTab === 'seccion' ? (
                                                 <Badge
                                                     appearance="filled"
                                                     color={
-                                                        section.studentStatus === 'En Team' ? 'success' :
-                                                            section.studentStatus === 'Pendiente' ? 'warning' : 'danger'
+                                                        (item.status === 'En Team') ? 'success' :
+                                                            (item.status === 'Pendiente') ? 'warning' :
+                                                                (item.status === 'Sin Team') ? 'danger' :
+                                                                    'brand'
                                                     }
+                                                    className={styles.statusBadge}
                                                 >
-                                                    {section.studentStatus}
+                                                    {item.status}
                                                 </Badge>
-                                            </div>
+                                            ) : (
+                                                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                                    <Badge appearance="outline" color={item.teamStatus === 'Activo' ? 'success' : 'important'}>
+                                                        Team: {item.teamStatus}
+                                                    </Badge>
+                                                    <Badge
+                                                        appearance="filled"
+                                                        color={
+                                                            item.studentStatus === 'En Team' ? 'success' :
+                                                                item.studentStatus === 'Pendiente' ? 'warning' : 'danger'
+                                                        }
+                                                    >
+                                                        {item.studentStatus}
+                                                    </Badge>
+                                                </div>
+                                            )}
                                         </TableCell>
                                     </TableRow>
                                 ))
                             ) : (
                                 <TableRow>
-                                    <TableCell colSpan={selectedTab === 'seccion' ? 4 : 3} style={{ textAlign: 'center', padding: '20px', color: tokens.colorNeutralForeground3 }}>
-                                        No hay datos para mostrar. Realice una búsqueda.
+                                    <TableCell colSpan={4} style={{ textAlign: 'center', padding: '40px', color: tokens.colorNeutralForeground3 }}>
+                                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+                                            {(selectedTab === 'seccion' ? !seccionData : !alumnoData) ? (
+                                                <>
+                                                    <GridDotsRegular fontSize={48} />
+                                                    No hay datos cargados. Por favor busca una {(selectedTab === 'seccion' ? 'sección' : 'alumno')}.
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <SearchRegular fontSize={48} />
+                                                    No se encontraron resultados que coincidan con la búsqueda.
+                                                </>
+                                            )}
+                                        </div>
                                     </TableCell>
                                 </TableRow>
                             )}

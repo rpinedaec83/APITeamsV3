@@ -493,12 +493,14 @@ const Dashboard: React.FC = () => {
                 <div className={styles.heroPanel}>
                     <div className={styles.heroGlow} />
                     <div className={styles.heroGlowSecondary} />
-                    <div className={styles.heroContent}>
+                    <div className={styles.heroContent} style={{ gap: '8px' }}>
                         <div className={styles.eyebrow}>Resumen Operativo</div>
-                        <Title1 style={{ color: '#fff', margin: 0 }}>Dashboard Ejecutivo</Title1>
-                        <Text style={{ color: 'rgba(255,255,255,0.78)' }}>
-                            {summary?.displayName ?? 'Tenant actual'} · Bienvenido, {accounts[0]?.name}
-                        </Text>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            <Title1 style={{ color: '#fff', margin: 0 }}>Dashboard Ejecutivo</Title1>
+                            <Text style={{ color: 'rgba(255,255,255,0.78)' }}>
+                                {summary?.displayName ?? 'Tenant actual'} · Bienvenido, {accounts[0]?.name}
+                            </Text>
+                        </div>
                         <div className={styles.heroMeta}>
                             <Badge appearance="filled" color={summary?.isPilotMode ? 'warning' : 'success'}>
                                 {summary?.isPilotMode ? 'Pilot Mode activo' : 'Despliegue total'}
@@ -613,7 +615,7 @@ const Dashboard: React.FC = () => {
                     <div className={styles.panels}>
                         <div className={styles.panelCard}>
                             <div className={styles.panelHeader}>
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                                     <Title3 style={{ margin: 0 }}>Cobertura Operativa</Title3>
                                     <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>Resumen de salud del tenant con foco en adopción.</Text>
                                 </div>
@@ -629,7 +631,7 @@ const Dashboard: React.FC = () => {
 
                         <div className={styles.panelCard}>
                             <div className={styles.panelHeader}>
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                                     <Title3 style={{ margin: 0 }}>Focos de Atencion</Title3>
                                     <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>Sedes y programas con mejor y peor comportamiento.</Text>
                                 </div>
@@ -673,7 +675,7 @@ const Dashboard: React.FC = () => {
 
                     <div className={styles.panelCard}>
                         <div className={styles.panelHeader}>
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                                     <Title3 style={{ margin: 0 }}>Detalle por Unidad, Programa y Periodo</Title3>
                                     <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>Vista tabular para seguimiento operativo fino.</Text>
                                 </div>

@@ -124,6 +124,11 @@ const useStyles = makeStyles({
         fontFamily: 'monospace',
         fontSize: '12px',
     },
+    flexColumn: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '2px',
+    },
 });
 
 const resolveBrowserTimeZone = (timeZoneId?: string) => WINDOWS_TO_IANA_TIMEZONES[timeZoneId ?? ''] ?? timeZoneId ?? 'America/Lima';
@@ -172,9 +177,9 @@ const ScheduleExecutionsPage: React.FC = () => {
     return (
         <div className={styles.root}>
             <div className={styles.header}>
-                <div>
+                <div className={styles.flexColumn}>
                     <Title1 style={{ margin: 0 }}>Detalle de ejecuciones</Title1>
-                    <Text>
+                    <Text size={200} weight="regular" style={{ color: tokens.colorNeutralForeground2 }}>
                         Revisa el historial de disparos, resultados y tareas encoladas por la programación.
                     </Text>
                 </div>
@@ -200,9 +205,9 @@ const ScheduleExecutionsPage: React.FC = () => {
                     <Card className={styles.card}>
                         <div className={styles.cardBody}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
-                                <div>
+                                <div className={styles.flexColumn}>
                                     <Title3 style={{ margin: 0 }}>{details.companyName}</Title3>
-                                    <Text>Programación #{details.id} · {details.timeZoneId}</Text>
+                                    <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>Programación #{details.id} · {details.timeZoneId}</Text>
                                 </div>
                                 <Badge appearance="filled" color={details.isEnabled ? 'success' : 'danger'}>
                                     {details.isEnabled ? 'Activo' : 'Inactivo'}

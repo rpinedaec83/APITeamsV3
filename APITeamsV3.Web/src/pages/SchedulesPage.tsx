@@ -427,9 +427,11 @@ const SchedulesPage: React.FC = () => {
                 <div className={styles.heroPanel}>
                     <div className={styles.eyebrow}>Synchronization Scheduling</div>
                     <Title1 style={{ color: '#fff', margin: 0 }}>Programación de Sincronización</Title1>
-                    <Text style={{ color: 'rgba(255,255,255,0.82)', maxWidth: '64ch' }}>
-                        Define ventanas operativas para la sincronización completa de Teams por empresa, con control visible de estado, horario y última ejecución real.
-                    </Text>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                         <Text style={{ color: 'rgba(255,255,255,0.82)', maxWidth: '64ch' }}>
+                            Define ventanas operativas para la sincronización completa de Teams por empresa, con control visible de estado, horario y última ejecución real.
+                        </Text>
+                    </div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
                         <Badge appearance="filled" color="informative">Sincronización automatizada</Badge>
                         <Badge appearance="outline">Zona horaria por tenant</Badge>
@@ -451,9 +453,9 @@ const SchedulesPage: React.FC = () => {
 
             <div className={styles.card}>
                 <div className={styles.cardHeader}>
-                    <div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                         <Title3 style={{ margin: 0 }}>Programaciones registradas</Title3>
-                        <Text size={200}>Filtra, revisa y modifica las ventanas activas por empresa.</Text>
+                        <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>Filtra, revisa y modifica las ventanas activas por empresa.</Text>
                     </div>
                     <Button appearance="primary" icon={<AddRegular />} onClick={openCreate}>Nueva programación</Button>
                 </div>
