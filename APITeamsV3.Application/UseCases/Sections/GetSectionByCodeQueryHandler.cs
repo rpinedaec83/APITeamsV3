@@ -34,7 +34,13 @@ namespace APITeamsV3.Application.UseCases.Sections
                 // Fallback: Search in Physical Seccion Table if not in Active view
                 var sectionTable = await _context.Set<SeccionTable>()
                     .AsNoTracking()
-                    .FirstOrDefaultAsync(s => s.Codigo == request.Code, cancellationToken);
+                    .Where(s => s.Codigo == request.Code)
+                    .Select(s => new SeccionTable
+                    {
+                        IdSeccion = s.IdSeccion,
+                        Codigo = s.Codigo
+                    })
+                    .FirstOrDefaultAsync(cancellationToken);
                 
                 if (sectionTable == null) return null;
 

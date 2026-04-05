@@ -9,12 +9,42 @@ namespace APITeamsV3.Application.UseCases.Schedules
         int Id,
         int CompanyConfigId,
         string CompanyName,
+        string TimeZoneId,
         string DaysOfWeek,
         int Hour,
         int Minute,
         bool IsEnabled,
+        DateTime CreatedAt,
         DateTime? LastRunAt
     );
+
+    public record SyncScheduleExecutionDto(
+        int Id,
+        string Status,
+        string TriggerSource,
+        string SedeCodes,
+        int TotalSections,
+        int EnqueuedJobsCount,
+        List<string> JobIds,
+        string ErrorMessage,
+        DateTime TriggeredAtUtc,
+        DateTime? CompletedAtUtc
+    );
+
+    public class SyncScheduleDetailsDto
+    {
+        public int Id { get; set; }
+        public int CompanyConfigId { get; set; }
+        public string CompanyName { get; set; } = string.Empty;
+        public string TimeZoneId { get; set; } = string.Empty;
+        public string DaysOfWeek { get; set; } = string.Empty;
+        public int Hour { get; set; }
+        public int Minute { get; set; }
+        public bool IsEnabled { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public DateTime? LastRunAt { get; set; }
+        public List<SyncScheduleExecutionDto> Executions { get; set; } = [];
+    }
 
     public record GetAllSchedulesQuery(bool AllowCrossTenant = false) : IRequest<List<SyncScheduleDto>>;
 
@@ -48,12 +78,89 @@ namespace APITeamsV3.Application.UseCases.Schedules
                 s.Id,
                 s.CompanyConfigId,
                 companies.FirstOrDefault(c => c.Id == s.CompanyConfigId)?.DisplayName ?? "Unknown",
+                companies.FirstOrDefault(c => c.Id == s.CompanyConfigId)?.TimeZoneId ?? "SA Pacific Standard Time",
                 s.DaysOfWeek,
                 s.Hour,
                 s.Minute,
                 s.IsEnabled,
+                s.CreatedAt,
                 s.LastRunAt
             )).ToList();
+        }
+    }
+
+    public record GetSyncScheduleDetailsQuery(int Id, bool AllowCrossTenant = false) : IRequest<SyncScheduleDetailsDto?>;
+
+    public class GetSyncScheduleDetailsQueryHandler : IRequestHandler<GetSyncScheduleDetailsQuery, SyncScheduleDetailsDto?>
+    {
+        private readonly ICentralDbContext _context;
+        private readonly ITenantProvider _tenantProvider;
+
+        public GetSyncScheduleDetailsQueryHandler(ICentralDbContext context, ITenantProvider tenantProvider)
+        {
+            _context = context;
+            _tenantProvider = tenantProvider;
+        }
+
+        public async Task<SyncScheduleDetailsDto?> Handle(GetSyncScheduleDetailsQuery request, CancellationToken cancellationToken)
+        {
+            var schedule = await _context.SyncSchedules
+                .AsNoTracking()
+                .FirstOrDefaultAsync(s => s.Id == request.Id, cancellationToken);
+
+            if (schedule == null)
+            {
+                return null;
+            }
+
+            if (!request.AllowCrossTenant)
+            {
+                var tenant = _tenantProvider.GetCurrentTenant();
+                if (tenant.CompanyId != schedule.CompanyConfigId)
+                {
+                    return null;
+                }
+            }
+
+            var company = await _context.CompanyConfigs
+                .AsNoTracking()
+                .FirstOrDefaultAsync(c => c.Id == schedule.CompanyConfigId, cancellationToken);
+
+            var executions = await _context.SyncScheduleExecutions
+                .AsNoTracking()
+                .Where(e => e.SyncScheduleId == schedule.Id)
+                .OrderByDescending(e => e.TriggeredAtUtc)
+                .Take(50)
+                .Select(e => new SyncScheduleExecutionDto(
+                    e.Id,
+                    e.Status,
+                    e.TriggerSource,
+                    e.SedeCodes,
+                    e.TotalSections,
+                    e.EnqueuedJobsCount,
+                    string.IsNullOrWhiteSpace(e.JobIds)
+                        ? new List<string>()
+                        : e.JobIds.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList(),
+                    e.ErrorMessage,
+                    e.TriggeredAtUtc,
+                    e.CompletedAtUtc
+                ))
+                .ToListAsync(cancellationToken);
+
+            return new SyncScheduleDetailsDto
+            {
+                Id = schedule.Id,
+                CompanyConfigId = schedule.CompanyConfigId,
+                CompanyName = company?.DisplayName ?? "Unknown",
+                TimeZoneId = company?.TimeZoneId ?? "SA Pacific Standard Time",
+                DaysOfWeek = schedule.DaysOfWeek,
+                Hour = schedule.Hour,
+                Minute = schedule.Minute,
+                IsEnabled = schedule.IsEnabled,
+                CreatedAt = schedule.CreatedAt,
+                LastRunAt = schedule.LastRunAt,
+                Executions = executions
+            };
         }
     }
 

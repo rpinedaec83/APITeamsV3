@@ -20,6 +20,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
         public string NombresFacilitador { get; set; } = string.Empty;
         public string ApellidosFacilitador { get; set; } = string.Empty;
         public string EmailFacilitador { get; set; } = string.Empty;
+        public string OldEmailFacilitador { get; set; } = string.Empty;
         public string OldCodigoFacilitador { get; set; } = string.Empty;
     }
 }

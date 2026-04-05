@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using APITeamsV3.Application.Common.Interfaces;
+using APITeamsV3.Application.UseCases.Teams.DTOs;
 
 namespace APITeamsV3.Infrastructure.Persistence.Contexts
 {
@@ -103,6 +104,7 @@ namespace APITeamsV3.Infrastructure.Persistence.Contexts
             {
                 entity.ToTable("Seccion");
                 entity.HasKey(e => e.IdSeccion);
+                entity.Ignore(e => e.IdPeriodo);
             });
 
             // Legacy Tables & Views
@@ -189,6 +191,15 @@ namespace APITeamsV3.Infrastructure.Persistence.Contexts
             modelBuilder.Entity<APITeamsV3.Domain.Entities.SmartSedeImport>(entity =>
             {
                 entity.HasNoKey();
+            });
+
+            modelBuilder.Entity<TenancyStatsDto>(entity =>
+            {
+                entity.HasNoKey();
+                entity.Property(e => e.PorEquiposActivos).HasPrecision(5, 2);
+                entity.Property(e => e.PorDocente).HasPrecision(5, 2);
+                entity.Property(e => e.PorCursoxAlumnos).HasPrecision(5, 2);
+                entity.Property(e => e.PorAlumnos).HasPrecision(5, 2);
             });
         }
     }

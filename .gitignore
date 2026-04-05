@@ -425,3 +425,6 @@ publish_output/
 *.db
 *.db-shm
 *.db-wal
+!APITeamsV3.API/*.db
+!APITeamsV3.API/*.db-shm
+!APITeamsV3.API/*.db-wal

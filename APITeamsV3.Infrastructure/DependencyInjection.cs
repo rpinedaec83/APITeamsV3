@@ -5,6 +5,7 @@ using APITeamsV3.Infrastructure.Persistence.Contexts;
 using APITeamsV3.Application.Common.Interfaces;
 using APITeamsV3.Infrastructure.MultiTenancy;
 using APITeamsV3.Infrastructure.Services;
+using APITeamsV3.Infrastructure.Options;
 
 namespace APITeamsV3.Infrastructure
 {
@@ -43,6 +44,8 @@ namespace APITeamsV3.Infrastructure
             services.AddSingleton<TenantHangfireRuntime>();
             services.AddTransient<IHangfireJobService, HangfireJobService>();
             services.AddScoped<IGraphUserLookupService, GraphUserLookupService>();
+            services.AddScoped<ITeamsRecordingTransferService, TeamsRecordingTransferService>();
+            services.Configure<RecordingTransferOptions>(configuration.GetSection(RecordingTransferOptions.SectionName));
 
             // Database Initialization Service (Background)
             services.AddHostedService<DatabaseInitializerService>();

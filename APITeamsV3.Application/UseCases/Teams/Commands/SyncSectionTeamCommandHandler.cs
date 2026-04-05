@@ -46,6 +46,10 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
             
             try
             {
+                await _mediator.Send(
+                    new GenerateSectionScheduleCommand(request.IdSeccion) { Force = true },
+                    cancellationToken);
+
                 // 1. Refresh staging data for section essentially means load from local vw_MatriculasActivas or similar
                 // Here we fetch the Seccion entity.
                 var section = await _context.Set<Seccion>()
@@ -73,16 +77,6 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
 
                 if (existingTeam == null || existingTeam.EstadoTeam == "I")
                 {
-                    // 3.1 Ensure Snapshot Metadata exists (TeamsProgramacionGeneral)
-                    var metadata = await _context.TeamsProgramacionGeneral
-                        .AnyAsync(p => p.IdCurso == request.IdSeccion, cancellationToken);
-                    
-                    if (!metadata)
-                    {
-                        _logger.LogInformation($"Metadata missing for section {request.IdSeccion}. Forcing generation...");
-                        await _mediator.Send(new GenerateSectionScheduleCommand(request.IdSeccion) { Force = true }, cancellationToken);
-                    }
-
                     // Flujo 3: Crear Team
                     _logger.LogInformation($"Creating Team for section {request.IdSeccion}");
                     
@@ -108,9 +102,9 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     }
 
                     // Keep creation flow aligned with RECREAR:
-                    // owners are already assigned during ProvisionTeamAsync;
-                    // here we only sync students as members.
-                    _logger.LogInformation($"Populating initial members for new team {newGraphId}");
+                    // owners are assigned during ProvisionTeamAsync; then we reconcile teachers/students deltas.
+                    _logger.LogInformation($"Reconciling initial members and facilitators for new team {newGraphId}");
+                    await _mediator.Send(new SyncTeamFacilitatorsCommand(request.IdSeccion), cancellationToken);
                     await _mediator.Send(new SyncMissingStudentsCommand(request.IdSeccion), cancellationToken);
                     await _provisioningService.EnsureMembershipOpenAsync(newGraphId);
                     

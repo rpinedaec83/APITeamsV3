@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
@@ -14,12 +15,12 @@ namespace APITeamsV3.Infrastructure.Services
         private const string VersionPrefix = "v2:";
         private const string DevelopmentFallbackKey = "b14ca5898a4e4133bbce2ea2315a1916";
         private readonly byte[] _key;
+        private readonly List<byte[]> _decryptKeyCandidates;
         private readonly ILogger<EncryptionService> _logger;
-        private readonly IConfiguration _configuration;
+        private int _preferredDecryptKeyIndex;
 
         public EncryptionService(IConfiguration configuration, IHostEnvironment environment, ILogger<EncryptionService> logger)
         {
-            _configuration = configuration;
             _logger = logger;
 
             var configuredKey =
@@ -38,6 +39,8 @@ namespace APITeamsV3.Infrastructure.Services
             }
 
             _key = NormalizeKey(configuredKey);
+            _decryptKeyCandidates = BuildDecryptKeyCandidates(configuredKey, _key);
+            _preferredDecryptKeyIndex = 0;
         }
 
         public string Encrypt(string plainText)
@@ -80,45 +83,30 @@ namespace APITeamsV3.Infrastructure.Services
         {
             if (string.IsNullOrEmpty(cipherText)) return cipherText;
 
-            try
+            CryptographicException? lastException = null;
+
+            for (var attempt = 0; attempt < _decryptKeyCandidates.Count; attempt++)
             {
-                return DecryptWithKey(cipherText, _key);
-            }
-            catch (CryptographicException)
-            {
-                // Resilience: If the primary key fails (padding issue), try the alternative normalization if the original key was 32 chars.
-                var configuredKey = _configuration["EncryptionKey"] ?? DevelopmentFallbackKey;
-                if (configuredKey?.Length == 32)
+                var candidateIndex = (_preferredDecryptKeyIndex + attempt) % _decryptKeyCandidates.Count;
+                var candidateKey = _decryptKeyCandidates[candidateIndex];
+
+                try
                 {
-                    // If _key is Hex (16 bytes), try UTF8 (32 bytes)
-                    // If _key is UTF8 (32 bytes), try Hex (16 bytes)
-                    byte[] altKey = null;
-                    byte[] hexBytes;
-                    bool isHex = TryDecodeHex(configuredKey, out hexBytes) && hexBytes.Length == 16;
-                    
-                    if (isHex && _key.Length == 16) 
+                    var decrypted = DecryptWithKey(cipherText, candidateKey);
+                    if (candidateIndex != _preferredDecryptKeyIndex)
                     {
-                        altKey = Encoding.UTF8.GetBytes(configuredKey);
-                    }
-                    else if (!isHex && _key.Length == 32)
-                    {
-                        if (TryDecodeHex(configuredKey, out hexBytes)) altKey = hexBytes;
+                        _preferredDecryptKeyIndex = candidateIndex;
                     }
 
-                    if (altKey != null)
-                    {
-                        try
-                        {
-                            return DecryptWithKey(cipherText, altKey);
-                        }
-                        catch
-                        {
-                            // Fall through to original exception
-                        }
-                    }
+                    return decrypted;
                 }
-                throw;
+                catch (CryptographicException ex)
+                {
+                    lastException = ex;
+                }
             }
+
+            throw lastException ?? new CryptographicException("Unable to decrypt the payload with the configured key candidates.");
         }
 
         private string DecryptWithKey(string cipherText, byte[] key)
@@ -189,6 +177,36 @@ namespace APITeamsV3.Infrastructure.Services
             }
 
             throw new InvalidOperationException("EncryptionKey must be 16, 24, or 32 bytes; or a hex/base64 encoding of one of those lengths.");
+        }
+
+        private static List<byte[]> BuildDecryptKeyCandidates(string configuredKey, byte[] primaryKey)
+        {
+            var candidates = new List<byte[]> { primaryKey };
+
+            if (configuredKey.Length == 32)
+            {
+                byte[]? alternateKey = null;
+
+                if (TryDecodeHex(configuredKey, out var hexBytes) && hexBytes.Length == 16 && primaryKey.Length == 16)
+                {
+                    alternateKey = Encoding.UTF8.GetBytes(configuredKey);
+                }
+                else
+                {
+                    var utf8Bytes = Encoding.UTF8.GetBytes(configuredKey);
+                    if (primaryKey.Length == 32 && utf8Bytes.Length == 32 && TryDecodeHex(configuredKey, out hexBytes) && hexBytes.Length == 16)
+                    {
+                        alternateKey = hexBytes;
+                    }
+                }
+
+                if (alternateKey != null && !candidates.Exists(candidate => candidate.AsSpan().SequenceEqual(alternateKey)))
+                {
+                    candidates.Add(alternateKey);
+                }
+            }
+
+            return candidates;
         }
 
         private static bool TryDecodeHex(string value, out byte[] bytes)

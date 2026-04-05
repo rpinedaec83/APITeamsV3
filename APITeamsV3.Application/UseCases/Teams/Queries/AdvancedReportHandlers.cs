@@ -18,17 +18,27 @@ namespace APITeamsV3.Application.UseCases.Teams.Queries
         IRequestHandler<GetSyncProgressReportQuery, List<SyncProgressReportDto>>
     {
         private readonly ISmartDbContext _context;
+        private readonly ICentralDbContext _centralContext;
+        private readonly ITenantProvider _tenantProvider;
 
-        public AdvancedReportHandlers(ISmartDbContext context)
+        public AdvancedReportHandlers(
+            ISmartDbContext context,
+            ICentralDbContext centralContext,
+            ITenantProvider tenantProvider)
         {
             _context = context;
+            _centralContext = centralContext;
+            _tenantProvider = tenantProvider;
         }
 
         public async Task<List<ScheduleReportDto>> Handle(GetScheduleReportQuery request, CancellationToken cancellationToken)
         {
+            var activeSedes = await GetActiveSedeNamesAsync(cancellationToken);
+
             // Join Seccion with HorarioSesion
             var query = from s in _context.Set<Seccion>().AsNoTracking()
                         join h in _context.Set<HorarioSesion>().AsNoTracking() on s.IdSeccion equals h.IdSeccion
+                        where activeSedes.Count == 0 || activeSedes.Contains(s.SedeNombre)
                         select new ScheduleReportDto
                         {
                             IdSeccion = s.IdSeccion,
@@ -46,8 +56,12 @@ namespace APITeamsV3.Application.UseCases.Teams.Queries
 
         public async Task<List<TeamMemberReportDto>> Handle(GetTeamMembersReportQuery request, CancellationToken cancellationToken)
         {
+            var activeSedes = await GetActiveSedeNamesAsync(cancellationToken);
+
             var query = from tm in _context.Set<TeamMember>().AsNoTracking()
                         join t in _context.Set<TeamEntity>().AsNoTracking() on tm.IdTeams equals t.IdTeamsGroup
+                        join s in _context.Set<Seccion>().AsNoTracking() on t.IdSeccionSmart equals s.IdSeccion
+                        where activeSedes.Count == 0 || activeSedes.Contains(s.SedeNombre)
                         select new TeamMemberReportDto
                         {
                             IdTeamsGroup = t.IdTeamsGroup,
@@ -69,9 +83,14 @@ namespace APITeamsV3.Application.UseCases.Teams.Queries
 
         public async Task<List<SmartVsTeamsReportDto>> Handle(GetSmartVsTeamsReportQuery request, CancellationToken cancellationToken)
         {
+            var activeSedes = await GetActiveSedeNamesAsync(cancellationToken);
+
             // Compare AlumnoCurso (Smart) vs TeamsUsuarios (Teams)
             // This is a complex query, let's simplify for the report
-            var sections = await _context.Set<Seccion>().AsNoTracking().ToListAsync(cancellationToken);
+            var sections = await _context.Set<Seccion>()
+                .AsNoTracking()
+                .Where(s => activeSedes.Count == 0 || activeSedes.Contains(s.SedeNombre))
+                .ToListAsync(cancellationToken);
             var result = new List<SmartVsTeamsReportDto>();
 
             foreach (var s in sections)
@@ -101,7 +120,13 @@ namespace APITeamsV3.Application.UseCases.Teams.Queries
 
         public async Task<List<SyncProgressReportDto>> Handle(GetSyncProgressReportQuery request, CancellationToken cancellationToken)
         {
-            var sedes = await _context.Set<Seccion>().AsNoTracking().Select(s => s.SedeNombre).Distinct().ToListAsync(cancellationToken);
+            var activeSedes = await GetActiveSedeNamesAsync(cancellationToken);
+            var sedes = await _context.Set<Seccion>()
+                .AsNoTracking()
+                .Where(s => activeSedes.Count == 0 || activeSedes.Contains(s.SedeNombre))
+                .Select(s => s.SedeNombre)
+                .Distinct()
+                .ToListAsync(cancellationToken);
             var result = new List<SyncProgressReportDto>();
 
             foreach (var sede in sedes)
@@ -126,6 +151,37 @@ namespace APITeamsV3.Application.UseCases.Teams.Queries
             }
 
             return result;
+        }
+
+        private async Task<HashSet<string>> GetActiveSedeNamesAsync(CancellationToken cancellationToken)
+        {
+            var tenant = _tenantProvider.GetCurrentTenant();
+            if (string.IsNullOrWhiteSpace(tenant.CompanyKey))
+            {
+                return [];
+            }
+
+            var normalizedCompanyKey = tenant.CompanyKey.Trim().ToLowerInvariant();
+            var company = await _centralContext.CompanyConfigs
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    c => c.IsActive && c.CompanyKey.ToLower() == normalizedCompanyKey,
+                    cancellationToken);
+
+            if (company == null)
+            {
+                return [];
+            }
+
+            var sedes = await _centralContext.CompanySedes
+                .AsNoTracking()
+                .Where(s => s.CompanyConfigId == company.Id && s.IsActive)
+                .Select(s => s.Nombre)
+                .ToListAsync(cancellationToken);
+
+            return sedes
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
         }
     }
 }

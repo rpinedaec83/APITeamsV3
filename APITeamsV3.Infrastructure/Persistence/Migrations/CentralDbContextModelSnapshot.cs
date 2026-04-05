@@ -236,6 +236,58 @@ namespace APITeamsV3.Infrastructure.Persistence.Migrations
                     b.ToTable("SyncSchedules");
                 });
 
+            modelBuilder.Entity("APITeamsV3.Domain.Entities.SyncScheduleExecution", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("CompanyConfigId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("CompletedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ErrorMessage")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("EnqueuedJobsCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("JobIds")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SedeCodes")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("SyncScheduleId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("TriggeredAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TriggerSource")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyConfigId");
+
+                    b.HasIndex("SyncScheduleId");
+
+                    b.HasIndex("TriggeredAtUtc");
+
+                    b.ToTable("SyncScheduleExecutions");
+                });
+
             modelBuilder.Entity("APITeamsV3.Domain.Entities.CompanyPilotSection", b =>
                 {
                     b.HasOne("APITeamsV3.Domain.Entities.CompanyConfig", null)

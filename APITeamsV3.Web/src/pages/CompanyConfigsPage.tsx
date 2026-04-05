@@ -27,6 +27,14 @@ import {
 import { DeleteRegular, EditRegular, AddRegular, BuildingRegular, ArrowSyncRegular } from '@fluentui/react-icons';
 import { showError, showConfirm } from '../utils/alerts';
 
+type ConnectionValidationResult = {
+    id: number;
+    companyKey: string;
+    displayName: string;
+    isValid: boolean;
+    errorMessage?: string | null;
+};
+
 const CompanyConfigsPage: React.FC = () => {
     const api = useApiClient();
     const [configs, setConfigs] = useState<CompanyConfig[]>([]);
@@ -40,6 +48,8 @@ const CompanyConfigsPage: React.FC = () => {
     const [sedes, setSedes] = useState<Sede[]>([]);
     const [sedeLoading, setSedeLoading] = useState(false);
     const [importLoading, setImportLoading] = useState(false);
+    const [validationLoading, setValidationLoading] = useState(false);
+    const [validationResults, setValidationResults] = useState<ConnectionValidationResult[]>([]);
 
     useEffect(() => {
         loadConfigs();
@@ -80,6 +90,19 @@ const CompanyConfigsPage: React.FC = () => {
         }
     };
 
+    const handleValidateConnections = async () => {
+        setValidationLoading(true);
+        try {
+            const response = await api.get('/admin/company-configs/validate-connections');
+            setValidationResults(response.data);
+        } catch (error) {
+            console.error(error);
+            showError('No se pudieron validar los connection strings.');
+        } finally {
+            setValidationLoading(false);
+        }
+    };
+
     const openCreate = () => {
         setCurrentConfig({ isActive: true, timeZoneId: 'SA Pacific Standard Time', isPilotMode: false, pilotSections: [] });
         setIsEditing(false);
@@ -87,7 +110,11 @@ const CompanyConfigsPage: React.FC = () => {
     };
 
     const openEdit = (config: CompanyConfig) => {
-        setCurrentConfig({ ...config });
+        setCurrentConfig({
+            ...config,
+            smartConnectionString: '',
+            graphClientSecretRef: ''
+        });
         setIsEditing(true);
         setIsOpen(true);
     };
@@ -150,8 +177,73 @@ const CompanyConfigsPage: React.FC = () => {
                     <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 600 }}>Company Configurations</h1>
                     <p style={{ margin: '4px 0 0', color: '#666' }}>Manage tenant configurations for the provisioning system.</p>
                 </div>
-                <Button appearance="primary" icon={<AddRegular />} onClick={openCreate}>Add Configuration</Button>
+                <div style={{ display: 'flex', gap: '12px' }}>
+                    <Button
+                        appearance="secondary"
+                        icon={validationLoading ? <Spinner size="tiny" /> : <ArrowSyncRegular />}
+                        onClick={handleValidateConnections}
+                        disabled={validationLoading}
+                    >
+                        {validationLoading ? 'Validando...' : 'Validar conexiones'}
+                    </Button>
+                    <Button appearance="primary" icon={<AddRegular />} onClick={openCreate}>Add Configuration</Button>
+                </div>
             </div>
+
+            {validationResults.length > 0 && (
+                <div style={{
+                    background: 'white',
+                    borderRadius: '8px',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+                    padding: '16px 20px',
+                    marginBottom: '20px'
+                }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                        <div>
+                            <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700 }}>Validación de connection strings</h3>
+                            <p style={{ margin: '4px 0 0', color: '#666', fontSize: '13px' }}>
+                                Se intenta descifrar cada `SmartConnectionString` con la clave del proceso actual.
+                            </p>
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                            <Badge appearance="filled" color="success">
+                                {validationResults.filter(item => item.isValid).length} válidos
+                            </Badge>
+                            <Badge appearance="filled" color="danger">
+                                {validationResults.filter(item => !item.isValid).length} inválidos
+                            </Badge>
+                        </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gap: '10px' }}>
+                        {validationResults.map(result => (
+                            <div
+                                key={result.id}
+                                style={{
+                                    border: `1px solid ${result.isValid ? '#b7ebc6' : '#ffd6d6'}`,
+                                    background: result.isValid ? '#f6ffed' : '#fff5f5',
+                                    borderRadius: '8px',
+                                    padding: '12px 14px'
+                                }}
+                            >
+                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}>
+                                    <div>
+                                        <div style={{ fontWeight: 700 }}>{result.displayName} <span style={{ color: '#666', fontWeight: 500 }}>({result.companyKey})</span></div>
+                                        {!result.isValid && (
+                                            <div style={{ marginTop: '4px', fontSize: '12px', color: '#a4262c' }}>
+                                                {result.errorMessage || 'No se pudo descifrar o interpretar el connection string.'}
+                                            </div>
+                                        )}
+                                    </div>
+                                    <Badge appearance="filled" color={result.isValid ? 'success' : 'danger'}>
+                                        {result.isValid ? 'Válido' : 'Inválido'}
+                                    </Badge>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             <div style={{ background: 'white', borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.1)', padding: '20px', overflowX: 'auto' }}>
                 <Table style={{ tableLayout: 'fixed', width: '100%' }}>
@@ -247,7 +339,17 @@ const CompanyConfigsPage: React.FC = () => {
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '16px' }}>
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                                     <Label>Smart Connection String</Label>
-                                    <Input value={currentConfig.smartConnectionString || ''} type="password" onChange={(_, d) => setCurrentConfig({ ...currentConfig, smartConnectionString: d.value })} />
+                                    <Input
+                                        value={currentConfig.smartConnectionString || ''}
+                                        type="password"
+                                        placeholder={isEditing ? 'Dejar vacío para conservar el valor actual' : 'Server=...;Database=...;User Id=...;Password=...;'}
+                                        onChange={(_, d) => setCurrentConfig({ ...currentConfig, smartConnectionString: d.value })}
+                                    />
+                                    {isEditing && (
+                                        <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#666' }}>
+                                            Solo completa este campo si quieres reemplazar el connection string actual.
+                                        </p>
+                                    )}
                                 </div>
                             </div>
 
@@ -265,7 +367,17 @@ const CompanyConfigsPage: React.FC = () => {
                                 </div>
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '10px' }}>
                                     <Label>Client Secret Ref</Label>
-                                    <Input value={currentConfig.graphClientSecretRef || ''} onChange={(_, d) => setCurrentConfig({ ...currentConfig, graphClientSecretRef: d.value })} />
+                                    <Input
+                                        value={currentConfig.graphClientSecretRef || ''}
+                                        type="password"
+                                        placeholder={isEditing ? 'Dejar vacío para conservar el valor actual' : 'Secret ref o valor configurado'}
+                                        onChange={(_, d) => setCurrentConfig({ ...currentConfig, graphClientSecretRef: d.value })}
+                                    />
+                                    {isEditing && (
+                                        <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#666' }}>
+                                            Solo completa este campo si quieres reemplazar el client secret actual.
+                                        </p>
+                                    )}
                                 </div>
                             </div>
 

@@ -51,6 +51,23 @@ interface HangfireJobResult {
     error?: string;
 }
 
+interface HangfireRecurringJobResult {
+    id: string;
+    cron: string;
+    queue: string;
+    method: string;
+    idSeccion?: number | null;
+    createdAt?: string | null;
+    lastExecution?: string | null;
+    nextExecution?: string | null;
+    lastJobId: string;
+    lastJobState: string;
+    lastResult: string;
+    timeZoneId: string;
+    error: string;
+    removed: boolean;
+}
+
 const useStyles = makeStyles({
     root: {
         padding: '32px',
@@ -159,10 +176,21 @@ const useStyles = makeStyles({
         overflow: 'hidden',
         boxShadow: tokens.shadow2,
     },
+    sectionHeader: {
+        padding: '16px 24px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: '12px',
+    },
     emptyState: {
         textAlign: 'center' as const,
         padding: '40px 20px',
         color: tokens.colorNeutralForeground3,
+    },
+    mono: {
+        fontFamily: 'monospace',
+        fontSize: '12px',
     },
 });
 
@@ -215,8 +243,8 @@ const JOB_DEFINITIONS: JobDefinition[] = [
     },
     {
         key: 'sync-roster',
-        label: 'Sync Roster Completo',
-        description: 'Sincroniza altas y bajas de roster.',
+        label: 'Sincronizacion Operativa Completa',
+        description: 'Crea o actualiza el Team, sincroniza docentes y alumnos, y ajusta la agenda sin regenerarla manualmente.',
         endpoint: '/jobs/sync-roster',
         icon: <ArrowSyncRegular />,
         color: tokens.colorPaletteTealBorderActive,
@@ -249,7 +277,9 @@ const JobsPage: React.FC = () => {
     const [idSeccion, setIdSeccion] = useState('');
     const [loading, setLoading] = useState<string | null>(null);
     const [loadingHistory, setLoadingHistory] = useState(false);
+    const [loadingRecurring, setLoadingRecurring] = useState(false);
     const [history, setHistory] = useState<HangfireJobResult[]>([]);
+    const [recurringJobs, setRecurringJobs] = useState<HangfireRecurringJobResult[]>([]);
     const [selectedTab, setSelectedTab] = useState<TabValue>('all');
 
     const loadRecentJobs = async (silent = false) => {
@@ -268,10 +298,28 @@ const JobsPage: React.FC = () => {
         }
     };
 
+    const loadRecurringJobs = async (silent = false) => {
+        if (!silent) setLoadingRecurring(true);
+        try {
+            const response = await apiClient.get('/jobs/recurring');
+            const jobs = Array.isArray(response.data) ? response.data as HangfireRecurringJobResult[] : [];
+            setRecurringJobs(jobs);
+        } catch (err: unknown) {
+            if (!silent) {
+                const errorMessage = err instanceof Error ? err.message : 'No se pudieron cargar los jobs recurrentes.';
+                showWarning(errorMessage);
+            }
+        } finally {
+            if (!silent) setLoadingRecurring(false);
+        }
+    };
+
     useEffect(() => {
         void loadRecentJobs(false);
+        void loadRecurringJobs(false);
         const interval = window.setInterval(() => {
             void loadRecentJobs(true);
+            void loadRecurringJobs(true);
         }, 15000);
 
         return () => window.clearInterval(interval);
@@ -322,6 +370,11 @@ const JobsPage: React.FC = () => {
         return 'informative';
     };
 
+    const formatDateTime = (value?: string | null) => {
+        if (!value) return '-';
+        return new Date(value).toLocaleString('es-PE');
+    };
+
     const getStateIcon = (state: string) => {
         const normalized = state.toLowerCase();
         if (normalized.includes('succeed')) {
@@ -354,8 +407,11 @@ const JobsPage: React.FC = () => {
                     </Badge>
                     <Button
                         appearance="secondary"
-                        icon={loadingHistory ? <Spinner size="tiny" /> : <ArrowSyncRegular />}
-                        onClick={() => loadRecentJobs(false)}
+                        icon={loadingHistory || loadingRecurring ? <Spinner size="tiny" /> : <ArrowSyncRegular />}
+                        onClick={() => {
+                            void loadRecentJobs(false);
+                            void loadRecurringJobs(false);
+                        }}
                     >
                         Actualizar
                     </Button>
@@ -426,7 +482,91 @@ const JobsPage: React.FC = () => {
             </div>
 
             <div className={styles.historyContainer}>
-                <div style={{ padding: '16px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div className={styles.sectionHeader}>
+                    <Title3>Jobs Recurrentes</Title3>
+                    <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
+                        Registro, ultima ejecucion y siguiente disparo
+                    </Text>
+                </div>
+                <Divider />
+
+                {loadingRecurring && recurringJobs.length === 0 ? (
+                    <div className={styles.emptyState}>
+                        <Spinner label="Cargando jobs recurrentes..." />
+                    </div>
+                ) : recurringJobs.length === 0 ? (
+                    <div className={styles.emptyState}>
+                        <ClockRegular style={{ fontSize: '48px', marginBottom: '12px', opacity: 0.4 }} />
+                        <div style={{ fontWeight: 600, marginBottom: '4px' }}>Sin jobs recurrentes</div>
+                        <div style={{ fontSize: '13px' }}>Este tenant no tiene recurring jobs registrados.</div>
+                    </div>
+                ) : (
+                    <Table>
+                        <TableHeader>
+                            <TableRow>
+                                <TableHeaderCell>Job</TableHeaderCell>
+                                <TableHeaderCell>Metodo</TableHeaderCell>
+                                <TableHeaderCell>Seccion</TableHeaderCell>
+                                <TableHeaderCell>Agregado</TableHeaderCell>
+                                <TableHeaderCell>Ultima ejecucion</TableHeaderCell>
+                                <TableHeaderCell>Resultado ultimo run</TableHeaderCell>
+                                <TableHeaderCell>Siguiente</TableHeaderCell>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                            {recurringJobs.map((entry) => (
+                                <TableRow key={entry.id}>
+                                    <TableCell>
+                                        <div style={{ fontWeight: 600 }}>{entry.id}</div>
+                                        <div style={{ marginTop: '4px' }}>
+                                            <Badge appearance="outline" color={entry.removed ? 'danger' : 'brand'}>
+                                                {entry.removed ? 'Removed' : entry.queue || 'default'}
+                                            </Badge>
+                                        </div>
+                                    </TableCell>
+                                    <TableCell>
+                                        <div>{entry.method}</div>
+                                        <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
+                                            {entry.cron}
+                                        </Text>
+                                    </TableCell>
+                                    <TableCell>
+                                        <Badge appearance="outline">{entry.idSeccion ?? '-'}</Badge>
+                                    </TableCell>
+                                    <TableCell>{formatDateTime(entry.createdAt)}</TableCell>
+                                    <TableCell>
+                                        <div>{formatDateTime(entry.lastExecution)}</div>
+                                        <div style={{ marginTop: '4px' }}>
+                                            <Badge appearance="outline" size="small" color={getStateBadgeColor(entry.lastJobState || 'informative')}>
+                                                {entry.lastJobState || 'Sin ejecutar'}
+                                            </Badge>
+                                        </div>
+                                        {entry.lastJobId ? (
+                                            <div className={styles.mono} style={{ marginTop: '4px', color: tokens.colorNeutralForeground3 }}>
+                                                {entry.lastJobId}
+                                            </div>
+                                        ) : null}
+                                    </TableCell>
+                                    <TableCell>
+                                        <Text size={200} style={{ color: entry.error ? tokens.colorPaletteRedForeground1 : undefined }}>
+                                            {entry.error || entry.lastResult || '-'}
+                                        </Text>
+                                    </TableCell>
+                                    <TableCell>
+                                        <div>{formatDateTime(entry.nextExecution)}</div>
+                                        <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
+                                            {entry.timeZoneId || '-'}
+                                        </Text>
+                                    </TableCell>
+                                </TableRow>
+                            ))}
+                        </TableBody>
+                    </Table>
+                )}
+            </div>
+
+            <div className={styles.historyContainer}>
+                <div className={styles.sectionHeader}>
                     <Title3>Historial de Ejecucion (Hangfire)</Title3>
                     <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
                         Refresco automatico cada 15s
@@ -465,7 +605,7 @@ const JobsPage: React.FC = () => {
                                     <TableCell>
                                         <Badge appearance="outline">{entry.idSeccion ?? '-'}</Badge>
                                     </TableCell>
-                                    <TableCell style={{ fontFamily: 'monospace', fontSize: '12px' }}>
+                                    <TableCell className={styles.mono}>
                                         {entry.jobId}
                                     </TableCell>
                                     <TableCell>
@@ -474,7 +614,7 @@ const JobsPage: React.FC = () => {
                                         </Text>
                                     </TableCell>
                                     <TableCell style={{ fontSize: '12px', color: tokens.colorNeutralForeground3 }}>
-                                        {new Date(entry.timestamp).toLocaleString()}
+                                        {new Date(entry.timestamp).toLocaleString('es-PE')}
                                     </TableCell>
                                 </TableRow>
                             ))}

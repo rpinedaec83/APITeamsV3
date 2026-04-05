@@ -1,4 +1,5 @@
 using System;
+using Microsoft.EntityFrameworkCore;
 
 namespace APITeamsV3.Application.UseCases.Teams.DTOs
 {
@@ -87,16 +88,32 @@ namespace APITeamsV3.Application.UseCases.Teams.DTOs
         public string Programa { get; set; } = string.Empty;
         public int Equipos { get; set; }
         public int EquiposActivos { get; set; }
+        [Precision(5, 2)]
         public decimal PorEquiposActivos { get; set; }
         public int Docentes { get; set; }
         public int NoDocentes { get; set; }
+        [Precision(5, 2)]
         public decimal PorDocente { get; set; }
         public int CursoxAlumnos { get; set; }
         public int CursoxTeams { get; set; }
+        [Precision(5, 2)]
         public decimal PorCursoxAlumnos { get; set; }
         public int Alumnos { get; set; }
         public int EnTeams { get; set; }
+        [Precision(5, 2)]
         public decimal PorAlumnos { get; set; }
+    }
+
+    public class DashboardSummaryDto
+    {
+        public string CompanyKey { get; set; } = string.Empty;
+        public string DisplayName { get; set; } = string.Empty;
+        public bool IsPilotMode { get; set; }
+        public int PilotSectionsConfigured { get; set; }
+        public string DefaultChannelName { get; set; } = string.Empty;
+        public string MeetingPolicyMode { get; set; } = string.Empty;
+        public string TimeZoneId { get; set; } = string.Empty;
+        public List<TenancyStatsDto> Rows { get; set; } = [];
     }
 
     public class TeamsLogOperativoDto

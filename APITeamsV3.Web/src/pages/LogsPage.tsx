@@ -37,7 +37,19 @@ interface CompanyOption {
     displayName: string;
 }
 
+interface TenantConfigResponse {
+    timeZoneId?: string;
+}
+
 const PAGE_SIZE = 50;
+
+const WINDOWS_TO_IANA_TIMEZONES: Record<string, string> = {
+    'SA Pacific Standard Time': 'America/Lima',
+    'Pacific SA Standard Time': 'America/Santiago',
+    'Eastern Standard Time': 'America/New_York',
+    'SA Western Standard Time': 'America/La_Paz',
+    'UTC': 'UTC',
+};
 
 const useStyles = makeStyles({
     root: {
@@ -120,6 +132,35 @@ const formatDateParam = (dateValue: string): string => {
     return new Date(`${dateValue}T00:00:00`).toISOString();
 };
 
+const resolveBrowserTimeZone = (timeZoneId?: string): string => {
+    if (!timeZoneId) return 'America/Lima';
+    return WINDOWS_TO_IANA_TIMEZONES[timeZoneId] ?? timeZoneId;
+};
+
+const parseUtcDate = (value: string): Date => {
+    if (!value) return new Date(NaN);
+    const normalized = /z$|[+-]\d{2}:\d{2}$/i.test(value) ? value : `${value}Z`;
+    return new Date(normalized);
+};
+
+const formatTenantDateTime = (value: string, timeZone: string): string => {
+    const date = parseUtcDate(value);
+    if (Number.isNaN(date.getTime())) {
+        return value;
+    }
+
+    return new Intl.DateTimeFormat('es-PE', {
+        timeZone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true,
+    }).format(date);
+};
+
 const getTipoBadgeColor = (tipo: string): 'danger' | 'success' | 'warning' | 'informative' => {
     switch ((tipo ?? '').toLowerCase()) {
         case 'error':
@@ -146,6 +187,7 @@ const LogsPage: React.FC = () => {
     const [companies, setCompanies] = useState<CompanyOption[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+    const [tenantTimeZone, setTenantTimeZone] = useState('America/Lima');
 
     const [page, setPage] = useState(1);
     const [reloadTick, setReloadTick] = useState(0);
@@ -191,6 +233,20 @@ const LogsPage: React.FC = () => {
 
         void loadCompanies();
     }, [apiClient, isIt]);
+
+    useEffect(() => {
+        const loadTenantConfig = async () => {
+            try {
+                const response = await apiClient.get('/config');
+                const config = (response.data ?? {}) as TenantConfigResponse;
+                setTenantTimeZone(resolveBrowserTimeZone(config.timeZoneId));
+            } catch {
+                setTenantTimeZone('America/Lima');
+            }
+        };
+
+        void loadTenantConfig();
+    }, [apiClient]);
 
     useEffect(() => {
         const fetchLogs = async () => {
@@ -439,7 +495,7 @@ const LogsPage: React.FC = () => {
                             ) : (
                                 logs.map(log => (
                                     <TableRow key={`${log.companyKey ?? 'tenant'}-${log.id}-${log.fecha}`}>
-                                        <TableCell>{new Date(log.fecha).toLocaleString()}</TableCell>
+                                        <TableCell>{formatTenantDateTime(log.fecha, tenantTimeZone)}</TableCell>
                                         <TableCell>
                                             <Badge appearance="filled" color={getTipoBadgeColor(log.tipo)}>
                                                 {log.tipo}

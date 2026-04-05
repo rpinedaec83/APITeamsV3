@@ -511,8 +511,22 @@ WHERE IdSeccion = {0};";
         private static string BuildSubject(Seccion section, int inicio, int fin, bool addHourRange)
         {
             var sectionCode = !string.IsNullOrWhiteSpace(section.GrupoCodigo) ? section.GrupoCodigo : section.Codigo;
+            var uniqueCode = !string.IsNullOrWhiteSpace(section.Codigo) ? section.Codigo : section.GrupoCodigo;
             var courseName = !string.IsNullOrWhiteSpace(section.CursoNombre) ? section.CursoNombre : "Clase";
-            var subject = $"{courseName} [{sectionCode}]";
+            var identityTokens = new List<string> { $"SEC:{section.IdSeccion}" };
+
+            if (!string.IsNullOrWhiteSpace(uniqueCode))
+            {
+                identityTokens.Add($"COD:{uniqueCode}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(sectionCode) &&
+                !string.Equals(sectionCode, uniqueCode, StringComparison.OrdinalIgnoreCase))
+            {
+                identityTokens.Add($"GRP:{sectionCode}");
+            }
+
+            var subject = $"{courseName} [{sectionCode}] [{string.Join("|", identityTokens)}]";
 
             if (addHourRange)
             {

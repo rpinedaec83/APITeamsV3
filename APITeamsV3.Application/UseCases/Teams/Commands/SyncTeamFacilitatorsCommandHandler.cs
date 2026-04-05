@@ -75,6 +75,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     NombresFacilitador = x.mpg.NombresFacilitador ?? string.Empty,
                     ApellidosFacilitador = x.mpg.ApellidosFacilitador ?? string.Empty,
                     EmailFacilitador = x.mpg.EmailFacilitador ?? string.Empty,
+                    OldEmailFacilitador = x.te.Propietario3 ?? string.Empty,
                     OldCodigoFacilitador = string.IsNullOrEmpty(x.te.Propietario3)
                         ? string.Empty
                         : (x.te.Propietario3.Contains("@") 
@@ -125,6 +126,13 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                             classIdByGroup[change.IdTeam] = classId;
                         }
 
+                        await RemoveFormerFacilitatorAsync(
+                            graphClient,
+                            classId,
+                            change,
+                            companyConfig?.TeacherAltDomain,
+                            cancellationToken);
+
                         await AddReferenceWithRetryAsync(
                             () => GroupReferenceWriter.AddOwnerAsync(graphClient, change.IdTeam, userReference, cancellationToken),
                             change.IdTeam,
@@ -160,6 +168,48 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
             }
 
             return result;
+        }
+
+        private async Task RemoveFormerFacilitatorAsync(
+            Microsoft.Graph.GraphServiceClient graphClient,
+            string? classId,
+            TeamFacilitatorChangeDto change,
+            string? altDomain,
+            CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(change.OldEmailFacilitador) ||
+                string.Equals(change.OldEmailFacilitador, change.EmailFacilitador, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            var oldUser = await _userLookupService.FindUserAsync(
+                graphClient,
+                change.OldEmailFacilitador,
+                altDomain,
+                cancellationToken);
+
+            if (string.IsNullOrWhiteSpace(oldUser?.Id))
+            {
+                _logger.LogWarning(
+                    "Former facilitator {OldEmail} could not be resolved in Azure AD for Team {TeamId}.",
+                    change.OldEmailFacilitador,
+                    change.IdTeam);
+                return;
+            }
+
+            await RemoveReferenceIfExistsAsync(
+                () => graphClient.Groups[change.IdTeam].Owners[oldUser.Id].Ref.DeleteAsync(cancellationToken: cancellationToken),
+                change.IdTeam,
+                $"former owner {change.OldEmailFacilitador}");
+
+            if (!string.IsNullOrWhiteSpace(classId))
+            {
+                await RemoveReferenceIfExistsAsync(
+                    () => graphClient.Education.Classes[classId].Teachers[oldUser.Id].Ref.DeleteAsync(cancellationToken: cancellationToken),
+                    classId,
+                    $"former teacher {change.OldEmailFacilitador}");
+            }
         }
 
         private async Task AddReferenceWithRetryAsync(Func<Task> action, string teamId, string subject, CancellationToken cancellationToken)
@@ -199,6 +249,22 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
             _logger.LogWarning("Failed to attach {Subject} to Team/Class resource {TeamId} after retries.", subject, teamId);
         }
 
+        private async Task RemoveReferenceIfExistsAsync(Func<Task> action, string resourceId, string subject)
+        {
+            try
+            {
+                await action();
+            }
+            catch (Exception ex) when (IsMissingReferenceError(ex))
+            {
+                _logger.LogDebug("{Subject} is already absent from resource {ResourceId}.", subject, resourceId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to remove {Subject} from resource {ResourceId}.", subject, resourceId);
+            }
+        }
+
         private static bool IsAlreadyExistsError(Exception ex)
         {
             return ex.Message.Contains("already exist", StringComparison.OrdinalIgnoreCase) ||
@@ -212,6 +278,14 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                    ex.Message.Contains("404", StringComparison.OrdinalIgnoreCase) ||
                    ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase) ||
                    ex.Message.Contains("not present", StringComparison.OrdinalIgnoreCase) ||
+                   ex.Message.Contains("resource not found", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsMissingReferenceError(Exception ex)
+        {
+            return ex.Message.Contains("does not exist", StringComparison.OrdinalIgnoreCase) ||
+                   ex.Message.Contains("404", StringComparison.OrdinalIgnoreCase) ||
+                   ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase) ||
                    ex.Message.Contains("resource not found", StringComparison.OrdinalIgnoreCase);
         }
     }

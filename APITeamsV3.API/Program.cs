@@ -66,6 +66,7 @@ builder.Services.AddHangfire(configuration => configuration
     .UseSimpleAssemblyNameTypeSerializer()
     .UseRecommendedSerializerSettings());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TenantHangfireRuntime>());
+builder.Services.AddHostedService<RecordingTransferRecurringJobRegistrar>();
 
 builder.Services.AddHostedService<SyncSchedulerService>();
 
@@ -142,7 +143,10 @@ if (dashboardRegistrations.Count == 0)
     startupLogger.LogWarning("No tenant Hangfire dashboards were mapped because there are no active tenants with SmartConnectionString configured.");
 }
 
-app.UseHttpsRedirection();
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
 
 app.UseAuthentication();
 app.UseAuthorization();

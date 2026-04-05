@@ -3,6 +3,7 @@ using APITeamsV3.Application.Common.Interfaces;
 using APITeamsV3.Application.UseCases.Teams.DTOs;
 using Microsoft.EntityFrameworkCore;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -11,14 +12,23 @@ namespace APITeamsV3.Application.UseCases.Stats.Queries
     public class GetTenancyStatsQueryHandler : IRequestHandler<GetTenancyStatsQuery, List<TenancyStatsDto>>
     {
         private readonly ISmartDbContext _context;
+        private readonly ICentralDbContext _centralContext;
+        private readonly ITenantProvider _tenantProvider;
 
-        public GetTenancyStatsQueryHandler(ISmartDbContext context)
+        public GetTenancyStatsQueryHandler(
+            ISmartDbContext context,
+            ICentralDbContext centralContext,
+            ITenantProvider tenantProvider)
         {
             _context = context;
+            _centralContext = centralContext;
+            _tenantProvider = tenantProvider;
         }
 
         public async Task<List<TenancyStatsDto>> Handle(GetTenancyStatsQuery request, CancellationToken cancellationToken)
         {
+            var activeSedeCodes = await GetActiveSedeCodesAsync(cancellationToken);
+
             // Option 36 Logic: Optimized with CTEs
             var sql = @"
                 DECLARE @FechaIniDias INT = 14,
@@ -61,6 +71,10 @@ namespace APITeamsV3.Application.UseCases.Stats.Queries
                           AND CONVERT(VARCHAR, GETDATE(), 112) <= CONVERT(VARCHAR, DATEADD(DAY, @FechaFinDias, PE.Fin), 112)
                         )
                       )
+                      AND ({0} IS NULL OR SD.Codigo IN (
+                        SELECT value
+                        FROM STRING_SPLIT({0}, ',')
+                      ))
                 ),
                 TeamStats AS (
                     SELECT 
@@ -114,7 +128,37 @@ namespace APITeamsV3.Application.UseCases.Stats.Queries
                         AND TS.Programa = SS.Programa
                 ORDER BY TS.Periodo, TS.Sede, TS.UnidadNegocio, TS.Programa";
 
-            return await _context.Database.SqlQueryRaw<TenancyStatsDto>(sql).ToListAsync(cancellationToken);
+            var sedeFilter = string.IsNullOrWhiteSpace(activeSedeCodes) ? null : activeSedeCodes;
+            return await _context.Database.SqlQueryRaw<TenancyStatsDto>(sql, sedeFilter).ToListAsync(cancellationToken);
+        }
+
+        private async Task<string> GetActiveSedeCodesAsync(CancellationToken cancellationToken)
+        {
+            var tenant = _tenantProvider.GetCurrentTenant();
+            if (string.IsNullOrWhiteSpace(tenant.CompanyKey))
+            {
+                return string.Empty;
+            }
+
+            var normalizedCompanyKey = tenant.CompanyKey.Trim().ToLowerInvariant();
+            var company = await _centralContext.CompanyConfigs
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    c => c.IsActive && c.CompanyKey.ToLower() == normalizedCompanyKey,
+                    cancellationToken);
+
+            if (company == null)
+            {
+                return string.Empty;
+            }
+
+            var codes = await _centralContext.CompanySedes
+                .AsNoTracking()
+                .Where(s => s.CompanyConfigId == company.Id && s.IsActive)
+                .Select(s => s.Codigo)
+                .ToListAsync(cancellationToken);
+
+            return string.Join(",", codes.Where(code => !string.IsNullOrWhiteSpace(code)));
         }
     }
 }

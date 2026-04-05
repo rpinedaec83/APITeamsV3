@@ -88,12 +88,7 @@ namespace APITeamsV3.Infrastructure.Persistence.Repositories
                 const string sql = @"
 SELECT
     COLUMN_NAME AS ColumnName,
-    CAST(
-        CASE
-            WHEN CHARACTER_MAXIMUM_LENGTH IS NULL THEN 0
-            ELSE CHARACTER_MAXIMUM_LENGTH
-        END
-    AS int) AS MaxLength
+    ISNULL(TRY_CONVERT(int, CHARACTER_MAXIMUM_LENGTH), 0) AS MaxLength
 FROM INFORMATION_SCHEMA.COLUMNS
 WHERE TABLE_SCHEMA = 'dbo'
   AND TABLE_NAME = 'TeamsLogOperativo'
@@ -116,7 +111,7 @@ WHERE TABLE_SCHEMA = 'dbo'
                     .Where(r => !string.IsNullOrWhiteSpace(r.ColumnName))
                     .ToDictionary(
                         keySelector: r => r.ColumnName!,
-                        elementSelector: r => r.MaxLength,
+                        elementSelector: r => r.MaxLength ?? 0,
                         comparer: StringComparer.OrdinalIgnoreCase);
             }
             catch (Exception ex)
@@ -178,7 +173,7 @@ WHERE TABLE_SCHEMA = 'dbo'
         private sealed class ColumnLengthRow
         {
             public string? ColumnName { get; set; }
-            public int MaxLength { get; set; }
+            public int? MaxLength { get; set; }
         }
     }
 }

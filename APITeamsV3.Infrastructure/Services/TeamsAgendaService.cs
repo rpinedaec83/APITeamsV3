@@ -168,6 +168,112 @@ namespace APITeamsV3.Infrastructure.Services
             }
         }
 
+        public async Task<TeamsMeetingResult> UpdateMeetingAsync(TeamsMeetingUpdateRequest request, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(request.TeamId))
+                {
+                    throw new InvalidOperationException("TeamId is required to update a meeting.");
+                }
+
+                if (string.IsNullOrWhiteSpace(request.EventId))
+                {
+                    throw new InvalidOperationException("EventId is required to update a meeting.");
+                }
+
+                var graphClient = await CreateAgendaGraphClientAsync();
+                var timeZoneId = ResolveTimeZoneId();
+                var attendees = (request.RequiredAttendeeEmails ?? Array.Empty<string>())
+                    .Where(email => !string.IsNullOrWhiteSpace(email))
+                    .Select(email => email.Trim())
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Select(email => new Attendee
+                    {
+                        EmailAddress = new EmailAddress { Address = email },
+                        Type = AttendeeType.Required
+                    })
+                    .ToList();
+
+                var patch = new Event();
+                if (request.Start.HasValue)
+                {
+                    patch.Start = new DateTimeTimeZone
+                    {
+                        DateTime = request.Start.Value.ToString("yyyy-MM-ddTHH:mm:ss"),
+                        TimeZone = timeZoneId
+                    };
+                }
+
+                if (request.End.HasValue)
+                {
+                    patch.End = new DateTimeTimeZone
+                    {
+                        DateTime = request.End.Value.ToString("yyyy-MM-ddTHH:mm:ss"),
+                        TimeZone = timeZoneId
+                    };
+                }
+
+                patch.Attendees = attendees;
+
+                await graphClient.Groups[request.TeamId].Events[request.EventId].PatchAsync(
+                    patch,
+                    cancellationToken: cancellationToken);
+
+                var joinUrl = request.JoinUrl;
+                if (string.IsNullOrWhiteSpace(joinUrl))
+                {
+                    try
+                    {
+                        var currentEvent = await graphClient.Groups[request.TeamId].Events[request.EventId].GetAsync(
+                            cancellationToken: cancellationToken);
+
+                        joinUrl = currentEvent?.OnlineMeeting?.JoinUrl
+                            ?? currentEvent?.OnlineMeetingUrl
+                            ?? currentEvent?.WebLink
+                            ?? string.Empty;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(
+                            ex,
+                            "Could not reload meeting {EventId} in Team {TeamId} after update to resolve JoinUrl.",
+                            request.EventId,
+                            request.TeamId);
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(joinUrl))
+                {
+                    await TryPromotePresentersAsync(
+                        graphClient,
+                        joinUrl,
+                        request.PresenterEmails,
+                        cancellationToken);
+                }
+
+                _logger.LogInformation(
+                    "Updated meeting {EventId} for Team {TeamId}.",
+                    request.EventId,
+                    request.TeamId);
+
+                return new TeamsMeetingResult
+                {
+                    EventId = request.EventId,
+                    JoinUrl = joinUrl ?? string.Empty
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "Error updating meeting {EventId} in team {TeamId}",
+                    request.EventId,
+                    request.TeamId);
+                throw;
+            }
+        }
+
         private async Task TryPromotePresentersAsync(
             GraphServiceClient graphClient,
             string joinUrl,

@@ -70,6 +70,35 @@ namespace APITeamsV3.API.Controllers
             return Ok(result);
         }
 
+        [HttpGet("dashboard-summary")]
+        public async Task<ActionResult<DashboardSummaryDto>> GetDashboardSummary()
+        {
+            var tenant = _tenantProvider.GetCurrentTenant();
+            var rows = await _mediator.Send(new GetTenancyStatsQuery());
+
+            var normalizedCompanyKey = tenant.CompanyKey.Trim().ToLowerInvariant();
+            var companyConfig = await _centralDbContext.CompanyConfigs
+                .Include(c => c.PilotSections)
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    c => c.IsActive && c.CompanyKey.ToLower() == normalizedCompanyKey,
+                    HttpContext.RequestAborted);
+
+            var result = new DashboardSummaryDto
+            {
+                CompanyKey = tenant.CompanyKey,
+                DisplayName = companyConfig?.DisplayName ?? tenant.CompanyKey.ToUpperInvariant(),
+                IsPilotMode = companyConfig?.IsPilotMode ?? false,
+                PilotSectionsConfigured = companyConfig?.PilotSections.Count ?? 0,
+                DefaultChannelName = companyConfig?.DefaultChannelName ?? string.Empty,
+                MeetingPolicyMode = companyConfig?.MeetingPolicyMode ?? string.Empty,
+                TimeZoneId = companyConfig?.TimeZoneId ?? tenant.TimeZoneId ?? string.Empty,
+                Rows = rows
+            };
+
+            return Ok(result);
+        }
+
         [HttpGet("logs")]
         public async Task<ActionResult<List<TeamsLogOperativoDto>>> GetLogs(
             [FromQuery] int page = 1,

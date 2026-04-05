@@ -1,6 +1,8 @@
 using APITeamsV3.Application.Common.Interfaces;
 using APITeamsV3.Infrastructure.Services;
 using Hangfire;
+using Hangfire.Storage;
+using Hangfire.Storage.Monitoring;
 using Microsoft.AspNetCore.Mvc;
 
 namespace APITeamsV3.API.Controllers
@@ -98,6 +100,115 @@ namespace APITeamsV3.API.Controllers
             return Ok(ordered);
         }
 
+        [HttpGet("recurring")]
+        public async Task<ActionResult<IReadOnlyList<HangfireRecurringJobSnapshotDto>>> GetRecurringJobs()
+        {
+            var tenant = _tenantProvider.GetCurrentTenant();
+            if (string.IsNullOrWhiteSpace(tenant.CompanyKey))
+            {
+                return BadRequest(new { Message = "No se pudo resolver el tenant actual." });
+            }
+
+            var storage = await _tenantHangfireRuntime.GetStorageAsync(tenant.CompanyKey, HttpContext.RequestAborted);
+            using var connection = storage.GetConnection();
+            var monitoring = storage.GetMonitoringApi();
+
+            var recurringJobs = connection.GetRecurringJobs()
+                .OrderByDescending(job => job.CreatedAt ?? job.LastExecution ?? job.NextExecution ?? DateTime.MinValue)
+                .Select(job =>
+                {
+                    int? idSeccion = null;
+                    var args = job.Job?.Args?.Select(a => a?.ToString() ?? string.Empty).ToArray() ?? Array.Empty<string>();
+                    if (args.Length > 0 && int.TryParse(args[0], out var parsedSection))
+                    {
+                        idSeccion = parsedSection;
+                    }
+
+                    var jobDetails = !string.IsNullOrWhiteSpace(job.LastJobId)
+                        ? monitoring.JobDetails(job.LastJobId)
+                        : null;
+
+                    var result = BuildRecurringJobResult(job, jobDetails);
+
+                    return new HangfireRecurringJobSnapshotDto
+                    {
+                        Id = job.Id,
+                        Cron = job.Cron ?? string.Empty,
+                        Queue = job.Queue ?? "default",
+                        Method = job.Job?.Method?.Name ?? "Unknown",
+                        IdSeccion = idSeccion,
+                        CreatedAt = job.CreatedAt,
+                        LastExecution = job.LastExecution,
+                        NextExecution = job.NextExecution,
+                        LastJobId = job.LastJobId ?? string.Empty,
+                        LastJobState = job.LastJobState ?? string.Empty,
+                        LastResult = result,
+                        TimeZoneId = job.TimeZoneId ?? string.Empty,
+                        Error = job.Error ?? string.Empty,
+                        Removed = job.Removed
+                    };
+                })
+                .ToList();
+
+            return Ok(recurringJobs);
+        }
+
+        private static string BuildRecurringJobResult(RecurringJobDto recurringJob, JobDetailsDto? jobDetails)
+        {
+            if (!string.IsNullOrWhiteSpace(recurringJob.Error))
+            {
+                return recurringJob.Error;
+            }
+
+            if (jobDetails == null)
+            {
+                return string.IsNullOrWhiteSpace(recurringJob.LastJobState)
+                    ? "Aun sin ejecuciones."
+                    : recurringJob.LastJobState;
+            }
+
+            var latestState = jobDetails.History?
+                .OrderByDescending(h => h.CreatedAt)
+                .FirstOrDefault();
+
+            if (latestState == null)
+            {
+                return string.IsNullOrWhiteSpace(recurringJob.LastJobState)
+                    ? "Sin historial disponible."
+                    : recurringJob.LastJobState;
+            }
+
+            if (latestState.Data != null)
+            {
+                if (latestState.Data.TryGetValue("ExceptionMessage", out var exceptionMessage) &&
+                    !string.IsNullOrWhiteSpace(exceptionMessage))
+                {
+                    return exceptionMessage;
+                }
+
+                if (latestState.Data.TryGetValue("Result", out var result) &&
+                    !string.IsNullOrWhiteSpace(result))
+                {
+                    return result;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(latestState.Reason))
+            {
+                return latestState.Reason;
+            }
+
+            return latestState.StateName switch
+            {
+                "Succeeded" => "Ejecucion completada correctamente.",
+                "Failed" => "La ultima ejecucion fallo.",
+                "Deleted" => "La ultima ejecucion fue eliminada.",
+                "Scheduled" => "La ejecucion quedo programada.",
+                "Processing" => "La ultima ejecucion sigue en proceso.",
+                _ => latestState.StateName
+            };
+        }
+
         [HttpPost("generate-schedule/{idSeccion}")]
         public async Task<ActionResult<string>> GenerateSchedule(int idSeccion)
         {
@@ -109,7 +220,7 @@ namespace APITeamsV3.API.Controllers
         public async Task<ActionResult<string>> SyncRoster(int idSeccion, [FromQuery] bool fullSync = true)
         {
             var jobId = await _jobService.EnqueueSyncRoster(idSeccion, fullSync);
-            return Ok(new { JobId = jobId, Message = "Sync Roster Job Enqueued" });
+        return Ok(new { JobId = jobId, Message = "Sincronizacion Operativa Completa encolada" });
         }
 
         [HttpPost("sync-dates/{idSeccion}")]
@@ -171,5 +282,23 @@ namespace APITeamsV3.API.Controllers
         public DateTime Timestamp { get; set; }
         public string[] Arguments { get; set; } = Array.Empty<string>();
         public string? Error { get; set; }
+    }
+
+    public class HangfireRecurringJobSnapshotDto
+    {
+        public string Id { get; set; } = string.Empty;
+        public string Cron { get; set; } = string.Empty;
+        public string Queue { get; set; } = string.Empty;
+        public string Method { get; set; } = string.Empty;
+        public int? IdSeccion { get; set; }
+        public DateTime? CreatedAt { get; set; }
+        public DateTime? LastExecution { get; set; }
+        public DateTime? NextExecution { get; set; }
+        public string LastJobId { get; set; } = string.Empty;
+        public string LastJobState { get; set; } = string.Empty;
+        public string LastResult { get; set; } = string.Empty;
+        public string TimeZoneId { get; set; } = string.Empty;
+        public string Error { get; set; } = string.Empty;
+        public bool Removed { get; set; }
     }
 }

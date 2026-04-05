@@ -6,7 +6,8 @@
       "launchUrl": "swagger",
       "applicationUrl": "http://localhost:5000",
       "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development"
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "APITEAMSV3_ENCRYPTION_KEY": "YjE0Y2E1ODk4YTRlNDEzM2JiY2UyZWEyMzE1YTE5MTY="
       }
     }
   }

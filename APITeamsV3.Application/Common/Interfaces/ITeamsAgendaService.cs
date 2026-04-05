@@ -26,9 +26,21 @@ namespace APITeamsV3.Application.Common.Interfaces
         public string JoinUrl { get; set; } = string.Empty;
     }
 
+    public class TeamsMeetingUpdateRequest
+    {
+        public string TeamId { get; set; } = string.Empty;
+        public string EventId { get; set; } = string.Empty;
+        public string JoinUrl { get; set; } = string.Empty;
+        public DateTime? Start { get; set; }
+        public DateTime? End { get; set; }
+        public IReadOnlyCollection<string> RequiredAttendeeEmails { get; set; } = Array.Empty<string>();
+        public IReadOnlyCollection<string> PresenterEmails { get; set; } = Array.Empty<string>();
+    }
+
     public interface ITeamsAgendaService
     {
         Task<TeamsMeetingResult> CreateRecurringChannelMeetingAsync(TeamsMeetingRequest request, CancellationToken cancellationToken = default);
+        Task<TeamsMeetingResult> UpdateMeetingAsync(TeamsMeetingUpdateRequest request, CancellationToken cancellationToken = default);
         Task DeleteMeetingAsync(string teamId, string eventId);
         Task<string> GetPrimaryChannelIdAsync(string teamId, CancellationToken cancellationToken = default);
     }

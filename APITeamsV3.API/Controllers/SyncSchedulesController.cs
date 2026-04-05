@@ -21,6 +21,14 @@ namespace APITeamsV3.API.Controllers
             return await _mediator.Send(new GetAllSchedulesQuery(User.IsInRole("IT")));
         }
 
+        [HttpGet("{id}/details")]
+        public async Task<ActionResult<SyncScheduleDetailsDto>> GetDetails(int id)
+        {
+            var result = await _mediator.Send(new GetSyncScheduleDetailsQuery(id, User.IsInRole("IT")));
+            if (result == null) return NotFound();
+            return Ok(result);
+        }
+
         [HttpPost]
         public async Task<ActionResult<int>> Create(CreateSyncScheduleCommand command)
         {

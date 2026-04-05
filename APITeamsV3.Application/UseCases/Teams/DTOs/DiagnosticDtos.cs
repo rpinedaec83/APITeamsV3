@@ -21,6 +21,7 @@ namespace APITeamsV3.Application.UseCases.Teams.DTOs
     {
         public string IdTeamsGroup { get; set; } = string.Empty;
         public string CodigoAlumno { get; set; } = string.Empty;
+        public string EmailAlumno { get; set; } = string.Empty;
     }
 
     public class ExpiredTeamDto

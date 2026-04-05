@@ -1,6 +1,7 @@
 using APITeamsV3.Application.Common.Interfaces;
 using APITeamsV3.Application.UseCases.Sedes;
 using APITeamsV3.Application.UseCases.Teams.Commands;
+using APITeamsV3.Domain.Entities;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -125,6 +126,17 @@ namespace APITeamsV3.Infrastructure.Services
                 _logger.LogInformation("Schedule {Id} triggered for company {CompanyId} at {Time} ({TZ})",
                     schedule.Id, schedule.CompanyConfigId, now, timeZoneId);
 
+                var execution = new SyncScheduleExecution
+                {
+                    SyncScheduleId = schedule.Id,
+                    CompanyConfigId = schedule.CompanyConfigId,
+                    Status = "Started",
+                    TriggerSource = "SchedulerService",
+                    TriggeredAtUtc = nowUtc,
+                };
+                centralDb.SyncScheduleExecutions.Add(execution);
+                await centralDb.SaveChangesAsync(stoppingToken);
+
                 try
                 {
                     // Get active sede codes for this company
@@ -135,6 +147,11 @@ namespace APITeamsV3.Infrastructure.Services
                     {
                         _logger.LogWarning("Schedule {Id}: No active sedes for company {CompanyId}. Skipping.",
                             schedule.Id, schedule.CompanyConfigId);
+                        execution.Status = "Skipped";
+                        execution.SedeCodes = string.Empty;
+                        execution.ErrorMessage = "No active sedes were found for the company.";
+                        execution.CompletedAtUtc = DateTime.UtcNow;
+                        await centralDb.SaveChangesAsync(stoppingToken);
                         continue;
                     }
 
@@ -160,11 +177,21 @@ namespace APITeamsV3.Infrastructure.Services
 
                     // Persist last run timestamp in UTC so comparisons are timezone-independent
                     schedule.LastRunAt = nowUtc;
+                    execution.Status = "Succeeded";
+                    execution.SedeCodes = sedeCodes;
+                    execution.TotalSections = result.TotalSections;
+                    execution.EnqueuedJobsCount = result.JobIds.Count;
+                    execution.JobIds = string.Join(",", result.JobIds);
+                    execution.CompletedAtUtc = DateTime.UtcNow;
                     await centralDb.SaveChangesAsync(stoppingToken);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Schedule {Id}: Error triggering sync.", schedule.Id);
+                    execution.Status = "Failed";
+                    execution.ErrorMessage = ex.Message;
+                    execution.CompletedAtUtc = DateTime.UtcNow;
+                    await centralDb.SaveChangesAsync(stoppingToken);
                 }
             }
         }

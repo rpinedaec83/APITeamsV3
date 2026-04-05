@@ -1,11 +1,15 @@
 using Hangfire;
+using Hangfire.Server;
 using MediatR;
 using APITeamsV3.Application.Common.Interfaces;
 using APITeamsV3.Application.UseCases.Provisioning.Commands;
+using APITeamsV3.Application.UseCases.Recordings.Commands;
 using APITeamsV3.Application.UseCases.Teams.Commands;
+using APITeamsV3.Domain.Entities;
 using APITeamsV3.Infrastructure.Persistence.Contexts;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using System;
 
 namespace APITeamsV3.Infrastructure.Services
 {
@@ -14,6 +18,7 @@ namespace APITeamsV3.Infrastructure.Services
         private readonly IMediator _mediator;
         private readonly ITenantProvider _tenantProvider;
         private readonly CentralDbContext _centralDb;
+        private readonly ISmartDbContext _smartDb;
         private readonly IEncryptionService _encryptionService;
         private readonly TenantHangfireRuntime _tenantHangfireRuntime;
         private readonly ILogger<HangfireJobService> _logger;
@@ -22,6 +27,7 @@ namespace APITeamsV3.Infrastructure.Services
             IMediator mediator,
             ITenantProvider tenantProvider,
             CentralDbContext centralDb,
+            ISmartDbContext smartDb,
             IEncryptionService encryptionService,
             TenantHangfireRuntime tenantHangfireRuntime,
             ILogger<HangfireJobService> logger)
@@ -29,6 +35,7 @@ namespace APITeamsV3.Infrastructure.Services
             _mediator = mediator;
             _tenantProvider = tenantProvider;
             _centralDb = centralDb;
+            _smartDb = smartDb;
             _encryptionService = encryptionService;
             _tenantHangfireRuntime = tenantHangfireRuntime;
             _logger = logger;
@@ -156,12 +163,7 @@ namespace APITeamsV3.Infrastructure.Services
         {
             var key = GetCurrentCompanyKey();
             var client = await CreateClientAsync(key);
-
-            var j1 = client.Enqueue(() => SendSyncMissingStudents(idSeccion, key));
-            var j2 = client.ContinueJobWith(j1, () => SendSyncObsoleteStudents(idSeccion, key));
-            client.ContinueJobWith(j2, () => SendSyncRenamedTeams(idSeccion, key));
-
-            return j1;
+            return client.Enqueue(() => SendSyncRoster(idSeccion, true, key));
         }
 
         public async Task<string> EnqueueSyncSectionTeam(int idSeccion)
@@ -198,10 +200,18 @@ namespace APITeamsV3.Infrastructure.Services
             await _mediator.Send(new SyncSessionFacilitatorCommand(idSeccion));
         }
 
-        [JobDisplayName("Sync Roster: Section {0} (Full: {1}) [{2}]")]
-        public async Task SendSyncRoster(int idSeccion, bool fullSync, string companyKey)
+    [JobDisplayName("Sincronizacion Operativa: Section {0} (Full: {1}) [{2}]")]
+    public async Task SendSyncRoster(int idSeccion, bool fullSync, string companyKey)
         {
             if (!await ShouldRunForSectionAsync(companyKey, idSeccion, "SyncRoster")) return;
+
+            if (fullSync)
+            {
+                await _mediator.Send(new SyncSectionTeamCommand(idSeccion, companyKey, null));
+                await _mediator.Send(new SyncSectionAgendaCommand(idSeccion, companyKey, null));
+                return;
+            }
+
             var command = new SyncSessionRosterCommand
             {
                 IdSeccion = idSeccion,
@@ -243,6 +253,122 @@ namespace APITeamsV3.Infrastructure.Services
         {
             if (!await ShouldRunForSectionAsync(companyKey, idSeccion, "SyncSectionTeam")) return;
             await _mediator.Send(new SyncSectionTeamCommand(idSeccion, companyKey, jobId));
+        }
+
+        [JobDisplayName("Regenerate Agenda: Section {0} [{1}]")]
+        public async Task SendRegenerateAgenda(int idSeccion, string companyKey, string? jobId)
+        {
+            if (!await ShouldRunForSectionAsync(companyKey, idSeccion, "RegenerateAgenda")) return;
+
+            var result = await _mediator.Send(new RegenerateAgendaCommand(idSeccion, companyKey, jobId));
+            if (!result.IsValid)
+            {
+                _logger.LogWarning(
+                    "Agenda regeneration for section {IdSeccion} in tenant {CompanyKey} finished as invalid: {Summary}",
+                    idSeccion,
+                    companyKey,
+                    result.Summary);
+
+                if (result.Summary.Contains("aprovisionando", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(result.Summary);
+                }
+            }
+        }
+
+        [JobDisplayName("Transfer Pilot Recordings [{0}]")]
+        public async Task RunPilotRecordingTransfers(string companyKey, PerformContext? performContext = null)
+        {
+            var hangfireJobId = performContext?.BackgroundJob?.Id;
+            var config = await ResolveTenantAsync(companyKey, includePilotSections: true);
+            if (!config.IsPilotMode)
+            {
+                _logger.LogInformation(
+                    "Recording transfer job omitted for tenant {CompanyKey}: IsPilotMode is disabled.",
+                    companyKey);
+                return;
+            }
+
+            var pilotSectionIds = config.PilotSections
+                .Select(ps => ps.IdSeccion)
+                .Distinct()
+                .ToList();
+
+            if (pilotSectionIds.Count == 0)
+            {
+                _logger.LogInformation(
+                    "Recording transfer job omitted for tenant {CompanyKey}: there are no pilot sections configured.",
+                    companyKey);
+                return;
+            }
+
+            var failures = new List<string>();
+            var processedSections = 0;
+
+            foreach (var idSeccion in pilotSectionIds)
+            {
+                try
+                {
+                    var team = await _smartDb.Set<TeamEntity>()
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(
+                            t => t.IdSeccionSmart == idSeccion && t.EstadoTeam == "A",
+                            CancellationToken.None);
+
+                    if (team == null || string.IsNullOrWhiteSpace(team.IdTeamsGroup))
+                    {
+                        _logger.LogInformation(
+                            "Recording transfer skipped for tenant {CompanyKey}, section {IdSeccion}: no active team found.",
+                            companyKey,
+                            idSeccion);
+                        continue;
+                    }
+
+                    var section = await _smartDb.Set<Seccion>()
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(s => s.IdSeccion == idSeccion, CancellationToken.None);
+
+                    var result = await _mediator.Send(new TransferRecordingsCommand
+                    {
+                        JobId = hangfireJobId,
+                        OrganizerUserPrincipalName = string.IsNullOrWhiteSpace(team.Propietario2) ? null : team.Propietario2,
+                        TeamGroupId = team.IdTeamsGroup,
+                        CourseName = section?.CursoNombre,
+                        Section = !string.IsNullOrWhiteSpace(section?.GrupoCodigo) ? section.GrupoCodigo : section?.Codigo,
+                        SectionId = idSeccion,
+                        SectionCode = !string.IsNullOrWhiteSpace(section?.Codigo) ? section.Codigo : section?.GrupoCodigo
+                    });
+
+                    processedSections++;
+
+                    if (result.FilesErrored > 0)
+                    {
+                        var errorSummary = result.Errors.Count > 0
+                            ? string.Join(" | ", result.Errors.Take(3))
+                            : $"Se registraron {result.FilesErrored} error(es) durante la transferencia.";
+
+                        failures.Add($"Seccion {idSeccion}: {errorSummary}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(
+                        ex,
+                        "Recording transfer failed for tenant {CompanyKey}, section {IdSeccion}.",
+                        companyKey,
+                        idSeccion);
+
+                    failures.Add($"Seccion {idSeccion}: {ex.Message}");
+                }
+            }
+
+            if (failures.Count > 0)
+            {
+                var summary = string.Join(" || ", failures.Take(5));
+                throw new InvalidOperationException(
+                    $"Recording transfer completed with failures for tenant {companyKey}. " +
+                    $"Procesadas={processedSections}, Fallidas={failures.Count}. Detalle: {summary}");
+            }
         }
     }
 }

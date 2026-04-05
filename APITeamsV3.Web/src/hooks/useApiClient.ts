@@ -1,9 +1,28 @@
 import { useMsal, useAccount } from "@azure/msal-react";
 import axios from "axios";
-import { getApiScopes, getLoginRequest } from "../authConfig";
+import { getApiScopes } from "../authConfig";
 import { useMemo } from "react";
 import { getBaseApiUrl } from "../utils/config";
-import { InteractionRequiredAuthError, BrowserAuthError } from "@azure/msal-browser";
+import { CacheLookupPolicy, InteractionRequiredAuthError } from "@azure/msal-browser";
+
+export const AUTH_INTERACTION_REQUIRED_EVENT = "apiteams:auth-interaction-required";
+export const AUTH_TOKEN_REQUIRED_ERROR = "auth_token_required";
+
+const shouldRequestInteractiveAuth = () => window.self === window.top;
+
+const notifyInteractiveAuthRequired = () => {
+    if (!shouldRequestInteractiveAuth()) {
+        return;
+    }
+
+    window.dispatchEvent(new CustomEvent(AUTH_INTERACTION_REQUIRED_EVENT));
+};
+
+const createAuthTokenRequiredError = () => {
+    const error = new Error("Interactive authentication is required.");
+    error.name = AUTH_TOKEN_REQUIRED_ERROR;
+    return error;
+};
 
 export const useApiClient = () => {
     const { instance, accounts } = useMsal();
@@ -24,23 +43,18 @@ export const useApiClient = () => {
                 try {
                     const response = await instance.acquireTokenSilent({
                         scopes: apiScopes,
-                        account: account
+                        account: account,
+                        cacheLookupPolicy: CacheLookupPolicy.AccessTokenAndRefreshToken,
                     });
                     config.headers.Authorization = `Bearer ${response.accessToken}`;
                 } catch (error) {
                     console.error("Token acquisition failed", error);
                     if (error instanceof InteractionRequiredAuthError) {
-                        try {
-                            await instance.handleRedirectPromise();
-                            await instance.loginRedirect(getLoginRequest());
-                        } catch (redirectError) {
-                            if (redirectError instanceof BrowserAuthError && redirectError.errorCode === "interaction_in_progress") {
-                                console.warn("Redirect skipped: interaction already in progress.");
-                            } else {
-                                console.error("Redirect failed", redirectError);
-                            }
-                        }
+                        notifyInteractiveAuthRequired();
+                        throw createAuthTokenRequiredError();
                     }
+
+                    throw error;
                 }
             }
             return config;
@@ -49,18 +63,13 @@ export const useApiClient = () => {
         api.interceptors.response.use(
             (response) => response,
             async (error) => {
+                if (error instanceof Error && error.name === AUTH_TOKEN_REQUIRED_ERROR) {
+                    return Promise.reject(error);
+                }
+
                 if (error.response && error.response.status === 401) {
-                    console.warn("Unauthorized request, redirecting to login...");
-                    try {
-                        await instance.handleRedirectPromise();
-                        await instance.loginRedirect(getLoginRequest());
-                    } catch (redirectError) {
-                        if (redirectError instanceof BrowserAuthError && redirectError.errorCode === "interaction_in_progress") {
-                            console.warn("Redirect skipped: interaction already in progress.");
-                        } else {
-                            console.error("Redirect failed", redirectError);
-                        }
-                    }
+                    console.warn("Unauthorized request, interactive login required.");
+                    notifyInteractiveAuthRequired();
                 }
                 return Promise.reject(error);
             }

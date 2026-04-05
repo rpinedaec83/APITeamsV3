@@ -1,8 +1,12 @@
 using APITeamsV3.Application.UseCases.CompanyConfigs;
+using APITeamsV3.Application.Common.Interfaces;
 using MediatR;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System.Collections.Generic;
+using System;
+using System.Linq;
 using System.Threading.Tasks;
 
 namespace APITeamsV3.API.Controllers
@@ -13,11 +17,19 @@ namespace APITeamsV3.API.Controllers
     public class CompanyConfigsController : ControllerBase
     {
         private readonly IMediator _mediator;
+        private readonly ICentralDbContext _centralDbContext;
+        private readonly IEncryptionService _encryptionService;
         private readonly ILogger<CompanyConfigsController> _logger;
 
-        public CompanyConfigsController(IMediator mediator, ILogger<CompanyConfigsController> logger)
+        public CompanyConfigsController(
+            IMediator mediator,
+            ICentralDbContext centralDbContext,
+            IEncryptionService encryptionService,
+            ILogger<CompanyConfigsController> logger)
         {
             _mediator = mediator;
+            _centralDbContext = centralDbContext;
+            _encryptionService = encryptionService;
             _logger = logger;
         }
 
@@ -80,5 +92,71 @@ namespace APITeamsV3.API.Controllers
             if (!success) return NotFound();
             return NoContent();
         }
+
+        [HttpGet("validate-connections")]
+        public async Task<ActionResult<List<CompanyConfigConnectionValidationDto>>> ValidateConnections()
+        {
+            var isAdminView = User.IsInRole("IT");
+            var configs = await _mediator.Send(new GetCompanyConfigsQuery(isAdminView));
+            var configIds = configs.Select(c => c.Id).ToList();
+
+            var entities = await _centralDbContext.CompanyConfigs
+                .AsNoTracking()
+                .Where(c => configIds.Contains(c.Id))
+                .OrderBy(c => c.CompanyKey)
+                .ToListAsync(HttpContext.RequestAborted);
+
+            var results = new List<CompanyConfigConnectionValidationDto>(entities.Count);
+
+            foreach (var config in entities)
+            {
+                if (string.IsNullOrWhiteSpace(config.SmartConnectionString))
+                {
+                    results.Add(new CompanyConfigConnectionValidationDto(
+                        config.Id,
+                        config.CompanyKey,
+                        config.DisplayName,
+                        false,
+                        "SmartConnectionString is empty."));
+                    continue;
+                }
+
+                try
+                {
+                    var decrypted = _encryptionService.Decrypt(config.SmartConnectionString);
+                    var hasSqlServerShape =
+                        !string.IsNullOrWhiteSpace(decrypted) &&
+                        (decrypted.Contains("Server=", StringComparison.OrdinalIgnoreCase) ||
+                         decrypted.Contains("Data Source=", StringComparison.OrdinalIgnoreCase)) &&
+                        (decrypted.Contains("Database=", StringComparison.OrdinalIgnoreCase) ||
+                         decrypted.Contains("Initial Catalog=", StringComparison.OrdinalIgnoreCase));
+
+                    results.Add(new CompanyConfigConnectionValidationDto(
+                        config.Id,
+                        config.CompanyKey,
+                        config.DisplayName,
+                        hasSqlServerShape,
+                        hasSqlServerShape ? null : "Decryption succeeded but the result does not look like a SQL Server connection string."));
+                }
+                catch (Exception ex)
+                {
+                    results.Add(new CompanyConfigConnectionValidationDto(
+                        config.Id,
+                        config.CompanyKey,
+                        config.DisplayName,
+                        false,
+                        ex.Message));
+                }
+            }
+
+            return Ok(results);
+        }
+
+        public sealed record CompanyConfigConnectionValidationDto(
+            int Id,
+            string CompanyKey,
+            string DisplayName,
+            bool IsValid,
+            string? ErrorMessage);
     }
 }

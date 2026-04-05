@@ -15,6 +15,7 @@ namespace APITeamsV3.Infrastructure.Persistence.Contexts
         public DbSet<CompanyConfig> CompanyConfigs { get; set; }
         public DbSet<CompanySede> CompanySedes { get; set; }
         public DbSet<SyncSchedule> SyncSchedules { get; set; }
+        public DbSet<SyncScheduleExecution> SyncScheduleExecutions { get; set; }
         public DbSet<SyncJob> SyncJobs { get; set; }
         public DbSet<CompanyPilotSection> CompanyPilotSections { get; set; }
 
@@ -50,6 +51,19 @@ namespace APITeamsV3.Infrastructure.Persistence.Contexts
             modelBuilder.Entity<SyncSchedule>(entity =>
             {
                 entity.HasKey(e => e.Id);
+            });
+
+            modelBuilder.Entity<SyncScheduleExecution>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Status).IsRequired();
+                entity.Property(e => e.TriggerSource).IsRequired();
+                entity.Property(e => e.SedeCodes).IsRequired();
+                entity.Property(e => e.JobIds).IsRequired();
+                entity.Property(e => e.ErrorMessage).IsRequired();
+                entity.HasIndex(e => e.SyncScheduleId);
+                entity.HasIndex(e => e.CompanyConfigId);
+                entity.HasIndex(e => e.TriggeredAtUtc);
             });
 
             modelBuilder.Entity<SyncJob>(entity =>

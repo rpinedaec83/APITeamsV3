@@ -26,7 +26,8 @@ namespace APITeamsV3.API.Controllers
                 RedirectUri = $"https://{Request.Host}/auth/callback",
                 CompanyKey = tenant.CompanyKey,
                 DisplayName = tenant.DisplayName,
-                CompanyId = tenant.CompanyId 
+                CompanyId = tenant.CompanyId,
+                TimeZoneId = tenant.TimeZoneId
             });
         }
     }

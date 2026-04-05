@@ -2,10 +2,12 @@ export interface SyncSchedule {
     id: number;
     companyConfigId: number;
     companyName: string;
+    timeZoneId: string;
     daysOfWeek: string;
     hour: number;
     minute: number;
     isEnabled: boolean;
+    createdAt: string;
     lastRunAt: string | null;
 }
 
