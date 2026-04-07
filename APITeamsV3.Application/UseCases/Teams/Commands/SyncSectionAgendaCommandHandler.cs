@@ -68,11 +68,19 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     return result;
                 }
 
-                var futureSessions = await GetFutureSessionsAsync(request.IdSeccion, cancellationToken);
+                var courseStartDate = section.FechaInicio == default ? DateTime.Today : section.FechaInicio.Date;
+                var courseEndDate = section.FechaFin == default ? courseStartDate : section.FechaFin.Date;
+
+                if (courseEndDate < courseStartDate)
+                {
+                    courseEndDate = courseStartDate;
+                }
+
+                var futureSessions = await GetFutureSessionsAsync(request.IdSeccion, courseStartDate, courseEndDate, cancellationToken);
                 if (futureSessions.Count == 0)
                 {
                     result.IsValid = false;
-                    result.Summary = "No hay sesiones futuras para sincronizar agenda.";
+                    result.Summary = "No hay sesiones programadas dentro del rango del curso para sincronizar agenda.";
                     return result;
                 }
 
@@ -113,7 +121,16 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                             .ToList(),
                         activeStudents,
                         section,
+                        courseStartDate,
+                        courseEndDate,
                         cancellationToken);
+
+                    if (createdBlocks.Count == 0)
+                    {
+                        result.IsValid = false;
+                        result.Summary = "No hay ocurrencias pendientes dentro del rango del curso para crear agenda.";
+                        return result;
+                    }
 
                     await UpdateSeccionHorarioLinkAsync(
                         request.IdSeccion,
@@ -223,6 +240,8 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                                 attendeeEmails,
                                 teacherEmails,
                                 section,
+                                courseStartDate,
+                                courseEndDate,
                                 cancellationToken);
 
                             createdMissingBlocks.Add(createdBlock);
@@ -310,6 +329,8 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
             IReadOnlyCollection<List<FutureSessionRow>> groupedSchedules,
             List<StudentRow> activeStudents,
             Seccion section,
+            DateTime courseStartDate,
+            DateTime courseEndDate,
             CancellationToken cancellationToken)
         {
             var createdBlocks = new List<CreatedMeetingBlock>();
@@ -341,6 +362,8 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     attendeeEmails,
                     teacherEmails,
                     section,
+                    courseStartDate,
+                    courseEndDate,
                     cancellationToken));
             }
 
@@ -357,22 +380,27 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
             IReadOnlyCollection<string> attendeeEmails,
             IReadOnlyCollection<string> teacherEmails,
             Seccion section,
+            DateTime courseStartDate,
+            DateTime courseEndDate,
             CancellationToken cancellationToken)
         {
-            var firstDate = blockSessions.Min(s => s.Fecha.Date);
-            var lastDate = blockSessions.Max(s => s.Fecha.Date);
-            var firstStart = ComposeDateTime(firstDate, inicio);
-            var firstEnd = ComposeDateTime(firstDate, fin);
-            if (firstEnd <= firstStart)
-            {
-                firstEnd = firstEnd.AddDays(1);
-            }
-
             var recurrenceDays = blockSessions
                 .Select(s => s.Fecha.DayOfWeek)
                 .Distinct()
                 .OrderBy(d => d)
                 .ToList();
+
+            if (!TryResolveFirstOccurrenceDate(courseStartDate, courseEndDate, recurrenceDays, out var firstOccurrenceDate))
+            {
+                throw new InvalidOperationException($"No hay ocurrencias pendientes para el bloque {FormatHour(inicio)}-{FormatHour(fin)} dentro del rango del curso.");
+            }
+
+            var firstStart = ComposeDateTime(firstOccurrenceDate, inicio);
+            var firstEnd = ComposeDateTime(firstOccurrenceDate, fin);
+            if (firstEnd <= firstStart)
+            {
+                firstEnd = firstEnd.AddDays(1);
+            }
 
             var subject = BuildSubject(section, inicio, fin, true);
             var htmlContent = BuildContent(section, inicio, fin);
@@ -386,8 +414,8 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     HtmlContent = htmlContent,
                     FirstOccurrenceStart = firstStart,
                     FirstOccurrenceEnd = firstEnd,
-                    RecurrenceStartDate = firstDate,
-                    RecurrenceEndDate = lastDate,
+                    RecurrenceStartDate = firstOccurrenceDate,
+                    RecurrenceEndDate = courseEndDate,
                     RecurrenceDays = recurrenceDays,
                     RequiredAttendeeEmails = attendeeEmails,
                     PresenterEmails = teacherEmails
@@ -407,7 +435,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
             };
         }
 
-        private async Task<List<FutureSessionRow>> GetFutureSessionsAsync(int sectionId, CancellationToken cancellationToken)
+        private async Task<List<FutureSessionRow>> GetFutureSessionsAsync(int sectionId, DateTime courseStartDate, DateTime courseEndDate, CancellationToken cancellationToken)
         {
             const string sql = @"
 SELECT HS.IdHorario,
@@ -425,11 +453,11 @@ LEFT JOIN Facilitador F WITH (NOLOCK)
     ON F.IdFacilitador = ISNULL(HS.IdActorReemplazo, HS.IdActorProgramado)
 WHERE HS.IdSeccion = {0}
   AND HS.Estado <> 'X'
-  AND CONVERT(date, HS.Fecha) >= CONVERT(date, GETDATE())
+  AND CONVERT(date, HS.Fecha) BETWEEN CONVERT(date, {1}) AND CONVERT(date, {2})
 ORDER BY HS.Fecha, HS.Inicio, HS.Numero;";
 
             return await _context.Database
-                .SqlQueryRaw<FutureSessionRow>(sql, sectionId)
+                .SqlQueryRaw<FutureSessionRow>(sql, sectionId, courseStartDate, courseEndDate)
                 .ToListAsync(cancellationToken);
         }
 
@@ -689,6 +717,32 @@ WHERE IdSeccion = {0};";
                 $"<p>Curso: <b>{section.CursoNombre}</b></p>" +
                 $"<p>Horario: <b>{FormatHour(inicio)} - {FormatHour(fin)}</b></p>" +
                 $"<p>Este evento se genera sobre el Team para que grabaciones y recursos queden en el equipo.</p>";
+        }
+
+        private static bool TryResolveFirstOccurrenceDate(
+            DateTime courseStartDate,
+            DateTime courseEndDate,
+            IReadOnlyCollection<DayOfWeek> recurrenceDays,
+            out DateTime firstOccurrenceDate)
+        {
+            firstOccurrenceDate = default;
+
+            if (recurrenceDays.Count == 0)
+            {
+                return false;
+            }
+
+            var searchStart = DateTime.Today > courseStartDate ? DateTime.Today : courseStartDate;
+            for (var date = searchStart.Date; date <= courseEndDate.Date; date = date.AddDays(1))
+            {
+                if (recurrenceDays.Contains(date.DayOfWeek))
+                {
+                    firstOccurrenceDate = date;
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private async Task LogOperativoAsync(string type, string target, string reference, string msg, string? jobId, string context = "")

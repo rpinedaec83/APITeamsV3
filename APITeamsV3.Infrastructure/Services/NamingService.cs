@@ -2,6 +2,7 @@ using APITeamsV3.Application.Common.Interfaces;
 using APITeamsV3.Domain.Entities;
 using System.Text.RegularExpressions;
 using System.Text;
+using System.Linq;
 
 namespace APITeamsV3.Infrastructure.Services
 {
@@ -9,39 +10,21 @@ namespace APITeamsV3.Infrastructure.Services
     {
         public string GetMailNickname(Seccion seccion)
         {
-            // Format: {ProductoCodigo}.{IdCurricula}.{IdCurso}.{Periodo}-{IdSeccion}
-            // E.g.: 0324.313.1610.2025I-12239
-            
-            // Need to ensure these properties exist on Seccion extended entity or are fetched.
-            // For now assuming the view provides them or they are part of Seccion class.
-            
-            // Note: In cTeamsPorSeccion.sql:
-            // REPLACE(PE.Codigo, '-', '') is used for Periodo part if not careful, but the requirement says:
-            // 2025I is allowed.
-            // Requirement: "Mantener '.' y '-' tal cual"
-            
-            // IMPORTANT: We need IdCurricula on Seccion.
-            // Let's assume for now Seccion has these fields populated.
+            // Format: {ProductoCodigo}.{IdCurricula}.{IdCurso}.{Periodo}-{CodigoSeccion}
+            // Example: 0324.313.1610.2025-I-01425.26.00184
+            //
+            // "CodigoSeccion" must prefer Seccion.Codigo.
+            // If it is unavailable, we fall back to GrupoCodigo and finally to IdSeccion.
 
             var sb = new StringBuilder();
-            sb.Append($"{seccion.ProductoCodigo}.");
-            sb.Append($"{seccion.IdCurricula}."); // Plan de estudios (Promocion.IdCurricula)
-            sb.Append($"{seccion.IdCurso}.");
-            sb.Append($"{seccion.CodigoPeriodo}-");
-            sb.Append($"{seccion.IdSeccion}");
+            sb.Append($"{SanitizeComponent(seccion.ProductoCodigo)}.");
+            sb.Append($"{SanitizeComponent(seccion.IdCurricula.ToString())}.");
+            sb.Append($"{SanitizeComponent(seccion.IdCurso.ToString())}.");
+            sb.Append($"{SanitizeComponent(seccion.CodigoPeriodo)}-");
+            sb.Append($"{SanitizeComponent(GetSectionCode(seccion))}");
 
             var nickname = sb.ToString();
-
-            // Sanitization: Allow only [A-Za-z0-9.-]
-            // Actually the requirement says "Mantener '.' y '-' tal cual" so we strip others?
-            // "Permitir solo [A-Za-z0-9.-]" meaning remove underscores, spaces?
             
-            // The requirement says:
-            // MailNickname = {ProductoCodigo}.{IdCurricula}.{IdCurso}.{Periodo}-{IdSeccion}
-            // If any component has invalid chars they should be stripped? 
-            // Usually IDs are numbers. Periodo might have '-'.
-            
-             // Truncate logic
             if (nickname.Length > 64)
             {
                 var prefix = nickname.Substring(0, 57);
@@ -55,7 +38,7 @@ namespace APITeamsV3.Infrastructure.Services
         public string GetDisplayName(Seccion seccion)
         {
             // "{NombreCurso} [{NombreProducto}][{CodigoSeccion}]"
-            var raw = $"{seccion.CursoNombre} [{seccion.ProductoNombre}][{seccion.GrupoCodigo}]";
+            var raw = $"{seccion.CursoNombre} [{seccion.ProductoNombre}][{GetSectionCode(seccion)}]";
             
             // Sanitization
             // Trim
@@ -87,6 +70,31 @@ namespace APITeamsV3.Infrastructure.Services
                 hash = (hash * 31) + c;
             }
             return Math.Abs(hash).ToString("X"); // Hex is easier
+        }
+
+        private static string GetSectionCode(Seccion seccion)
+        {
+            if (!string.IsNullOrWhiteSpace(seccion.Codigo))
+            {
+                return seccion.Codigo.Trim();
+            }
+
+            if (!string.IsNullOrWhiteSpace(seccion.GrupoCodigo))
+            {
+                return seccion.GrupoCodigo.Trim();
+            }
+
+            return seccion.IdSeccion.ToString();
+        }
+
+        private static string SanitizeComponent(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return string.Empty;
+            }
+
+            return new string(value.Trim().Where(ch => char.IsLetterOrDigit(ch) || ch == '.' || ch == '-').ToArray());
         }
     }
 }

@@ -1,5 +1,6 @@
 using MediatR;
 using System.Collections.Generic;
+using System;
 
 namespace APITeamsV3.Application.UseCases.Sections
 {
@@ -21,6 +22,9 @@ namespace APITeamsV3.Application.UseCases.Sections
         public string Programa { get; set; } = string.Empty;
         public string Semestre { get; set; } = string.Empty;
         public string UnidadNegocio { get; set; } = string.Empty;
+        public DateTime? FechaInicio { get; set; }
+        public DateTime? FechaFin { get; set; }
+        public string? LinkGrabacion { get; set; }
         public List<StudentSummaryDto> Members { get; set; } = new();
         public bool HasTeam { get; set; }
         public bool EsTeams { get; set; }

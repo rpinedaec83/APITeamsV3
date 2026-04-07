@@ -33,6 +33,7 @@ import {
     DeleteRegular,
     TriangleUpRegular,
     TriangleDownRegular,
+    CopyRegular,
 } from '@fluentui/react-icons';
 import { useApiClient } from '../hooks/useApiClient';
 import { showSuccess, showError, showConfirm } from '../utils/alerts';
@@ -54,6 +55,9 @@ interface SectionData {
     semestre: string;
     profesor?: string; // Optional/Nullable in API
     unidadNegocio: string;
+    fechaInicio?: string | null;
+    fechaFin?: string | null;
+    linkGrabacion?: string | null;
     hasTeam: boolean;
     esTeams: boolean; // Added to enforce academic flag check
     ineligibilityReason?: string;
@@ -162,6 +166,7 @@ const useStyles = makeStyles({
         fontSize: tokens.fontSizeBase300,
         fontWeight: tokens.fontWeightBold,
         color: tokens.colorNeutralForeground1,
+        wordBreak: 'break-word',
     },
     actionsRegion: {
         display: 'flex',
@@ -187,6 +192,43 @@ const useStyles = makeStyles({
         textTransform: 'capitalize',
     },
 });
+
+const formatDisplayDate = (value?: string | null) => {
+    if (!value) return '';
+
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        return value;
+    }
+
+    return new Intl.DateTimeFormat('es-PE', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+    }).format(date);
+};
+
+const copyTextToClipboard = async (text: string) => {
+    if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        return;
+    }
+
+    const textArea = document.createElement('textarea');
+    textArea.value = text;
+    textArea.setAttribute('readonly', '');
+    textArea.style.position = 'fixed';
+    textArea.style.left = '-9999px';
+    document.body.appendChild(textArea);
+    textArea.select();
+
+    const copied = document.execCommand('copy');
+    document.body.removeChild(textArea);
+
+    if (!copied) {
+        throw new Error('No se pudo copiar el texto.');
+    }
+};
 
 const OperationsPage: React.FC = () => {
     const styles = useStyles();
@@ -328,6 +370,25 @@ const OperationsPage: React.FC = () => {
         }
     };
 
+    const handleRefreshMembers = async () => {
+        if (!seccionData?.idSeccion) return;
+        const result = await showConfirm('¿Estás seguro de refrescar alumnos y facilitadores para esta sección?');
+        if (!result.isConfirmed) return;
+
+        setLoading(true);
+        try {
+            const companyKey = getCompanyKey();
+            const response = await apiClient.post(`/sync/section/${seccionData.idSeccion}/members?companyKey=${companyKey}`);
+            showSuccess(response.data.summary, 'Miembros actualizados');
+            await handleSearchSeccion();
+        } catch (err: unknown) {
+            const errorMessage = err instanceof Error ? err.message : 'Error desconocido al refrescar miembros';
+            showError(errorMessage);
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const handleVerifyTeam = async () => {
         if (!seccionData?.idSeccion) return;
         setLoading(true);
@@ -450,8 +511,11 @@ const OperationsPage: React.FC = () => {
                 ['Curso', seccionData.curso],
                 ['Programa', seccionData.programa],
                 ['Semestre', seccionData.semestre],
+                ['Inicio del curso', formatDisplayDate(seccionData.fechaInicio) || 'N/A'],
+                ['Fin del curso', formatDisplayDate(seccionData.fechaFin) || 'N/A'],
                 ['Facilitador', seccionData.profesor || 'N/A'],
                 ['Unidad Negocio', seccionData.unidadNegocio],
+                ['Link de grabación', seccionData.linkGrabacion || 'N/A'],
                 [''],
                 ['LISTADO DE ALUMNOS'],
                 ['#', 'Código', 'Nombre', 'Estado']
@@ -510,6 +574,17 @@ const OperationsPage: React.FC = () => {
     const onTabSelect = (_: unknown, data: SelectTabData) => {
         if (data?.value) {
             setSelectedTab(data.value);
+        }
+    };
+
+    const handleCopyLinkGrabacion = async (link?: string | null) => {
+        if (!link) return;
+
+        try {
+            await copyTextToClipboard(link);
+            showSuccess('El link de grabación fue copiado al portapapeles.', 'Link copiado');
+        } catch {
+            showError('No se pudo copiar el link de grabación.');
         }
     };
 
@@ -583,8 +658,15 @@ const OperationsPage: React.FC = () => {
                                 <DetailItem label="Curso" value={seccionData.curso} />
                                 <DetailItem label="Programa" value={seccionData.programa} />
                                 <DetailItem label="Semestre" value={seccionData.semestre} />
+                                <DetailItem label="Inicio del Curso" value={formatDisplayDate(seccionData.fechaInicio)} />
+                                <DetailItem label="Fin del Curso" value={formatDisplayDate(seccionData.fechaFin)} />
                                 <DetailItem label="Facilitador" value={seccionData.profesor || 'N/A'} />
                                 <DetailItem label="Unidad Negocio" value={seccionData.unidadNegocio} />
+                                <CopyDetailItem
+                                    label="Link de Grabación"
+                                    value={seccionData.linkGrabacion}
+                                    onCopy={handleCopyLinkGrabacion}
+                                />
                             </div>
                         )}
 
@@ -597,7 +679,7 @@ const OperationsPage: React.FC = () => {
                                             <Title3>Equipo Activo</Title3>
                                         </div>
                                         <span style={{ flex: 1 }}></span>
-                                        <Button icon={<SaveRegular />} onClick={handleProvisionTeam} disabled={loading}>Refrescar Miembros</Button>
+                                        <Button icon={<SaveRegular />} onClick={handleRefreshMembers} disabled={loading}>Refrescar Miembros</Button>
                                         <Button icon={<CalendarRegular />} onClick={handleRegenerateAgenda} disabled={loading}>Regenerar Agendas</Button>
                                         <Button
                                             icon={<ArrowSyncRegular />}
@@ -863,7 +945,7 @@ const OperationsPage: React.FC = () => {
     );
 };
 
-const DetailItem: React.FC<{ label: string; value: string }> = ({ label, value }) => {
+const DetailItem: React.FC<{ label: string; value?: string | null }> = ({ label, value }) => {
     const styles = useStyles();
     if (!value || value === 'N/A') return null;
 
@@ -871,6 +953,25 @@ const DetailItem: React.FC<{ label: string; value: string }> = ({ label, value }
         <div className={styles.detailItem}>
             <span className={styles.detailLabel}>{label}</span>
             <span className={styles.detailValue}>{value}</span>
+        </div>
+    );
+}
+
+const CopyDetailItem: React.FC<{ label: string; value?: string | null; onCopy: (value?: string | null) => void }> = ({ label, value, onCopy }) => {
+    const styles = useStyles();
+    if (!value || value === 'N/A') return null;
+
+    return (
+        <div className={styles.detailItem}>
+            <span className={styles.detailLabel}>{label}</span>
+            <Button
+                appearance="primary"
+                icon={<CopyRegular />}
+                onClick={() => void onCopy(value)}
+                style={{ width: 'fit-content' }}
+            >
+                Copiar link
+            </Button>
         </div>
     );
 }

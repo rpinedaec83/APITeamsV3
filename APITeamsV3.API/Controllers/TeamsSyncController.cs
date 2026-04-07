@@ -84,6 +84,15 @@ namespace APITeamsV3.API.Controllers
             return Ok(result);
         }
 
+        [HttpPost("section/{idSeccion}/members")]
+        public async Task<ActionResult<SyncSectionMembersResult>> SyncSectionMembers(int idSeccion, [FromQuery] string companyKey = "idat")
+        {
+            var result = await _mediator.Send(new SyncSectionMembersCommand(idSeccion));
+            if (!result.Success)
+                return BadRequest(result);
+            return Ok(result);
+        }
+
         [HttpPost("student/{codigoAlumno}")]
         public async Task<IActionResult> SyncStudentTeams(string codigoAlumno)
         {

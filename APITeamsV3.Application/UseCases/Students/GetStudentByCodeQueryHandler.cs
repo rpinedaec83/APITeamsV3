@@ -90,7 +90,7 @@ namespace APITeamsV3.Application.UseCases.Students
             var teamIds = teams.Select(t => t.IdTeamsGroup).ToList();
             var memberships = await _context.Set<TeamMember>()
                 .AsNoTracking()
-                .Where(tm => teamIds.Contains(tm.IdTeams) && tm.CodigoAlumno == student.Codigo && tm.Estado == "A") // Use Codigo
+                .Where(tm => teamIds.Contains(tm.IdTeams) && tm.Estado == "A")
                 .ToListAsync(cancellationToken);
 
             var enrolledDtos = new List<StudentEnrollmentDto>();
@@ -117,7 +117,14 @@ namespace APITeamsV3.Application.UseCases.Students
                 }
                 else
                 {
-                    var isMember = memberships.Any(m => m.IdTeams == team.IdTeamsGroup);
+                    var isMember = memberships.Any(m =>
+                        m.IdTeams == team.IdTeamsGroup &&
+                        BuildStudentIdentifiers(student.Codigo, student.EmailInstitucion, student.EmailPersonal)
+                            .Contains(NormalizeIdentifier(m.CodigoAlumno)))
+                        || memberships.Any(m =>
+                            m.IdTeams == team.IdTeamsGroup &&
+                            BuildStudentIdentifiers(student.Codigo, student.EmailInstitucion, student.EmailPersonal)
+                                .Contains(NormalizeIdentifier(m.Email)));
                     enrollmentDto.StudentStatus = isMember ? "En Team" : "Pendiente";
                 }
 
@@ -138,6 +145,36 @@ namespace APITeamsV3.Application.UseCases.Students
                 Seccion = sectionInfo?.GrupoCodigo ?? "N/A",
                 EnrolledSections = enrolledDtos
             };
+        }
+
+        private static HashSet<string> BuildStudentIdentifiers(string? code, string? institutionalEmail, string? personalEmail)
+        {
+            var identifiers = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+            AddIdentifierIfPresent(identifiers, code);
+            AddIdentifierIfPresent(identifiers, institutionalEmail);
+            AddIdentifierIfPresent(identifiers, personalEmail);
+            return identifiers;
+        }
+
+        private static void AddIdentifierIfPresent(ISet<string> identifiers, string? value)
+        {
+            var normalized = NormalizeIdentifier(value);
+            if (!string.IsNullOrWhiteSpace(normalized))
+            {
+                identifiers.Add(normalized);
+            }
+        }
+
+        private static string NormalizeIdentifier(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return string.Empty;
+            }
+
+            var trimmed = value.Trim();
+            var at = trimmed.IndexOf('@');
+            return (at >= 0 ? trimmed.Substring(0, at) : trimmed).Trim().ToLowerInvariant();
         }
     }
 }

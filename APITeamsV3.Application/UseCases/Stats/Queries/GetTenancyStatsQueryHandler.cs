@@ -2,6 +2,7 @@ using MediatR;
 using APITeamsV3.Application.Common.Interfaces;
 using APITeamsV3.Application.UseCases.Teams.DTOs;
 using Microsoft.EntityFrameworkCore;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -129,7 +130,11 @@ namespace APITeamsV3.Application.UseCases.Stats.Queries
                 ORDER BY TS.Periodo, TS.Sede, TS.UnidadNegocio, TS.Programa";
 
             var sedeFilter = string.IsNullOrWhiteSpace(activeSedeCodes) ? null : activeSedeCodes;
-            return await _context.Set<TenancyStatsDto>().FromSqlRaw(sql, sedeFilter).ToListAsync(cancellationToken);
+            var parameters = new object[] { sedeFilter is null ? DBNull.Value : sedeFilter };
+
+            return await _context.Set<TenancyStatsDto>()
+                .FromSqlRaw(sql, parameters)
+                .ToListAsync(cancellationToken);
         }
 
         private async Task<string> GetActiveSedeCodesAsync(CancellationToken cancellationToken)
