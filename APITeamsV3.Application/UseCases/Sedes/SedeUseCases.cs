@@ -111,9 +111,9 @@ namespace APITeamsV3.Application.UseCases.Sedes
 
             // Incluimos WHERE Activo = 1 si solo queremos importar las vigentes inicialmente, 
             // pero para sincronizar estados de desactivación es mejor traer todas y mapear el flag.
-            // Utilizar SmartSedeImport (mapeado en SmartDbContext) para evitar el error 500
-            var smartSedes = await _smartContext.Database
-                .SqlQueryRaw<SmartSedeImport>("SELECT IdSede, Codigo, Nombre, Activo FROM Sede WITH(NOLOCK)")
+            // Utilizar FromSqlRaw via DbSet para evitar el error 500 en EF Core 8 (SmartSedeImport está en el modelo)
+            var smartSedes = await _smartContext.Set<SmartSedeImport>()
+                .FromSqlRaw("SELECT IdSede, Codigo, Nombre, Activo FROM Sede WITH(NOLOCK)")
                 .ToListAsync(cancellationToken);
 
             var existingSedes = await _centralContext.CompanySedes

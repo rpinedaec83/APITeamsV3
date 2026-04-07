@@ -129,7 +129,7 @@ namespace APITeamsV3.Application.UseCases.Stats.Queries
                 ORDER BY TS.Periodo, TS.Sede, TS.UnidadNegocio, TS.Programa";
 
             var sedeFilter = string.IsNullOrWhiteSpace(activeSedeCodes) ? null : activeSedeCodes;
-            return await _context.Database.SqlQueryRaw<TenancyStatsDto>(sql, sedeFilter).ToListAsync(cancellationToken);
+            return await _context.Set<TenancyStatsDto>().FromSqlRaw(sql, sedeFilter).ToListAsync(cancellationToken);
         }
 
         private async Task<string> GetActiveSedeCodesAsync(CancellationToken cancellationToken)
