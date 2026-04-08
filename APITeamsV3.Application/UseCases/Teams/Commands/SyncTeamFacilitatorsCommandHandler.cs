@@ -57,32 +57,36 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     .SetProperty(t => t.Propietario4, p4),
                     cancellationToken);
 
-            // Paso 3: Retornar los cambios (mimic de dtFacilitadores CTE)
-            // Buscamos facilitadores en ProgramacionAlumnos que no sean ya P3 en TeamsEquipos activos
-            var result = await _context.TeamsProgramacionAlumnos
-                .Where(mpg => mpg.IdCurso == request.IdSeccion && !string.IsNullOrEmpty(mpg.EmailFacilitador))
-                .Join(_context.TeamsEquipos.Where(te => te.EstadoTeam == "A"),
-                    mpg => mpg.IdCurso,
-                    te => te.IdSeccionSmart,
-                    (mpg, te) => new { mpg, te })
-                .Where(x => !_context.TeamsEquipos
-                    .Any(t => t.IdSeccionSmart == x.mpg.IdCurso && t.Propietario3 == x.mpg.EmailFacilitador && t.EstadoTeam == "A"))
-                .Where(x => x.te.Propietario3 != x.mpg.EmailFacilitador)
-                .Select(x => new TeamFacilitatorChangeDto
-                {
-                    IdTeam = x.te.IdTeamsGroup,
-                    CodigoFacilitador = x.mpg.CodigoFacilitador ?? string.Empty,
-                    NombresFacilitador = x.mpg.NombresFacilitador ?? string.Empty,
-                    ApellidosFacilitador = x.mpg.ApellidosFacilitador ?? string.Empty,
-                    EmailFacilitador = x.mpg.EmailFacilitador ?? string.Empty,
-                    OldEmailFacilitador = x.te.Propietario3 ?? string.Empty,
-                    OldCodigoFacilitador = string.IsNullOrEmpty(x.te.Propietario3)
-                        ? string.Empty
-                        : (x.te.Propietario3.Contains("@") 
-                            ? x.te.Propietario3.Substring(0, x.te.Propietario3.IndexOf("@")) 
-                            : x.te.Propietario3)
-                })
-                .Distinct()
+            // Paso 3: Obtener el facilitador esperado desde la fuente academica real
+            // en vez de depender del snapshot TeamsProgramacionAlumnos.
+            const string facilitatorDeltaSql = @"
+SELECT DISTINCT
+    TE.IdTeamsGroup AS IdTeam,
+    ISNULL(FC.CodigoAnterior, '') AS CodigoFacilitador,
+    ISNULL(AT2.Nombres, '') AS NombresFacilitador,
+    LTRIM(RTRIM(ISNULL(AT2.Paterno, '') + ' ' + ISNULL(AT2.Materno, ''))) AS ApellidosFacilitador,
+    ISNULL(FC.EmailInstitucion, '') AS EmailFacilitador,
+    ISNULL(TE.Propietario3, '') AS OldEmailFacilitador,
+    CASE
+        WHEN TE.Propietario3 IS NULL OR TE.Propietario3 = '' THEN ''
+        WHEN TE.Propietario3 LIKE '%@%' THEN LEFT(TE.Propietario3, CHARINDEX('@', TE.Propietario3) - 1)
+        ELSE TE.Propietario3
+    END AS OldCodigoFacilitador
+FROM TeamsEquipos TE WITH (NOLOCK)
+LEFT JOIN SeccionProfesor SP WITH (NOLOCK)
+    ON SP.IdSeccion = TE.IdSeccionSmart
+   AND SP.EsResponsable = 1
+LEFT JOIN Actor AT2 WITH (NOLOCK)
+    ON AT2.IdActor = SP.IdActor
+LEFT JOIN Facilitador FC WITH (NOLOCK)
+    ON FC.IdFacilitador = SP.IdActor
+WHERE TE.IdSeccionSmart = {0}
+  AND TE.EstadoTeam = 'A'
+  AND ISNULL(FC.EmailInstitucion, '') <> ''
+  AND (TE.Propietario3 IS NULL OR TE.Propietario3 <> FC.EmailInstitucion);";
+
+            var result = await _context.Database
+                .SqlQueryRaw<TeamFacilitatorChangeDto>(facilitatorDeltaSql, request.IdSeccion)
                 .ToListAsync(cancellationToken);
 
             // Graph Sync for Facilitators (Owners)

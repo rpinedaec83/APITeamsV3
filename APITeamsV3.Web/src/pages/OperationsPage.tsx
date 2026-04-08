@@ -54,6 +54,9 @@ interface SectionData {
     programa: string;
     semestre: string;
     profesor?: string; // Optional/Nullable in API
+    teamTeacher?: string | null;
+    replacementTeacher?: string | null;
+    teacherReplacementStatus?: string | null;
     unidadNegocio: string;
     fechaInicio?: string | null;
     fechaFin?: string | null;
@@ -513,7 +516,10 @@ const OperationsPage: React.FC = () => {
                 ['Semestre', seccionData.semestre],
                 ['Inicio del curso', formatDisplayDate(seccionData.fechaInicio) || 'N/A'],
                 ['Fin del curso', formatDisplayDate(seccionData.fechaFin) || 'N/A'],
-                ['Facilitador', seccionData.profesor || 'N/A'],
+                ['Facilitador Académico', seccionData.profesor || 'N/A'],
+                ['Docente en TeamsEquipos', seccionData.teamTeacher || 'N/A'],
+                ['Docente a Reemplazar', seccionData.replacementTeacher || 'N/A'],
+                ['Estado Docente', seccionData.teacherReplacementStatus || 'N/A'],
                 ['Unidad Negocio', seccionData.unidadNegocio],
                 ['Link de grabación', seccionData.linkGrabacion || 'N/A'],
                 [''],
@@ -660,7 +666,10 @@ const OperationsPage: React.FC = () => {
                                 <DetailItem label="Semestre" value={seccionData.semestre} />
                                 <DetailItem label="Inicio del Curso" value={formatDisplayDate(seccionData.fechaInicio)} />
                                 <DetailItem label="Fin del Curso" value={formatDisplayDate(seccionData.fechaFin)} />
-                                <DetailItem label="Facilitador" value={seccionData.profesor || 'N/A'} />
+                                <DetailItem label="Facilitador Académico" value={seccionData.profesor || 'N/A'} />
+                                <DetailItem label="Docente en TeamsEquipos" value={seccionData.teamTeacher || 'N/A'} />
+                                <DetailItem label="Docente a Reemplazar" value={seccionData.replacementTeacher || 'N/A'} />
+                                <DetailItem label="Estado Docente" value={seccionData.teacherReplacementStatus || 'N/A'} />
                                 <DetailItem label="Unidad Negocio" value={seccionData.unidadNegocio} />
                                 <CopyDetailItem
                                     label="Link de Grabación"

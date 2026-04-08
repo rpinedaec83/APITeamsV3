@@ -18,6 +18,9 @@ namespace APITeamsV3.Application.UseCases.Sections
         public string Producto { get; set; } = string.Empty;
         public string Curso { get; set; } = string.Empty;
         public string Profesor { get; set; } = string.Empty;
+        public string? TeamTeacher { get; set; }
+        public string? ReplacementTeacher { get; set; }
+        public string? TeacherReplacementStatus { get; set; }
         public string Division { get; set; } = string.Empty;
         public string Programa { get; set; } = string.Empty;
         public string Semestre { get; set; } = string.Empty;

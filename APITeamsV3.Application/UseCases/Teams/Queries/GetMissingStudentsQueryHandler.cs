@@ -19,26 +19,32 @@ namespace APITeamsV3.Application.UseCases.Teams.Queries
 
         public async Task<List<MissingStudentDto>> Handle(GetMissingStudentsQuery request, CancellationToken cancellationToken)
         {
-            // Option 4 Logic: TRAE LOS ALUMNOS QUE AUN NO HAN SIDO AGREGADOS AL TEAMS
             var sql = @"
-                SELECT TE.IdTeamsGroup,
-                  MPG.CodigoAlumno,
-                  MPG.NombresAlumno,
-                  MPG.ApellidosAlumno,
-                  MPG.EmailAlumno
-                FROM TeamsProgramacionAlumnos MPG WITH (NOLOCK)
-                  LEFT JOIN TeamsEquipos TE WITH (NOLOCK) ON (TE.IdSeccionSmart = MPG.IdCurso)
-                WHERE TE.IdSeccionSmart = {0}
-                  AND NOT EXISTS (
-                    SELECT 1
-                    FROM TeamsUsuarios TU WITH (NOLOCK)
-                    WHERE TU.CodigoAlumno = MPG.CodigoAlumno
-                      AND TU.idTeams = TE.IdTeamsGroup
-                      AND TU.Tipo = 'A'
-                      AND TU.Estado = 'A'
-                  )
-                  AND ISNULL(MPG.CodigoFacilitador, '') <> ''
-                  AND TE.EstadoTeam = 'A'";
+SELECT DISTINCT
+    TE.IdTeamsGroup,
+    CodigoAlumno = COALESCE(NULLIF(AL.Codigo, ''), CONVERT(VARCHAR(50), AL.IdAlumno)),
+    NombresAlumno = ISNULL(AL.Nombre, ''),
+    ApellidosAlumno = '',
+    EmailAlumno = NULLIF(AL.EmailInstitucion, '')
+FROM AlumnoCurso AC WITH (NOLOCK)
+INNER JOIN Alumno AL WITH (NOLOCK)
+    ON AL.IdAlumno = AC.IdAlumno
+INNER JOIN TeamsEquipos TE WITH (NOLOCK)
+    ON TE.IdSeccionSmart = AC.IdSeccion
+WHERE AC.IdSeccion = {0}
+  AND AC.EsMatricula = 1
+  AND TE.EstadoTeam = 'A'
+  AND NULLIF(AL.EmailInstitucion, '') IS NOT NULL
+  AND NULLIF(COALESCE(NULLIF(AL.Codigo, ''), CONVERT(VARCHAR(50), AL.IdAlumno)), '') IS NOT NULL
+  AND NOT EXISTS
+  (
+      SELECT 1
+      FROM TeamsUsuarios TU WITH (NOLOCK)
+      WHERE TU.IdTeams = TE.IdTeamsGroup
+        AND TU.CodigoAlumno = COALESCE(NULLIF(AL.Codigo, ''), CONVERT(VARCHAR(50), AL.IdAlumno))
+        AND TU.Tipo = 'A'
+        AND TU.Estado = 'A'
+  );";
 
             return await _context.Database.SqlQueryRaw<MissingStudentDto>(sql, request.IdSeccion).ToListAsync(cancellationToken);
         }

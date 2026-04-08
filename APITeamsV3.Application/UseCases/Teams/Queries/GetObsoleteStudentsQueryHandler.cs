@@ -19,27 +19,55 @@ namespace APITeamsV3.Application.UseCases.Teams.Queries
 
         public async Task<List<ObsoleteStudentDto>> Handle(GetObsoleteStudentsQuery request, CancellationToken cancellationToken)
         {
-            // Option 5 Logic:
             var sql = @"
-                WITH dtOldMembers AS (
-                  SELECT TE.IdTeamsGroup,
-                    TU.CodigoAlumno
-                  FROM TeamsUsuarios TU WITH (NOLOCK)
-                    LEFT JOIN TeamsEquipos TE WITH (NOLOCK) ON (TE.IdTeamsGroup = TU.idTeams)
-                  WHERE TE.IdSeccionSmart = {0}
-                    AND NOT EXISTS (
-                      SELECT 1
-                      FROM TeamsProgramacionAlumnos MPG WITH (NOLOCK)
-                      WHERE MPG.IdCurso = TE.IdSeccionSmart
-                        AND MPG.CodigoAlumno = TU.CodigoAlumno
-                    )
-                    AND TU.Estado = 'A'
-                    AND TU.Tipo = 'A'
-                    AND TE.EstadoTeam = 'A'
-                )
-                SELECT *
-                FROM dtOldMembers
-                WHERE ISNULL(IdTeamsGroup, '') <> ''";
+WITH EnrolledIdentifiers AS (
+    SELECT DISTINCT
+        IdSeccion = AC.IdSeccion,
+        Identifier = LOWER(LTRIM(RTRIM(COALESCE(NULLIF(AL.Codigo, ''), CONVERT(VARCHAR(50), AL.IdAlumno)))))
+    FROM AlumnoCurso AC WITH (NOLOCK)
+    INNER JOIN Alumno AL WITH (NOLOCK)
+        ON AL.IdAlumno = AC.IdAlumno
+    WHERE AC.IdSeccion = {0}
+      AND AC.EsMatricula = 1
+
+    UNION
+
+    SELECT DISTINCT
+        IdSeccion = AC.IdSeccion,
+        Identifier = LOWER(LTRIM(RTRIM(LEFT(AL.EmailInstitucion, CHARINDEX('@', AL.EmailInstitucion + '@') - 1))))
+    FROM AlumnoCurso AC WITH (NOLOCK)
+    INNER JOIN Alumno AL WITH (NOLOCK)
+        ON AL.IdAlumno = AC.IdAlumno
+    WHERE AC.IdSeccion = {0}
+      AND AC.EsMatricula = 1
+      AND ISNULL(AL.EmailInstitucion, '') <> ''
+),
+dtOldMembers AS (
+    SELECT
+        TE.IdTeamsGroup,
+        TU.CodigoAlumno,
+        TU.Email AS EmailAlumno
+    FROM TeamsUsuarios TU WITH (NOLOCK)
+    INNER JOIN TeamsEquipos TE WITH (NOLOCK)
+        ON TE.IdTeamsGroup = TU.IdTeams
+    WHERE TE.IdSeccionSmart = {0}
+      AND TE.EstadoTeam = 'A'
+      AND TU.Estado = 'A'
+      AND TU.Tipo = 'A'
+      AND NOT EXISTS
+      (
+          SELECT 1
+          FROM EnrolledIdentifiers EI
+          WHERE EI.IdSeccion = TE.IdSeccionSmart
+            AND EI.Identifier = LOWER(LTRIM(RTRIM(COALESCE(
+                NULLIF(TU.CodigoAlumno, ''),
+                LEFT(ISNULL(TU.Email, ''), CHARINDEX('@', ISNULL(TU.Email, '') + '@') - 1)
+            ))))
+      )
+)
+SELECT *
+FROM dtOldMembers
+WHERE ISNULL(IdTeamsGroup, '') <> '';";
 
             return await _context.Database.SqlQueryRaw<ObsoleteStudentDto>(sql, request.IdSeccion).ToListAsync(cancellationToken);
         }

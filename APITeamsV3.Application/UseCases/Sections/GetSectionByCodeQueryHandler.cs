@@ -130,6 +130,27 @@ namespace APITeamsV3.Application.UseCases.Sections
                 })
                 .ToList();
 
+            var replacementTeacher = string.IsNullOrWhiteSpace(section.EmailFacilitador)
+                ? null
+                : string.IsNullOrWhiteSpace(section.NombresFacilitador)
+                    ? section.EmailFacilitador
+                    : $"{section.NombresFacilitador} ({section.EmailFacilitador})";
+
+            var teamTeacher = team == null || string.IsNullOrWhiteSpace(team.Propietario3)
+                ? null
+                : team.Propietario3;
+
+            var teacherReplacementStatus =
+                string.IsNullOrWhiteSpace(replacementTeacher) && string.IsNullOrWhiteSpace(teamTeacher)
+                    ? "SIN DOCENTE"
+                    : string.IsNullOrWhiteSpace(replacementTeacher)
+                        ? "SIN DOCENTE ACADEMICO"
+                        : string.IsNullOrWhiteSpace(teamTeacher)
+                            ? "PENDIENTE DE ASIGNAR"
+                            : string.Equals(teamTeacher, section.EmailFacilitador, System.StringComparison.OrdinalIgnoreCase)
+                                ? "SIN CAMBIO"
+                                : "REEMPLAZO";
+
             return new SectionDetailDto
             {
                 IdSeccion = section.IdSeccion,
@@ -138,6 +159,9 @@ namespace APITeamsV3.Application.UseCases.Sections
                 Producto = section.ProductoNombre,
                 Curso = section.CursoNombre,
                 Profesor = $"{section.NombresFacilitador} ({section.CodigoFacilitador})",
+                TeamTeacher = teamTeacher,
+                ReplacementTeacher = replacementTeacher,
+                TeacherReplacementStatus = teacherReplacementStatus,
                 Division = section.UnidadAcademicaNombre,
                 Programa = section.UnidadNegocioNombre,
                 Semestre = section.CodigoPeriodo,
