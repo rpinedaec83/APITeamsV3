@@ -28,7 +28,22 @@ namespace APITeamsV3.Application.UseCases.Schedules
         List<string> JobIds,
         string ErrorMessage,
         DateTime TriggeredAtUtc,
-        DateTime? CompletedAtUtc
+        DateTime? CompletedAtUtc,
+        int SucceededJobsCount,
+        int FailedJobsCount,
+        int PendingJobsCount,
+        string ExecutionSummary,
+        List<SyncScheduleExecutionJobDto> Jobs
+    );
+
+    public record SyncScheduleExecutionJobDto(
+        string JobId,
+        string State,
+        string Method,
+        int? SectionId,
+        string Error,
+        string Result,
+        DateTime? Timestamp
     );
 
     public class SyncScheduleDetailsDto
@@ -143,7 +158,12 @@ namespace APITeamsV3.Application.UseCases.Schedules
                         : e.JobIds.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList(),
                     e.ErrorMessage,
                     e.TriggeredAtUtc,
-                    e.CompletedAtUtc
+                    e.CompletedAtUtc,
+                    0,
+                    0,
+                    0,
+                    string.Empty,
+                    new List<SyncScheduleExecutionJobDto>()
                 ))
                 .ToListAsync(cancellationToken);
 

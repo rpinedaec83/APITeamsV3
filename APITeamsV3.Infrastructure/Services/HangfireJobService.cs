@@ -9,6 +9,8 @@ using APITeamsV3.Domain.Entities;
 using APITeamsV3.Infrastructure.Persistence.Contexts;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Graph.Models.ODataErrors;
+using Microsoft.Kiota.Abstractions;
 using System;
 
 namespace APITeamsV3.Infrastructure.Services
@@ -173,6 +175,12 @@ namespace APITeamsV3.Infrastructure.Services
             return client.Enqueue(() => SendSyncSectionTeam(idSeccion, key, null));
         }
 
+        public async Task<string> EnqueuePilotRecordingTransfers(string companyKey)
+        {
+            var client = await CreateClientAsync(companyKey);
+            return client.Enqueue(() => RunPilotRecordingTransfers(companyKey, null));
+        }
+
         private async Task<IBackgroundJobClient> CreateClientAsync(string companyKey)
         {
             var storage = await _tenantHangfireRuntime.GetStorageAsync(companyKey);
@@ -304,23 +312,44 @@ namespace APITeamsV3.Infrastructure.Services
 
             var failures = new List<string>();
             var processedSections = 0;
+            var skippedInconsistentSections = 0;
 
             foreach (var idSeccion in pilotSectionIds)
             {
                 try
                 {
+                    var anyTeam = await _smartDb.Set<TeamEntity>()
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(
+                            t => t.IdSeccionSmart == idSeccion,
+                            CancellationToken.None);
+
                     var team = await _smartDb.Set<TeamEntity>()
                         .AsNoTracking()
                         .FirstOrDefaultAsync(
-                            t => t.IdSeccionSmart == idSeccion && t.EstadoTeam == "A",
+                            t => t.IdSeccionSmart == idSeccion && t.EstadoTeam == "A" && t.IsActive == "A",
                             CancellationToken.None);
 
                     if (team == null || string.IsNullOrWhiteSpace(team.IdTeamsGroup))
                     {
-                        _logger.LogInformation(
-                            "Recording transfer skipped for tenant {CompanyKey}, section {IdSeccion}: no active team found.",
-                            companyKey,
-                            idSeccion);
+                        if (anyTeam != null && (!string.Equals(anyTeam.EstadoTeam, "A", StringComparison.OrdinalIgnoreCase) ||
+                                                !string.Equals(anyTeam.IsActive, "A", StringComparison.OrdinalIgnoreCase)))
+                        {
+                            _logger.LogInformation(
+                                "Recording transfer skipped for tenant {CompanyKey}, section {IdSeccion}: team is inactive (EstadoTeam={EstadoTeam}, IsActive={IsActive}).",
+                                companyKey,
+                                idSeccion,
+                                anyTeam.EstadoTeam,
+                                anyTeam.IsActive);
+                        }
+                        else
+                        {
+                            _logger.LogInformation(
+                                "Recording transfer skipped for tenant {CompanyKey}, section {IdSeccion}: no active team found.",
+                                companyKey,
+                                idSeccion);
+                        }
+
                         continue;
                     }
 
@@ -352,6 +381,17 @@ namespace APITeamsV3.Infrastructure.Services
                 }
                 catch (Exception ex)
                 {
+                    if (IsRecoverableRecordingTransferInconsistency(ex))
+                    {
+                        skippedInconsistentSections++;
+                        _logger.LogWarning(
+                            ex,
+                            "Recording transfer skipped as inconsistent for tenant {CompanyKey}, section {IdSeccion}.",
+                            companyKey,
+                            idSeccion);
+                        continue;
+                    }
+
                     _logger.LogError(
                         ex,
                         "Recording transfer failed for tenant {CompanyKey}, section {IdSeccion}.",
@@ -369,6 +409,50 @@ namespace APITeamsV3.Infrastructure.Services
                     $"Recording transfer completed with failures for tenant {companyKey}. " +
                     $"Procesadas={processedSections}, Fallidas={failures.Count}. Detalle: {summary}");
             }
+
+            if (skippedInconsistentSections > 0)
+            {
+                _logger.LogWarning(
+                    "Recording transfer completed for tenant {CompanyKey} with {SkippedInconsistentSections} inconsistent section(s) skipped. Procesadas={ProcessedSections}.",
+                    companyKey,
+                    skippedInconsistentSections,
+                    processedSections);
+            }
+        }
+
+        private static bool IsRecoverableRecordingTransferInconsistency(Exception ex)
+        {
+            if (ex is ODataError odataError && IsGraphNotFoundStatus(odataError.ResponseStatusCode))
+            {
+                return MessageMatchesRecoverableRecordingTransferInconsistency(odataError.Message);
+            }
+
+            if (ex is ApiException apiException && IsGraphNotFoundStatus(apiException.ResponseStatusCode))
+            {
+                return MessageMatchesRecoverableRecordingTransferInconsistency(apiException.Message);
+            }
+
+            return MessageMatchesRecoverableRecordingTransferInconsistency(ex.Message);
+        }
+
+        private static bool IsGraphNotFoundStatus(int statusCode)
+        {
+            return statusCode == 404;
+        }
+
+        private static bool MessageMatchesRecoverableRecordingTransferInconsistency(string? message)
+        {
+            if (string.IsNullOrWhiteSpace(message))
+            {
+                return false;
+            }
+
+            return message.Contains("GetChildThreadsV2Async", StringComparison.OrdinalIgnoreCase) ||
+                   message.Contains("GetThreadS2SRequest", StringComparison.OrdinalIgnoreCase) ||
+                   message.Contains("Requested API is not supported", StringComparison.OrdinalIgnoreCase) ||
+                   message.Contains("Resource is not found", StringComparison.OrdinalIgnoreCase) ||
+                   message.Contains("No se encontro el canal", StringComparison.OrdinalIgnoreCase) ||
+                   message.Contains("No se pudo resolver filesFolder", StringComparison.OrdinalIgnoreCase);
         }
     }
 }

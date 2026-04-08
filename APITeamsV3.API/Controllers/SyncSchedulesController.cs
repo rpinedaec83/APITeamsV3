@@ -1,8 +1,14 @@
 using APITeamsV3.Application.UseCases.Schedules;
+using APITeamsV3.Infrastructure.Services;
+using Hangfire.Storage;
 using MediatR;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using APITeamsV3.Application.Common.Interfaces;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
+using System;
 
 namespace APITeamsV3.API.Controllers
 {
@@ -12,8 +18,18 @@ namespace APITeamsV3.API.Controllers
     public class SyncSchedulesController : ControllerBase
     {
         private readonly IMediator _mediator;
+        private readonly ICentralDbContext _centralDbContext;
+        private readonly TenantHangfireRuntime _tenantHangfireRuntime;
 
-        public SyncSchedulesController(IMediator mediator) => _mediator = mediator;
+        public SyncSchedulesController(
+            IMediator mediator,
+            ICentralDbContext centralDbContext,
+            TenantHangfireRuntime tenantHangfireRuntime)
+        {
+            _mediator = mediator;
+            _centralDbContext = centralDbContext;
+            _tenantHangfireRuntime = tenantHangfireRuntime;
+        }
 
         [HttpGet]
         public async Task<ActionResult<List<SyncScheduleDto>>> GetAll()
@@ -26,6 +42,23 @@ namespace APITeamsV3.API.Controllers
         {
             var result = await _mediator.Send(new GetSyncScheduleDetailsQuery(id, User.IsInRole("IT")));
             if (result == null) return NotFound();
+
+            var companyKey = await _centralDbContext.CompanyConfigs
+                .AsNoTracking()
+                .Where(c => c.Id == result.CompanyConfigId)
+                .Select(c => c.CompanyKey)
+                .FirstOrDefaultAsync(HttpContext.RequestAborted);
+
+            if (!string.IsNullOrWhiteSpace(companyKey))
+            {
+                var storage = await _tenantHangfireRuntime.GetStorageAsync(companyKey!, HttpContext.RequestAborted);
+                using var connection = storage.GetConnection();
+
+                result.Executions = result.Executions
+                    .Select(execution => SyncScheduleExecutionEnricher.EnrichExecution(execution, connection))
+                    .ToList();
+            }
+
             return Ok(result);
         }
 
@@ -66,5 +99,121 @@ namespace APITeamsV3.API.Controllers
     public class ToggleRequest
     {
         public bool IsEnabled { get; set; }
+    }
+
+    internal static class SyncScheduleExecutionEnricher
+    {
+        public static SyncScheduleExecutionDto EnrichExecution(SyncScheduleExecutionDto execution, IStorageConnection connection)
+        {
+            var jobs = execution.JobIds
+                .Select(jobId => BuildJobDto(jobId, connection))
+                .ToList();
+
+            var succeeded = jobs.Count(job => string.Equals(job.State, "Succeeded", StringComparison.OrdinalIgnoreCase));
+            var failed = jobs.Count(job => string.Equals(job.State, "Failed", StringComparison.OrdinalIgnoreCase));
+            var pending = jobs.Count(job => IsPendingState(job.State));
+            var summary = BuildExecutionSummary(execution, jobs, succeeded, failed, pending);
+
+            return execution with
+            {
+                SucceededJobsCount = succeeded,
+                FailedJobsCount = failed,
+                PendingJobsCount = pending,
+                ExecutionSummary = summary,
+                Jobs = jobs
+            };
+        }
+
+        private static SyncScheduleExecutionJobDto BuildJobDto(string jobId, IStorageConnection connection)
+        {
+            var jobData = connection.GetJobData(jobId);
+            var stateData = connection.GetStateData(jobId);
+            var state = stateData?.Name ?? jobData?.State ?? "Unknown";
+            var method = jobData?.Job?.Method?.Name ?? "Unknown";
+            var args = jobData?.Job?.Args?.Select(a => a?.ToString() ?? string.Empty).ToArray() ?? Array.Empty<string>();
+            int? sectionId = null;
+
+            if (args.Length > 0 && int.TryParse(args[0], out var parsedSectionId))
+            {
+                sectionId = parsedSectionId;
+            }
+
+            var error = TryGetStateValue(stateData, "ExceptionMessage")
+                ?? TryGetStateValue(stateData, "FailedReason")
+                ?? stateData?.Reason
+                ?? string.Empty;
+
+            var result = TryGetStateValue(stateData, "Result") ?? string.Empty;
+            var timestamp = jobData?.CreatedAt;
+
+            return new SyncScheduleExecutionJobDto(
+                jobId,
+                state,
+                method,
+                sectionId,
+                error,
+                result,
+                timestamp);
+        }
+
+        private static string BuildExecutionSummary(
+            SyncScheduleExecutionDto execution,
+            List<SyncScheduleExecutionJobDto> jobs,
+            int succeeded,
+            int failed,
+            int pending)
+        {
+            if (!string.IsNullOrWhiteSpace(execution.ErrorMessage))
+            {
+                return execution.ErrorMessage;
+            }
+
+            if (jobs.Count == 0)
+            {
+                return execution.Status switch
+                {
+                    "Succeeded" => "La ejecución terminó, pero no hay jobs asociados para inspeccionar.",
+                    "Skipped" => "La ejecución fue omitida.",
+                    "Failed" => "La ejecución falló antes de encolar jobs.",
+                    _ => "No hay detalle de jobs para esta ejecución."
+                };
+            }
+
+            if (failed > 0)
+            {
+                var firstFailure = jobs.FirstOrDefault(job => !string.IsNullOrWhiteSpace(job.Error));
+                return firstFailure != null
+                    ? $"Fallaron {failed} job(s). Primer error: {firstFailure.Error}"
+                    : $"Fallaron {failed} job(s) de {jobs.Count}.";
+            }
+
+            if (pending > 0)
+            {
+                return $"Hay {pending} job(s) aún en cola o en proceso; {succeeded} completado(s).";
+            }
+
+            return $"Todos los jobs terminaron correctamente ({succeeded}/{jobs.Count}).";
+        }
+
+        private static bool IsPendingState(string state)
+        {
+            return string.Equals(state, "Enqueued", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(state, "Processing", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(state, "Scheduled", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(state, "Awaiting", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(state, "Unknown", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string? TryGetStateValue(Hangfire.Storage.StateData? stateData, string key)
+        {
+            if (stateData?.Data == null)
+            {
+                return null;
+            }
+
+            return stateData.Data.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value)
+                ? value
+                : null;
+        }
     }
 }

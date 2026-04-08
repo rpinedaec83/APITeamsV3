@@ -26,6 +26,21 @@ interface SyncScheduleExecution {
     errorMessage: string;
     triggeredAtUtc: string;
     completedAtUtc?: string | null;
+    succeededJobsCount: number;
+    failedJobsCount: number;
+    pendingJobsCount: number;
+    executionSummary: string;
+    jobs: SyncScheduleExecutionJob[];
+}
+
+interface SyncScheduleExecutionJob {
+    jobId: string;
+    state: string;
+    method: string;
+    sectionId?: number | null;
+    error: string;
+    result: string;
+    timestamp?: string | null;
 }
 
 interface SyncScheduleDetails {
@@ -124,6 +139,26 @@ const useStyles = makeStyles({
         fontFamily: 'monospace',
         fontSize: '12px',
     },
+    jobsTable: {
+        display: 'grid',
+        gridTemplateColumns: 'minmax(72px, 90px) minmax(110px, 140px) minmax(120px, 1fr) minmax(140px, 1.2fr)',
+        gap: '8px 12px',
+        alignItems: 'start',
+    },
+    jobsHeader: {
+        fontSize: '12px',
+        fontWeight: 700,
+        color: tokens.colorNeutralForeground3,
+    },
+    summaryBox: {
+        backgroundColor: '#f4f7fb',
+        border: `1px solid ${tokens.colorNeutralStroke2}`,
+        ...shorthands.borderRadius('12px'),
+        ...shorthands.padding('12px'),
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '6px',
+    },
     flexColumn: {
         display: 'flex',
         flexDirection: 'column',
@@ -133,6 +168,25 @@ const useStyles = makeStyles({
 
 const resolveBrowserTimeZone = (timeZoneId?: string) => WINDOWS_TO_IANA_TIMEZONES[timeZoneId ?? ''] ?? timeZoneId ?? 'America/Lima';
 const formatTime = (hour: number, minute: number) => `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
+const getJobStateBadgeColor = (state: string) => {
+    switch (state.toLowerCase()) {
+        case 'succeeded':
+            return 'success' as const;
+        case 'failed':
+        case 'deleted':
+            return 'danger' as const;
+        case 'processing':
+            return 'brand' as const;
+        case 'enqueued':
+        case 'scheduled':
+        case 'awaiting':
+        case 'unknown':
+            return 'warning' as const;
+        default:
+            return 'informative' as const;
+    }
+};
+
 const formatDateTime = (value: string | null | undefined, timeZoneId?: string) => {
     if (!value) return '—';
     const date = new Date(/z$|[+-]\d{2}:\d{2}$/i.test(value) ? value : `${value}Z`);
@@ -287,6 +341,30 @@ const ScheduleExecutionsPage: React.FC = () => {
                                                 <Text>{formatDateTime(execution.completedAtUtc, details.timeZoneId)}</Text>
                                             </div>
 
+                                            <div className={styles.summaryBox}>
+                                                <Text size={200} weight="semibold">Resumen</Text>
+                                                <Text>{execution.executionSummary || 'Sin resumen disponible.'}</Text>
+                                            </div>
+
+                                            <div className={styles.metrics}>
+                                                <div className={styles.metricCard}>
+                                                    <Text size={200} weight="semibold">Jobs ok</Text>
+                                                    <Text>{execution.succeededJobsCount}</Text>
+                                                </div>
+                                                <div className={styles.metricCard}>
+                                                    <Text size={200} weight="semibold">Jobs fallidos</Text>
+                                                    <Text>{execution.failedJobsCount}</Text>
+                                                </div>
+                                                <div className={styles.metricCard}>
+                                                    <Text size={200} weight="semibold">Jobs pendientes</Text>
+                                                    <Text>{execution.pendingJobsCount}</Text>
+                                                </div>
+                                                <div className={styles.metricCard}>
+                                                    <Text size={200} weight="semibold">Total inspeccionados</Text>
+                                                    <Text>{execution.jobs.length || execution.jobIds.length}</Text>
+                                                </div>
+                                            </div>
+
                                             {execution.errorMessage ? (
                                                 <div>
                                                     <Text size={200} weight="semibold">Error</Text>
@@ -294,7 +372,37 @@ const ScheduleExecutionsPage: React.FC = () => {
                                                 </div>
                                             ) : null}
 
-                                            {execution.jobIds.length > 0 ? (
+                                            {execution.jobs.length > 0 ? (
+                                                <div>
+                                                    <Text size={200} weight="semibold">Detalle de jobs</Text>
+                                                    <div className={styles.jobsTable} style={{ marginTop: '8px' }}>
+                                                        <Text className={styles.jobsHeader}>Job ID</Text>
+                                                        <Text className={styles.jobsHeader}>Estado</Text>
+                                                        <Text className={styles.jobsHeader}>Método / Sección</Text>
+                                                        <Text className={styles.jobsHeader}>Resultado</Text>
+                                                        {execution.jobs.map(job => (
+                                                            <React.Fragment key={job.jobId}>
+                                                                <div className={styles.mono}>{job.jobId}</div>
+                                                                <Badge appearance="outline" color={getJobStateBadgeColor(job.state)}>
+                                                                    {job.state}
+                                                                </Badge>
+                                                                <div>
+                                                                    <Text>{job.method}</Text>
+                                                                    <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
+                                                                        {job.sectionId ? `Sección ${job.sectionId}` : 'Sin sección detectada'}
+                                                                    </Text>
+                                                                </div>
+                                                                <div>
+                                                                    <Text>{job.error || job.result || 'Sin mensaje'}</Text>
+                                                                    <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
+                                                                        {formatDateTime(job.timestamp, details.timeZoneId)}
+                                                                    </Text>
+                                                                </div>
+                                                            </React.Fragment>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            ) : execution.jobIds.length > 0 ? (
                                                 <div>
                                                     <Text size={200} weight="semibold">Job IDs</Text>
                                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '6px' }}>

@@ -1,4 +1,5 @@
 using MediatR;
+using APITeamsV3.Application.Common.Graph;
 using APITeamsV3.Application.Common.Interfaces;
 using APITeamsV3.Application.UseCases.Teams.DTOs;
 using APITeamsV3.Application.UseCases.Provisioning.Commands;
@@ -17,6 +18,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
         private readonly ISectionEligibilityService _eligibilityService;
         private readonly ITeamAcademicoRepository _teamRepository;
         private readonly ITeamProvisioningService _provisioningService;
+        private readonly IGraphClientFactory _graphClientFactory;
         private readonly ISmartDbContext _context;
         private readonly ILogger<SyncSectionTeamCommandHandler> _logger;
         private readonly ITeamsLogOperativoRepository _logRepository;
@@ -26,6 +28,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
             ISectionEligibilityService eligibilityService,
             ITeamAcademicoRepository teamRepository,
             ITeamProvisioningService provisioningService,
+            IGraphClientFactory graphClientFactory,
             ISmartDbContext context,
             ILogger<SyncSectionTeamCommandHandler> logger,
             ITeamsLogOperativoRepository logRepository,
@@ -34,6 +37,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
             _eligibilityService = eligibilityService;
             _teamRepository = teamRepository;
             _provisioningService = provisioningService;
+            _graphClientFactory = graphClientFactory;
             _context = context;
             _logger = logger;
             _logRepository = logRepository;
@@ -115,6 +119,24 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                 {
                     // Flujo 4: Actualizar Team
                     _logger.LogInformation($"Updating Team for section {request.IdSeccion} (GroupId: {existingTeam.IdTeamsGroup})");
+
+                    var graphClient = await _graphClientFactory.CreateClientAsync();
+                    if (!await GraphGroupGuard.GroupExistsAsync(graphClient, existingTeam.IdTeamsGroup, cancellationToken))
+                    {
+                        existingTeam.EstadoTeam = "I";
+                        existingTeam.FechaModificacion = DateTime.UtcNow;
+                        await _teamRepository.UpdateAsync(existingTeam);
+
+                        await LogOperativoAsync(
+                            "Warning",
+                            "Team",
+                            existingTeam.IdTeamsGroup,
+                            "El Team local apunta a un grupo inexistente en Graph. Se marco como inactivo y no se ejecuto la sincronizacion de miembros.",
+                            request.JobId);
+
+                        result.Ignored++;
+                        return result;
+                    }
                     
                     // Call the granular commands to synchronize changes
                     

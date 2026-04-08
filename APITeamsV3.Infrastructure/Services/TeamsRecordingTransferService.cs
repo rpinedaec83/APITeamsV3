@@ -504,9 +504,24 @@ namespace APITeamsV3.Infrastructure.Services
                 ? request.ChannelName.Trim()
                 : _options.DefaultChannelName;
 
-            var channel = await ResolveChannelAsync(graphClient, request.TeamGroupId, requestedChannel, cancellationToken);
-            var channelFolder = await TryGetChannelFolderAsync(graphClient, request.TeamGroupId, channel.Id!, cancellationToken);
             var groupDrive = await TryGetGroupDriveAsync(graphClient, request.TeamGroupId, cancellationToken);
+            Channel? channel = null;
+            DriveItem? channelFolder = null;
+
+            if (IsPrimaryChannelName(requestedChannel))
+            {
+                channel = await TryGetPrimaryChannelAsync(graphClient, request.TeamGroupId, cancellationToken);
+                channelFolder = await TryGetPrimaryChannelFolderAsync(graphClient, request.TeamGroupId, cancellationToken);
+
+                if ((channel == null || channelFolder == null) && !string.IsNullOrWhiteSpace(groupDrive?.Id))
+                {
+                    channelFolder = channelFolder ?? await TryGetStandardChannelFolderByNameAsync(
+                        graphClient,
+                        groupDrive.Id!,
+                        requestedChannel,
+                        cancellationToken);
+                }
+            }
 
             if (!string.IsNullOrWhiteSpace(request.DestinationFolderPath))
             {
@@ -534,10 +549,30 @@ namespace APITeamsV3.Infrastructure.Services
                 {
                     DriveId = customDriveId,
                     FolderId = customDestinationFolder.Id ?? throw new InvalidOperationException("No se pudo resolver Id de carpeta destino."),
-                    ChannelName = channel.DisplayName ?? requestedChannel,
+                    ChannelName = channel?.DisplayName ?? requestedChannel,
                     LogicalPath = string.Join("/", customSegments)
                 };
             }
+
+            if (channelFolder == null)
+            {
+                channel ??= await ResolveChannelAsync(graphClient, request.TeamGroupId, requestedChannel, cancellationToken);
+                channelFolder = await TryGetChannelFolderAsync(graphClient, request.TeamGroupId, channel.Id!, cancellationToken);
+
+                if (channelFolder == null && !string.IsNullOrWhiteSpace(groupDrive?.Id))
+                {
+                    channelFolder = await TryGetStandardChannelFolderByNameAsync(
+                        graphClient,
+                        groupDrive.Id!,
+                        channel.DisplayName ?? requestedChannel,
+                        cancellationToken);
+                }
+            }
+
+            channel ??= new Channel
+            {
+                DisplayName = requestedChannel
+            };
 
             if (channelFolder == null || string.IsNullOrWhiteSpace(channelFolder.Id))
             {
@@ -628,26 +663,135 @@ namespace APITeamsV3.Infrastructure.Services
             }
         }
 
+        private async Task<Channel?> TryGetPrimaryChannelAsync(
+            GraphServiceClient graphClient,
+            string teamGroupId,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                var primary = await graphClient.Teams[teamGroupId]
+                    .PrimaryChannel
+                    .GetAsync(
+                        requestConfiguration => requestConfiguration.QueryParameters.Select = ["id", "displayName"],
+                        cancellationToken);
+
+                if (primary != null && !string.IsNullOrWhiteSpace(primary.Id))
+                {
+                    return primary;
+                }
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                var primary = await graphClient.Groups[teamGroupId]
+                    .Team
+                    .PrimaryChannel
+                    .GetAsync(
+                        requestConfiguration => requestConfiguration.QueryParameters.Select = ["id", "displayName"],
+                        cancellationToken);
+
+                if (primary != null && !string.IsNullOrWhiteSpace(primary.Id))
+                {
+                    return primary;
+                }
+            }
+            catch
+            {
+            }
+
+            return null;
+        }
+
+        private async Task<DriveItem?> TryGetPrimaryChannelFolderAsync(
+            GraphServiceClient graphClient,
+            string teamGroupId,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                var folder = await graphClient.Teams[teamGroupId]
+                    .PrimaryChannel
+                    .FilesFolder
+                    .GetAsync(
+                        requestConfiguration => requestConfiguration.QueryParameters.Select = ["id", "name", "parentReference", "webUrl"],
+                        cancellationToken);
+
+                if (folder != null && !string.IsNullOrWhiteSpace(folder.Id))
+                {
+                    return folder;
+                }
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                var folder = await graphClient.Groups[teamGroupId]
+                    .Team
+                    .PrimaryChannel
+                    .FilesFolder
+                    .GetAsync(
+                        requestConfiguration => requestConfiguration.QueryParameters.Select = ["id", "name", "parentReference", "webUrl"],
+                        cancellationToken);
+
+                if (folder != null && !string.IsNullOrWhiteSpace(folder.Id))
+                {
+                    return folder;
+                }
+            }
+            catch
+            {
+            }
+
+            return null;
+        }
+
+        private async Task<DriveItem?> TryGetStandardChannelFolderByNameAsync(
+            GraphServiceClient graphClient,
+            string driveId,
+            string channelName,
+            CancellationToken cancellationToken)
+        {
+            var normalizedChannelName = SanitizePathSegment(channelName);
+            if (string.IsNullOrWhiteSpace(normalizedChannelName))
+            {
+                return null;
+            }
+
+            var folder = await TryGetFolderByPathAsync(graphClient, driveId, normalizedChannelName, cancellationToken);
+            if (folder != null)
+            {
+                _logger.LogInformation(
+                    "Resolved channel folder by SharePoint path fallback (drive {DriveId}, channel {ChannelName}).",
+                    driveId,
+                    channelName);
+            }
+
+            return folder;
+        }
+
         private async Task<Channel> ResolveChannelAsync(
             GraphServiceClient graphClient,
             string teamGroupId,
             string requestedChannel,
             CancellationToken cancellationToken)
         {
-            if (string.Equals(requestedChannel, "General", StringComparison.OrdinalIgnoreCase))
+            if (IsPrimaryChannelName(requestedChannel))
             {
-                try
+                var primary = await TryGetPrimaryChannelAsync(graphClient, teamGroupId, cancellationToken);
+                if (primary != null && !string.IsNullOrWhiteSpace(primary.Id))
                 {
-                    var primary = await graphClient.Teams[teamGroupId].PrimaryChannel.GetAsync(cancellationToken: cancellationToken);
-                    if (primary != null && !string.IsNullOrWhiteSpace(primary.Id))
-                    {
-                        return primary;
-                    }
+                    return primary;
                 }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Could not resolve primary channel directly for Team {TeamId}. Falling back to listing channels.", teamGroupId);
-                }
+
+                _logger.LogWarning(
+                    "Could not resolve primary channel directly for Team {TeamId}. Falling back to listing channels.",
+                    teamGroupId);
             }
 
             var channelsResponse = await graphClient.Teams[teamGroupId]
@@ -669,6 +813,11 @@ namespace APITeamsV3.Infrastructure.Services
             }
 
             return matchedChannel;
+        }
+
+        private static bool IsPrimaryChannelName(string requestedChannel)
+        {
+            return string.Equals(requestedChannel, "General", StringComparison.OrdinalIgnoreCase);
         }
 
         private async Task<DriveItem> EnsureFolderPathAsync(

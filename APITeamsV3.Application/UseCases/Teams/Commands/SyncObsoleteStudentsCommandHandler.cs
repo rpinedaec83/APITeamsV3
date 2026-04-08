@@ -1,3 +1,4 @@
+using APITeamsV3.Application.Common.Graph;
 using APITeamsV3.Application.Common.Interfaces;
 using APITeamsV3.Application.UseCases.Teams.DTOs;
 using APITeamsV3.Domain.Entities;
@@ -37,23 +38,39 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
 
         public async Task<List<ObsoleteStudentDto>> Handle(SyncObsoleteStudentsCommand request, CancellationToken cancellationToken)
         {
-            var obsoleteStudents = await (from tu in _context.TeamsUsuarios
-                                          join te in _context.TeamsEquipos on tu.IdTeams equals te.IdTeamsGroup
-                                          where te.IdSeccionSmart == request.IdSeccion
-                                             && tu.Estado == "A"
-                                             && tu.Tipo == "A"
-                                             && te.EstadoTeam == "A"
-                                             && !_context.TeamsProgramacionAlumnos
-                                                    .Any(mpa => mpa.IdCurso == te.IdSeccionSmart
-                                                             && mpa.CodigoAlumno == tu.CodigoAlumno
-                                                             && mpa.Estado == "A")
-                                          select new ObsoleteStudentDto
-                                          {
-                                              IdTeamsGroup = te.IdTeamsGroup,
-                                              CodigoAlumno = tu.CodigoAlumno,
-                                              EmailAlumno = tu.Email
-                                          })
-                                          .ToListAsync(cancellationToken);
+            var activeTeamGroups = await _context.TeamsEquipos
+                .AsNoTracking()
+                .Where(te => te.IdSeccionSmart == request.IdSeccion && te.EstadoTeam == "A")
+                .Select(te => te.IdTeamsGroup)
+                .Distinct()
+                .ToListAsync(cancellationToken);
+
+            if (!activeTeamGroups.Any())
+            {
+                _logger.LogInformation(
+                    "No active team groups were found for section {SectionId}.",
+                    request.IdSeccion);
+                return new List<ObsoleteStudentDto>();
+            }
+
+            var enrolledIdentifiers = await BuildEnrolledStudentIdentifiersAsync(request.IdSeccion, cancellationToken);
+
+            var obsoleteStudents = await _context.TeamsUsuarios
+                .AsNoTracking()
+                .Where(tu => activeTeamGroups.Contains(tu.IdTeams) &&
+                             tu.Estado == "A" &&
+                             tu.Tipo == "A")
+                .Select(tu => new ObsoleteStudentDto
+                {
+                    IdTeamsGroup = tu.IdTeams,
+                    CodigoAlumno = tu.CodigoAlumno,
+                    EmailAlumno = tu.Email
+                })
+                .ToListAsync(cancellationToken);
+
+            obsoleteStudents = obsoleteStudents
+                .Where(student => !IsStillEnrolled(student, enrolledIdentifiers))
+                .ToList();
 
             obsoleteStudents = obsoleteStudents
                 .GroupBy(s => $"{s.IdTeamsGroup}::{s.CodigoAlumno}", StringComparer.OrdinalIgnoreCase)
@@ -69,6 +86,23 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
             }
 
             var graphClient = await _graphFactory.CreateClientAsync();
+            var validGroupIds = await FilterValidGroupIdsAsync(
+                graphClient,
+                obsoleteStudents.Select(student => student.IdTeamsGroup).Distinct(StringComparer.OrdinalIgnoreCase),
+                cancellationToken);
+
+            obsoleteStudents = obsoleteStudents
+                .Where(student => validGroupIds.Contains(student.IdTeamsGroup))
+                .ToList();
+
+            if (!obsoleteStudents.Any())
+            {
+                _logger.LogWarning(
+                    "Obsolete-student sync aborted for section {SectionId} because no active Graph group could be validated from TeamsEquipos.",
+                    request.IdSeccion);
+                return obsoleteStudents;
+            }
+
             var hasChanges = false;
 
             foreach (var student in obsoleteStudents)
@@ -195,6 +229,53 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
             return (at >= 0 ? trimmed.Substring(0, at) : trimmed).Trim().ToLowerInvariant();
         }
 
+        private async Task<HashSet<string>> BuildEnrolledStudentIdentifiersAsync(int idSeccion, CancellationToken cancellationToken)
+        {
+            var enrolledStudents = await _context.Set<AlumnoCurso>()
+                .AsNoTracking()
+                .Include(ac => ac.Alumno)
+                .Where(ac => ac.IdSeccion == idSeccion && ac.EsMatricula)
+                .Select(ac => new
+                {
+                    Codigo = ac.Alumno != null ? ac.Alumno.Codigo : string.Empty,
+                    EmailInstitucion = ac.Alumno != null ? ac.Alumno.EmailInstitucion : string.Empty,
+                    EmailPersonal = ac.Alumno != null ? ac.Alumno.EmailPersonal : null
+                })
+                .ToListAsync(cancellationToken);
+
+            var identifiers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var student in enrolledStudents)
+            {
+                AddIdentifierIfPresent(identifiers, student.Codigo);
+                AddIdentifierIfPresent(identifiers, student.EmailInstitucion);
+                AddIdentifierIfPresent(identifiers, student.EmailPersonal);
+            }
+
+            return identifiers;
+        }
+
+        private static bool IsStillEnrolled(ObsoleteStudentDto student, ISet<string> enrolledIdentifiers)
+        {
+            var normalizedCode = NormalizeLocalPart(student.CodigoAlumno);
+            if (!string.IsNullOrWhiteSpace(normalizedCode) && enrolledIdentifiers.Contains(normalizedCode))
+            {
+                return true;
+            }
+
+            var normalizedEmail = NormalizeLocalPart(student.EmailAlumno);
+            return !string.IsNullOrWhiteSpace(normalizedEmail) && enrolledIdentifiers.Contains(normalizedEmail);
+        }
+
+        private static void AddIdentifierIfPresent(ISet<string> identifiers, string? value)
+        {
+            var normalized = NormalizeLocalPart(value);
+            if (!string.IsNullOrWhiteSpace(normalized))
+            {
+                identifiers.Add(normalized);
+            }
+        }
+
         private static bool IsAlreadyMissingError(Exception ex)
         {
             return ex.Message.Contains("404", StringComparison.OrdinalIgnoreCase) ||
@@ -220,6 +301,46 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
             catch
             {
                 // Avoid recursive logging failures.
+            }
+        }
+
+        private async Task<HashSet<string>> FilterValidGroupIdsAsync(
+            Microsoft.Graph.GraphServiceClient graphClient,
+            IEnumerable<string> groupIds,
+            CancellationToken cancellationToken)
+        {
+            var validGroupIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var groupId in groupIds.Where(groupId => !string.IsNullOrWhiteSpace(groupId)))
+            {
+                if (await GraphGroupGuard.GroupExistsAsync(graphClient, groupId, cancellationToken))
+                {
+                    validGroupIds.Add(groupId);
+                    continue;
+                }
+
+                await MarkGroupAsInconsistentAsync(groupId, cancellationToken);
+            }
+
+            return validGroupIds;
+        }
+
+        private async Task MarkGroupAsInconsistentAsync(string groupId, CancellationToken cancellationToken)
+        {
+            var affected = await _context.TeamsEquipos
+                .Where(team => team.IdTeamsGroup == groupId && team.EstadoTeam == "A")
+                .ExecuteUpdateAsync(
+                    setters => setters
+                        .SetProperty(team => team.EstadoTeam, "I")
+                        .SetProperty(team => team.FechaModificacion, DateTime.UtcNow)
+                        .SetProperty(team => team.UsuarioModificacion, 1),
+                    cancellationToken);
+
+            if (affected > 0)
+            {
+                _logger.LogWarning(
+                    "Graph group {GroupId} does not exist. Matching TeamsEquipos rows were marked inactive before syncing obsolete students.",
+                    groupId);
             }
         }
     }

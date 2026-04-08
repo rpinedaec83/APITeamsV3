@@ -1,3 +1,4 @@
+using APITeamsV3.Application.Common.Graph;
 using APITeamsV3.Application.Common.Interfaces;
 using APITeamsV3.Application.UseCases.Provisioning.Commands;
 using APITeamsV3.Domain.Entities;
@@ -17,6 +18,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
         private readonly ISmartDbContext _context;
         private readonly ITeamAcademicoRepository _teamRepo;
         private readonly ITeamsAgendaService _agendaService;
+        private readonly IGraphClientFactory _graphClientFactory;
         private readonly ITeamsLogOperativoRepository _logRepository;
         private readonly IMediator _mediator;
         private readonly ILogger<SyncSectionAgendaCommandHandler> _logger;
@@ -25,6 +27,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
             ISmartDbContext context,
             ITeamAcademicoRepository teamRepo,
             ITeamsAgendaService agendaService,
+            IGraphClientFactory graphClientFactory,
             ITeamsLogOperativoRepository logRepository,
             IMediator mediator,
             ILogger<SyncSectionAgendaCommandHandler> logger)
@@ -32,6 +35,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
             _context = context;
             _teamRepo = teamRepo;
             _agendaService = agendaService;
+            _graphClientFactory = graphClientFactory;
             _logRepository = logRepository;
             _mediator = mediator;
             _logger = logger;
@@ -54,6 +58,19 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                 {
                     result.IsValid = false;
                     result.Summary = "Team local activo no encontrado.";
+                    return result;
+                }
+
+                var graphClient = await _graphClientFactory.CreateClientAsync();
+                if (!await GraphGroupGuard.GroupExistsAsync(graphClient, team.IdTeamsGroup, cancellationToken))
+                {
+                    team.EstadoTeam = "I";
+                    team.FechaModificacion = DateTime.UtcNow;
+                    await _teamRepo.UpdateAsync(team);
+
+                    result.IsValid = false;
+                    result.Summary = "El Team local apunta a un grupo inexistente en Graph. Se marco como inactivo.";
+                    await LogOperativoAsync("Error", "Agenda", team.IdTeamsGroup, result.Summary, request.JobId);
                     return result;
                 }
 
@@ -308,6 +325,36 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
             }
             catch (Exception ex)
             {
+                if (IsTransientProvisioningError(ex))
+                {
+                    _logger.LogWarning(ex, "Team/Group still provisioning while syncing agenda for section {SectionId}", request.IdSeccion);
+                    result.IsValid = false;
+                    result.Summary = "El Team aun se esta aprovisionando en Microsoft 365. Reintenta sincronizar agenda en unos minutos.";
+                    await LogOperativoAsync(
+                        "Warning",
+                        "Agenda",
+                        team?.IdTeamsGroup ?? request.IdSeccion.ToString(),
+                        result.Summary,
+                        request.JobId,
+                        ex.Message);
+                    return result;
+                }
+
+                if (IsAccessDeniedError(ex))
+                {
+                    _logger.LogWarning(ex, "Graph access denied while syncing agenda for section {SectionId}", request.IdSeccion);
+                    result.IsValid = false;
+                    result.Summary = "Graph denego acceso para agenda de canal. Revisar permisos delegados para operaciones de calendario del grupo.";
+                    await LogOperativoAsync(
+                        "Error",
+                        "Agenda",
+                        team?.IdTeamsGroup ?? request.IdSeccion.ToString(),
+                        result.Summary,
+                        request.JobId,
+                        ex.Message);
+                    return result;
+                }
+
                 _logger.LogError(ex, "Error synchronizing agenda automatically for section {SectionId}", request.IdSeccion);
                 result.IsValid = false;
                 result.Summary = "Error tecnico al sincronizar agenda automaticamente.";
@@ -321,6 +368,26 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
             }
 
             return result;
+        }
+
+        private static bool IsTransientProvisioningError(Exception ex)
+        {
+            var message = (ex.Message ?? string.Empty).ToLowerInvariant();
+            return (message.Contains("requested group") && message.Contains("invalid")) ||
+                   (message.Contains("resource") && message.Contains("not found")) ||
+                   message.Contains("does not exist") ||
+                   message.Contains("mailbox") ||
+                   message.Contains("not ready") ||
+                   message.Contains("primary channel");
+        }
+
+        private static bool IsAccessDeniedError(Exception ex)
+        {
+            var message = (ex.Message ?? string.Empty).ToLowerInvariant();
+            return message.Contains("access is denied") ||
+                   message.Contains("access denied") ||
+                   message.Contains("insufficient privileges") ||
+                   message.Contains("authorization_requestdenied");
         }
 
         private async Task<List<CreatedMeetingBlock>> CreateMissingBlocksAsync(

@@ -12,5 +12,6 @@ namespace APITeamsV3.Application.Common.Interfaces
         Task<string> EnqueueSyncRenamedTeams(int idSeccion);
         Task<string> EnqueueFullSectionSync(int idSeccion);
         Task<string> EnqueueSyncSectionTeam(int idSeccion);
+        Task<string> EnqueuePilotRecordingTransfers(string companyKey);
     }
 }

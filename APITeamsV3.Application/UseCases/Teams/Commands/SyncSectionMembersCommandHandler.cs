@@ -1,3 +1,4 @@
+using APITeamsV3.Application.Common.Graph;
 using APITeamsV3.Application.Common.Interfaces;
 using APITeamsV3.Domain.Entities;
 using MediatR;
@@ -49,6 +50,18 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                 };
             }
 
+            var graphClient = await _graphFactory.CreateClientAsync();
+            if (!await GraphGroupGuard.GroupExistsAsync(graphClient, activeTeam.IdTeamsGroup, cancellationToken))
+            {
+                await MarkTeamAsInconsistentAsync(activeTeam, cancellationToken);
+
+                return new SyncSectionMembersResult
+                {
+                    Success = false,
+                    Summary = $"El Team local de la seccion {request.IdSeccion} apunta al grupo {activeTeam.IdTeamsGroup}, pero ese grupo no existe en Graph. El registro local fue marcado como inactivo."
+                };
+            }
+
             var facilitatorChanges = await _mediator.Send(new SyncTeamFacilitatorsCommand(request.IdSeccion), cancellationToken);
             var missingStudents = await _mediator.Send(new SyncMissingStudentsCommand(request.IdSeccion), cancellationToken);
             var obsoleteStudents = await _mediator.Send(new SyncObsoleteStudentsCommand(request.IdSeccion), cancellationToken);
@@ -71,6 +84,25 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     $"Candidatos de baja: {obsoleteStudents.Count}. " +
                     $"Alumnos verificados en Graph y actualizados en BD: {studentsVerifiedInGraph}."
             };
+        }
+
+        private async Task MarkTeamAsInconsistentAsync(TeamEntity team, CancellationToken cancellationToken)
+        {
+            if (team.EstadoTeam == "I")
+            {
+                return;
+            }
+
+            team.EstadoTeam = "I";
+            team.FechaModificacion = DateTime.UtcNow;
+            team.UsuarioModificacion = 1;
+
+            await _context.SaveChangesAsync(cancellationToken);
+
+            _logger.LogWarning(
+                "Section {SectionId} references Graph group {GroupId}, but that group does not exist. Team was marked inactive locally.",
+                team.IdSeccionSmart,
+                team.IdTeamsGroup);
         }
 
         private async Task<int> RefreshStudentMembershipCacheFromGraphAsync(

@@ -74,6 +74,22 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
             var syncedCount = 0;
             var tenant = _tenantProvider.GetCurrentTenant();
             var config = await _centralContext.CompanyConfigs.FirstOrDefaultAsync(c => c.CompanyKey == tenant.CompanyKey, cancellationToken);
+            var validGroupIds = await FilterValidGroupIdsAsync(
+                graphClient,
+                missingStudents.Select(student => student.IdTeamsGroup).Distinct(StringComparer.OrdinalIgnoreCase),
+                cancellationToken);
+
+            missingStudents = missingStudents
+                .Where(student => validGroupIds.Contains(student.IdTeamsGroup))
+                .ToList();
+
+            if (!missingStudents.Any())
+            {
+                _logger.LogWarning(
+                    "Missing-student sync aborted for section {SectionId} because no active Graph group could be validated from TeamsEquipos.",
+                    request.IdSeccion);
+                return missingStudents;
+            }
 
             foreach (var student in missingStudents)
             {
@@ -336,7 +352,7 @@ WHERE AC.IdSeccion = {{0}}
                     _logger.LogDebug("{Subject} already exists on resource {ResourceId}.", subject, resourceId);
                     return true;
                 }
-                catch (Exception ex) when (IsPropagationError(ex) && attempt < maxAttempts)
+                catch (Exception ex) when (IsRetryablePropagationError(ex) && attempt < maxAttempts)
                 {
                     _logger.LogWarning(
                         "{Subject} cannot be added yet on resource {ResourceId}. Retrying in 3s ({Attempt}/{MaxAttempts}).",
@@ -349,6 +365,11 @@ WHERE AC.IdSeccion = {{0}}
                 }
                 catch (Exception ex)
                 {
+                    if (GraphGroupGuard.IsMissingResource(ex))
+                    {
+                        await MarkGroupAsInconsistentAsync(resourceId, cancellationToken);
+                    }
+
                     _logger.LogWarning(ex, "Failed to add {Subject} on resource {ResourceId}.", subject, resourceId);
                     await LogErrorAsync("Student", resourceId, $"Failed to add {subject}: {ex.Message}");
                     return false;
@@ -372,24 +393,13 @@ WHERE AC.IdSeccion = {{0}}
                    message.Contains("added object references already exist", StringComparison.OrdinalIgnoreCase);
         }
 
-        private static bool IsPropagationError(Exception ex)
+        private static bool IsRetryablePropagationError(Exception ex)
         {
-            if (ex is ODataError odataError && odataError.ResponseStatusCode == 404)
-            {
-                return true;
-            }
-
-            if (ex is ApiException apiException && apiException.ResponseStatusCode == 404)
-            {
-                return true;
-            }
-
             var message = ex.Message;
-            return message.Contains("404", StringComparison.OrdinalIgnoreCase) ||
-                   message.Contains("does not exist", StringComparison.OrdinalIgnoreCase) ||
-                   message.Contains("not found", StringComparison.OrdinalIgnoreCase) ||
-                   message.Contains("not present", StringComparison.OrdinalIgnoreCase) ||
-                   message.Contains("resource not found", StringComparison.OrdinalIgnoreCase);
+            return message.Contains("cannot be added yet", StringComparison.OrdinalIgnoreCase) ||
+                   message.Contains("resource is not ready", StringComparison.OrdinalIgnoreCase) ||
+                   message.Contains("temporarily unavailable", StringComparison.OrdinalIgnoreCase) ||
+                   message.Contains("eventual consistency", StringComparison.OrdinalIgnoreCase);
         }
 
         private async Task LogErrorAsync(string target, string reference, string msg)
@@ -409,6 +419,46 @@ WHERE AC.IdSeccion = {{0}}
             catch
             {
                 // Avoid recursive log failures.
+            }
+        }
+
+        private async Task<HashSet<string>> FilterValidGroupIdsAsync(
+            GraphServiceClient graphClient,
+            IEnumerable<string> groupIds,
+            CancellationToken cancellationToken)
+        {
+            var validGroupIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var groupId in groupIds.Where(groupId => !string.IsNullOrWhiteSpace(groupId)))
+            {
+                if (await GraphGroupGuard.GroupExistsAsync(graphClient, groupId, cancellationToken))
+                {
+                    validGroupIds.Add(groupId);
+                    continue;
+                }
+
+                await MarkGroupAsInconsistentAsync(groupId, cancellationToken);
+            }
+
+            return validGroupIds;
+        }
+
+        private async Task MarkGroupAsInconsistentAsync(string groupId, CancellationToken cancellationToken)
+        {
+            var affected = await _context.TeamsEquipos
+                .Where(team => team.IdTeamsGroup == groupId && team.EstadoTeam == "A")
+                .ExecuteUpdateAsync(
+                    setters => setters
+                        .SetProperty(team => team.EstadoTeam, "I")
+                        .SetProperty(team => team.FechaModificacion, DateTime.UtcNow)
+                        .SetProperty(team => team.UsuarioModificacion, 1),
+                    cancellationToken);
+
+            if (affected > 0)
+            {
+                _logger.LogWarning(
+                    "Graph group {GroupId} does not exist. Matching TeamsEquipos rows were marked inactive before syncing missing students.",
+                    groupId);
             }
         }
     }

@@ -26,6 +26,7 @@ import {
 import {
     PlayRegular,
     ArrowSyncRegular,
+    SearchRegular,
     PeopleRegular,
     PersonDeleteRegular,
     RenameRegular,
@@ -37,9 +38,10 @@ import {
     ErrorCircleRegular,
     InfoRegular,
     ClockRegular,
+    DismissCircleRegular,
 } from '@fluentui/react-icons';
 import { useApiClient } from '../hooks/useApiClient';
-import { showWarning } from '../utils/alerts';
+import { showConfirm, showSuccess, showWarning } from '../utils/alerts';
 
 interface HangfireJobResult {
     jobId: string;
@@ -278,6 +280,10 @@ const JobsPage: React.FC = () => {
     const [loading, setLoading] = useState<string | null>(null);
     const [loadingHistory, setLoadingHistory] = useState(false);
     const [loadingRecurring, setLoadingRecurring] = useState(false);
+    const [loadingPilotTransfers, setLoadingPilotTransfers] = useState(false);
+    const [purgingCompanyData, setPurgingCompanyData] = useState(false);
+    const [jobIdLookup, setJobIdLookup] = useState('');
+    const [requeueingJobId, setRequeueingJobId] = useState<string | null>(null);
     const [history, setHistory] = useState<HangfireJobResult[]>([]);
     const [recurringJobs, setRecurringJobs] = useState<HangfireRecurringJobResult[]>([]);
     const [selectedTab, setSelectedTab] = useState<TabValue>('all');
@@ -311,6 +317,83 @@ const JobsPage: React.FC = () => {
             }
         } finally {
             if (!silent) setLoadingRecurring(false);
+        }
+    };
+
+    const handleRunPilotTransfers = async () => {
+        setLoadingPilotTransfers(true);
+        try {
+            await apiClient.post('/jobs/recordings-transfer-pilot/run', {});
+            await loadRecentJobs(true);
+            await loadRecurringJobs(true);
+        } catch (err: unknown) {
+            const errorMessage = err instanceof Error ? err.message : 'No se pudo encolar la transferencia piloto.';
+            showWarning(errorMessage);
+        } finally {
+            setLoadingPilotTransfers(false);
+        }
+    };
+
+    const handleLookupJob = async () => {
+        const normalizedJobId = jobIdLookup.trim();
+        if (!normalizedJobId) {
+            showWarning('Ingrese un Job ID.');
+            return;
+        }
+
+        setLoadingHistory(true);
+        try {
+            const response = await apiClient.get(`/jobs/by-id/${encodeURIComponent(normalizedJobId)}`);
+            const job = response.data as HangfireJobResult;
+            setHistory(job ? [job] : []);
+        } catch (err: unknown) {
+            const errorMessage = err instanceof Error ? err.message : 'No se pudo consultar el Job ID.';
+            showWarning(errorMessage);
+        } finally {
+            setLoadingHistory(false);
+        }
+    };
+
+    const canRequeueJob = (state: string) => {
+        const normalizedState = state.toLowerCase();
+        return normalizedState.includes('fail') || normalizedState.includes('delet');
+    };
+
+    const handleRequeueJob = async (jobId: string) => {
+        setRequeueingJobId(jobId);
+        try {
+            await apiClient.post(`/jobs/${encodeURIComponent(jobId)}/requeue`, {});
+            await loadRecentJobs(true);
+        } catch (err: unknown) {
+            const errorMessage = err instanceof Error ? err.message : 'No se pudo re-encolar el job.';
+            showWarning(errorMessage);
+        } finally {
+            setRequeueingJobId(null);
+        }
+    };
+
+    const handlePurgeCompanyData = async () => {
+        const confirmation = await showConfirm(
+            'Se eliminarán todos los jobs de Hangfire, el historial de ejecuciones y los logs operativos de la empresa actual.',
+            'Borrar datos de la empresa');
+
+        if (!confirmation.isConfirmed) {
+            return;
+        }
+
+        setPurgingCompanyData(true);
+        try {
+            const response = await apiClient.delete('/jobs/company-data');
+            const message = response?.data?.message || 'Se eliminaron jobs y logs de la empresa actual.';
+            await showSuccess(message, 'Limpieza completada');
+            setJobIdLookup('');
+            await loadRecentJobs(true);
+            await loadRecurringJobs(true);
+        } catch (err: unknown) {
+            const errorMessage = err instanceof Error ? err.message : 'No se pudo limpiar la empresa actual.';
+            showWarning(errorMessage);
+        } finally {
+            setPurgingCompanyData(false);
         }
     };
 
@@ -406,6 +489,22 @@ const JobsPage: React.FC = () => {
                         {history.length} jobs visibles
                     </Badge>
                     <Button
+                        appearance="primary"
+                        icon={loadingPilotTransfers ? <Spinner size="tiny" /> : <PlayRegular />}
+                        onClick={() => { void handleRunPilotTransfers(); }}
+                        disabled={loadingPilotTransfers}
+                    >
+                        {loadingPilotTransfers ? 'Encolando transferencias...' : 'Ejecutar transferencias piloto ahora'}
+                    </Button>
+                    <Button
+                        appearance="secondary"
+                        icon={purgingCompanyData ? <Spinner size="tiny" /> : <DismissCircleRegular />}
+                        onClick={() => { void handlePurgeCompanyData(); }}
+                        disabled={purgingCompanyData}
+                    >
+                        {purgingCompanyData ? 'Borrando...' : 'Borrar jobs y logs de esta empresa'}
+                    </Button>
+                    <Button
                         appearance="secondary"
                         icon={loadingHistory || loadingRecurring ? <Spinner size="tiny" /> : <ArrowSyncRegular />}
                         onClick={() => {
@@ -435,6 +534,36 @@ const JobsPage: React.FC = () => {
                             Info
                         </Button>
                     </Tooltip>
+                </div>
+
+                <div className={styles.sectionInput} style={{ marginTop: '16px' }}>
+                    <div className={styles.inputGroup}>
+                        <Label weight="semibold">Buscar Job ID</Label>
+                        <Input
+                            placeholder="Ej. 123 o 12345"
+                            size="large"
+                            value={jobIdLookup}
+                            onChange={(_e, d) => setJobIdLookup(d.value)}
+                        />
+                    </div>
+                    <Button
+                        appearance="secondary"
+                        icon={loadingHistory ? <Spinner size="tiny" /> : <SearchRegular />}
+                        onClick={() => { void handleLookupJob(); }}
+                        disabled={loadingHistory}
+                    >
+                        Buscar job
+                    </Button>
+                    <Button
+                        appearance="subtle"
+                        onClick={() => {
+                            setJobIdLookup('');
+                            void loadRecentJobs(false);
+                        }}
+                        disabled={loadingHistory}
+                    >
+                        Limpiar
+                    </Button>
                 </div>
 
                 <Divider style={{ margin: '20px 0' }} />
@@ -590,6 +719,7 @@ const JobsPage: React.FC = () => {
                                 <TableHeaderCell>Job ID</TableHeaderCell>
                                 <TableHeaderCell>Mensaje</TableHeaderCell>
                                 <TableHeaderCell>Hora</TableHeaderCell>
+                                <TableHeaderCell>Accion</TableHeaderCell>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -615,6 +745,24 @@ const JobsPage: React.FC = () => {
                                     </TableCell>
                                     <TableCell style={{ fontSize: '12px', color: tokens.colorNeutralForeground3 }}>
                                         {new Date(entry.timestamp).toLocaleString('es-PE')}
+                                    </TableCell>
+                                    <TableCell>
+                                        {canRequeueJob(entry.state) ? (
+                                            <Button
+                                                appearance="secondary"
+                                                size="small"
+                                                icon={requeueingJobId === entry.jobId ? <Spinner size="tiny" /> : <ArrowSyncRegular />}
+                                                onClick={() => { void handleRequeueJob(entry.jobId); }}
+                                                disabled={requeueingJobId !== null}
+                                            >
+                                                {requeueingJobId === entry.jobId ? 'Re-encolando...' : 'Requeue'}
+                                            </Button>
+                                        ) : (
+                                            <Badge appearance="outline" size="small" color="subtle">
+                                                <DismissCircleRegular />
+                                                No aplica
+                                            </Badge>
+                                        )}
                                     </TableCell>
                                 </TableRow>
                             ))}

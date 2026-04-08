@@ -98,6 +98,12 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                 {
                     try
                     {
+                        if (!await GraphGroupGuard.GroupExistsAsync(graphClient, change.IdTeam, cancellationToken))
+                        {
+                            await MarkGroupAsInconsistentAsync(change.IdTeam, cancellationToken);
+                            continue;
+                        }
+
                         _logger.LogInformation($"Syncing new facilitator {change.EmailFacilitador} as owner to Team {change.IdTeam}");
                         var user = await _userLookupService.FindUserAsync(
                             graphClient,
@@ -287,6 +293,25 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                    ex.Message.Contains("404", StringComparison.OrdinalIgnoreCase) ||
                    ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase) ||
                    ex.Message.Contains("resource not found", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private async Task MarkGroupAsInconsistentAsync(string groupId, CancellationToken cancellationToken)
+        {
+            var affected = await _context.TeamsEquipos
+                .Where(team => team.IdTeamsGroup == groupId && team.EstadoTeam == "A")
+                .ExecuteUpdateAsync(
+                    setters => setters
+                        .SetProperty(team => team.EstadoTeam, "I")
+                        .SetProperty(team => team.FechaModificacion, DateTime.UtcNow)
+                        .SetProperty(team => team.UsuarioModificacion, 1),
+                    cancellationToken);
+
+            if (affected > 0)
+            {
+                _logger.LogWarning(
+                    "Graph group {GroupId} does not exist. Matching TeamsEquipos rows were marked inactive before syncing facilitators.",
+                    groupId);
+            }
         }
     }
 }

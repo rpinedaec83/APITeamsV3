@@ -1,8 +1,10 @@
 using APITeamsV3.Application.Common.Interfaces;
 using APITeamsV3.Infrastructure.Services;
 using Hangfire;
+using Hangfire.States;
 using Hangfire.Storage;
 using Hangfire.Storage.Monitoring;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Mvc;
 
 namespace APITeamsV3.API.Controllers
@@ -15,15 +17,21 @@ namespace APITeamsV3.API.Controllers
         private readonly IHangfireJobService _jobService;
         private readonly ITenantProvider _tenantProvider;
         private readonly TenantHangfireRuntime _tenantHangfireRuntime;
+        private readonly ICentralDbContext _centralDbContext;
+        private readonly ISmartDbContext _smartDbContext;
 
         public JobsController(
             IHangfireJobService jobService,
             ITenantProvider tenantProvider,
-            TenantHangfireRuntime tenantHangfireRuntime)
+            TenantHangfireRuntime tenantHangfireRuntime,
+            ICentralDbContext centralDbContext,
+            ISmartDbContext smartDbContext)
         {
             _jobService = jobService;
             _tenantProvider = tenantProvider;
             _tenantHangfireRuntime = tenantHangfireRuntime;
+            _centralDbContext = centralDbContext;
+            _smartDbContext = smartDbContext;
         }
 
         [HttpGet("recent")]
@@ -100,6 +108,156 @@ namespace APITeamsV3.API.Controllers
             return Ok(ordered);
         }
 
+        [HttpGet("by-id/{jobId}")]
+        public async Task<ActionResult<HangfireJobSnapshotDto>> GetJobById(string jobId)
+        {
+            var tenant = _tenantProvider.GetCurrentTenant();
+            if (string.IsNullOrWhiteSpace(tenant.CompanyKey))
+            {
+                return BadRequest(new { Message = "No se pudo resolver el tenant actual." });
+            }
+
+            var storage = await _tenantHangfireRuntime.GetStorageAsync(tenant.CompanyKey, HttpContext.RequestAborted);
+            using var connection = storage.GetConnection();
+
+            var jobData = connection.GetJobData(jobId);
+            if (jobData == null)
+            {
+                return NotFound(new { Message = $"No se encontro el job {jobId} en Hangfire." });
+            }
+
+            var stateData = connection.GetStateData(jobId);
+            var args = jobData.Job?.Args?.Select(a => a?.ToString() ?? string.Empty).ToArray() ?? Array.Empty<string>();
+            int? idSeccion = null;
+            if (args.Length > 0 && int.TryParse(args[0], out var parsedSection))
+            {
+                idSeccion = parsedSection;
+            }
+
+            var error = stateData?.Data != null && stateData.Data.TryGetValue("ExceptionMessage", out var exceptionMessage)
+                ? exceptionMessage
+                : stateData?.Reason;
+
+            return Ok(new HangfireJobSnapshotDto
+            {
+                JobId = jobId,
+                State = stateData?.Name ?? jobData.State ?? "Unknown",
+                Method = jobData.Job?.Method?.Name ?? "Unknown",
+                IdSeccion = idSeccion,
+                Arguments = args,
+                Error = error,
+                Timestamp = jobData.CreatedAt
+            });
+        }
+
+        [HttpPost("{jobId}/requeue")]
+        public async Task<ActionResult<object>> RequeueJob(string jobId)
+        {
+            var tenant = _tenantProvider.GetCurrentTenant();
+            if (string.IsNullOrWhiteSpace(tenant.CompanyKey))
+            {
+                return BadRequest(new { Message = "No se pudo resolver el tenant actual." });
+            }
+
+            var storage = await _tenantHangfireRuntime.GetStorageAsync(tenant.CompanyKey, HttpContext.RequestAborted);
+            using var connection = storage.GetConnection();
+
+            var jobData = connection.GetJobData(jobId);
+            if (jobData == null)
+            {
+                return NotFound(new { Message = $"No se encontro el job {jobId} en Hangfire." });
+            }
+
+            var currentState = connection.GetStateData(jobId)?.Name ?? jobData.State ?? string.Empty;
+            if (!IsRequeueableState(currentState))
+            {
+                return BadRequest(new
+                {
+                    Message = $"El job {jobId} no se puede re-encolar desde el estado '{currentState}'."
+                });
+            }
+
+            var client = new BackgroundJobClient(storage);
+            var changed = client.ChangeState(jobId, new EnqueuedState(), currentState);
+            if (!changed)
+            {
+                return Conflict(new
+                {
+                    Message = $"No se pudo re-encolar el job {jobId}. El estado pudo haber cambiado."
+                });
+            }
+
+            return Ok(new
+            {
+                JobId = jobId,
+                Message = $"Job {jobId} re-encolado correctamente."
+            });
+        }
+
+        [HttpDelete("company-data")]
+        public async Task<ActionResult<object>> PurgeCompanyData()
+        {
+            var tenant = _tenantProvider.GetCurrentTenant();
+            if (string.IsNullOrWhiteSpace(tenant.CompanyKey))
+            {
+                return BadRequest(new { Message = "No se pudo resolver el tenant actual." });
+            }
+
+            var storage = await _tenantHangfireRuntime.GetStorageAsync(tenant.CompanyKey, HttpContext.RequestAborted);
+            var monitoring = storage.GetMonitoringApi();
+            using var connection = storage.GetConnection();
+            var client = new BackgroundJobClient(storage);
+            var recurringManager = new RecurringJobManager(storage);
+
+            var deletedRecurringJobs = 0;
+            foreach (var recurringJob in connection.GetRecurringJobs())
+            {
+                recurringManager.RemoveIfExists(recurringJob.Id);
+                deletedRecurringJobs++;
+            }
+
+            var deletedJobs = 0;
+            deletedJobs += DeleteJobsBatch(monitoring.ProcessingJobs(0, 1000).Select(item => item.Key), client);
+            deletedJobs += DeleteJobsBatch(monitoring.EnqueuedJobs("default", 0, 1000).Select(item => item.Key), client);
+            deletedJobs += DeleteJobsBatch(monitoring.ScheduledJobs(0, 1000).Select(item => item.Key), client);
+            deletedJobs += DeleteJobsBatch(monitoring.FailedJobs(0, 1000).Select(item => item.Key), client);
+            deletedJobs += DeleteJobsBatch(monitoring.SucceededJobs(0, 1000).Select(item => item.Key), client);
+            deletedJobs += DeleteJobsBatch(monitoring.DeletedJobs(0, 1000).Select(item => item.Key), client);
+
+            var companyConfigId = await _centralDbContext.CompanyConfigs
+                .AsNoTracking()
+                .Where(c => c.CompanyKey == tenant.CompanyKey)
+                .Select(c => c.Id)
+                .FirstOrDefaultAsync(HttpContext.RequestAborted);
+
+            var deletedScheduleExecutions = 0;
+            var deletedSyncJobs = 0;
+            if (companyConfigId != 0)
+            {
+                deletedScheduleExecutions = await _centralDbContext.SyncScheduleExecutions
+                    .Where(e => e.CompanyConfigId == companyConfigId)
+                    .ExecuteDeleteAsync(HttpContext.RequestAborted);
+
+                deletedSyncJobs = await _centralDbContext.SyncJobs
+                    .Where(j => j.CompanyKey == tenant.CompanyKey)
+                    .ExecuteDeleteAsync(HttpContext.RequestAborted);
+            }
+
+            var deletedLogs = await _smartDbContext.Set<APITeamsV3.Domain.Entities.TeamsLogOperativo>()
+                .ExecuteDeleteAsync(HttpContext.RequestAborted);
+
+            return Ok(new
+            {
+                CompanyKey = tenant.CompanyKey,
+                DeletedRecurringJobs = deletedRecurringJobs,
+                DeletedHangfireJobs = deletedJobs,
+                DeletedLogs = deletedLogs,
+                DeletedSyncJobs = deletedSyncJobs,
+                DeletedScheduleExecutions = deletedScheduleExecutions,
+                Message = $"Se eliminaron jobs y logs del tenant {tenant.CompanyKey}."
+            });
+        }
+
         [HttpGet("recurring")]
         public async Task<ActionResult<IReadOnlyList<HangfireRecurringJobSnapshotDto>>> GetRecurringJobs()
         {
@@ -151,6 +309,23 @@ namespace APITeamsV3.API.Controllers
                 .ToList();
 
             return Ok(recurringJobs);
+        }
+
+        [HttpPost("recordings-transfer-pilot/run")]
+        public async Task<ActionResult<object>> RunPilotRecordingTransfersNow()
+        {
+            var tenant = _tenantProvider.GetCurrentTenant();
+            if (string.IsNullOrWhiteSpace(tenant.CompanyKey))
+            {
+                return BadRequest(new { Message = "No se pudo resolver el tenant actual." });
+            }
+
+            var jobId = await _jobService.EnqueuePilotRecordingTransfers(tenant.CompanyKey);
+            return Ok(new
+            {
+                JobId = jobId,
+                Message = $"Recording transfer piloto encolado para tenant {tenant.CompanyKey}."
+            });
         }
 
         private static string BuildRecurringJobResult(RecurringJobDto recurringJob, JobDetailsDto? jobDetails)
@@ -207,6 +382,34 @@ namespace APITeamsV3.API.Controllers
                 "Processing" => "La ultima ejecucion sigue en proceso.",
                 _ => latestState.StateName
             };
+        }
+
+        private static bool IsRequeueableState(string state)
+        {
+            return string.Equals(state, "Failed", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(state, "Deleted", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static int DeleteJobsBatch(
+            IEnumerable<string> jobIds,
+            BackgroundJobClient client)
+        {
+            var deleted = 0;
+            foreach (var jobId in jobIds.Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    if (client.Delete(jobId))
+                    {
+                        deleted++;
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            return deleted;
         }
 
         [HttpPost("generate-schedule/{idSeccion}")]

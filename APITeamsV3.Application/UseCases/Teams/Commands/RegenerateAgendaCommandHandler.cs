@@ -1,3 +1,4 @@
+using APITeamsV3.Application.Common.Graph;
 using APITeamsV3.Application.Common.Interfaces;
 using APITeamsV3.Domain.Entities;
 using MediatR;
@@ -16,6 +17,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
         private readonly ISmartDbContext _context;
         private readonly ITeamAcademicoRepository _teamRepo;
         private readonly ITeamsAgendaService _agendaService;
+        private readonly IGraphClientFactory _graphClientFactory;
         private readonly ITeamsLogOperativoRepository _logRepository;
         private readonly ILogger<RegenerateAgendaCommandHandler> _logger;
 
@@ -23,12 +25,14 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
             ISmartDbContext context,
             ITeamAcademicoRepository teamRepo,
             ITeamsAgendaService agendaService,
+            IGraphClientFactory graphClientFactory,
             ITeamsLogOperativoRepository logRepository,
             ILogger<RegenerateAgendaCommandHandler> logger)
         {
             _context = context;
             _teamRepo = teamRepo;
             _agendaService = agendaService;
+            _graphClientFactory = graphClientFactory;
             _logRepository = logRepository;
             _logger = logger;
         }
@@ -45,6 +49,19 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                 {
                     result.IsValid = false;
                     result.Summary = "Team local activo no encontrado.";
+                    return result;
+                }
+
+                var graphClient = await _graphClientFactory.CreateClientAsync();
+                if (!await GraphGroupGuard.GroupExistsAsync(graphClient, team.IdTeamsGroup, cancellationToken))
+                {
+                    team.EstadoTeam = "I";
+                    team.FechaModificacion = DateTime.UtcNow;
+                    await _teamRepo.UpdateAsync(team);
+
+                    result.IsValid = false;
+                    result.Summary = "El Team local apunta a un grupo inexistente en Graph. Se marco como inactivo.";
+                    await LogOperativoAsync("Error", "Agenda", team.IdTeamsGroup, result.Summary, request.JobId);
                     return result;
                 }
 
@@ -602,7 +619,8 @@ WHERE IdSeccion = {0};";
                    (message.Contains("resource") && message.Contains("not found")) ||
                    message.Contains("does not exist") ||
                    message.Contains("mailbox") ||
-                   message.Contains("not ready");
+                   message.Contains("not ready") ||
+                   message.Contains("primary channel");
         }
 
         private static bool IsAccessDeniedError(Exception ex)
