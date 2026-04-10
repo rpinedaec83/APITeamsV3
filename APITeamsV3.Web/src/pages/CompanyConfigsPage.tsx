@@ -24,7 +24,7 @@ import {
     Spinner,
     Tooltip
 } from '@fluentui/react-components';
-import { DeleteRegular, EditRegular, AddRegular, BuildingRegular, ArrowSyncRegular } from '@fluentui/react-icons';
+import { DeleteRegular, EditRegular, AddRegular, BuildingRegular, ArrowSyncRegular, WrenchRegular, WarningRegular } from '@fluentui/react-icons';
 import { showError, showConfirm } from '../utils/alerts';
 
 type ConnectionValidationResult = {
@@ -50,10 +50,41 @@ const CompanyConfigsPage: React.FC = () => {
     const [importLoading, setImportLoading] = useState(false);
     const [validationLoading, setValidationLoading] = useState(false);
     const [validationResults, setValidationResults] = useState<ConnectionValidationResult[]>([]);
+    const [globalMaintenance, setGlobalMaintenance] = useState(false);
+    const [globalLoading, setGlobalLoading] = useState(false);
 
     useEffect(() => {
         loadConfigs();
+        loadSystemSettings();
     }, []);
+
+    const loadSystemSettings = async () => {
+        try {
+            const response = await api.get('/admin/system-settings');
+            const maintenance = response.data.find((s: any) => s.key === 'GlobalMaintenanceMode');
+            if (maintenance) {
+                setGlobalMaintenance(maintenance.value.toLowerCase() === 'true');
+            }
+        } catch (error) {
+            console.error('Failed to load system settings', error);
+        }
+    };
+
+    const handleToggleGlobalMaintenance = async (checked: boolean) => {
+        setGlobalLoading(true);
+        try {
+            await api.put('/admin/system-settings/GlobalMaintenanceMode', {
+                value: checked ? 'true' : 'false',
+                description: 'Enable or disable maintenance mode for the entire application.'
+            });
+            setGlobalMaintenance(checked);
+        } catch (error) {
+            console.error(error);
+            showError('Failed to update global maintenance mode');
+        } finally {
+            setGlobalLoading(false);
+        }
+    };
 
     const loadConfigs = async () => {
         try {
@@ -245,6 +276,49 @@ const CompanyConfigsPage: React.FC = () => {
                 </div>
             )}
 
+            <div style={{
+                background: globalMaintenance ? '#fff4ce' : 'white',
+                borderRadius: '8px',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+                padding: '20px',
+                marginBottom: '24px',
+                border: globalMaintenance ? '1px solid #ffb900' : '1px solid transparent',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center'
+            }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                    <div style={{
+                        width: '40px',
+                        height: '40px',
+                        borderRadius: '50%',
+                        background: globalMaintenance ? '#ffb900' : '#f0f0f0',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                    }}>
+                        <WrenchRegular style={{ fontSize: '20px', color: globalMaintenance ? 'white' : '#666' }} />
+                    </div>
+                    <div>
+                        <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700 }}>Modo Mantenimiento Global</h3>
+                        <p style={{ margin: '4px 0 0', color: '#666', fontSize: '14px' }}>
+                            {globalMaintenance 
+                                ? 'La aplicación está bloqueada para todos los usuarios excepto administradores.' 
+                                : 'La aplicación está operando normalmente.'}
+                        </p>
+                    </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    {globalLoading && <Spinner size="tiny" />}
+                    <Switch
+                        label={globalMaintenance ? "ACTIVADO" : "DESACTIVADO"}
+                        checked={globalMaintenance}
+                        onChange={(_, d) => handleToggleGlobalMaintenance(d.checked)}
+                        disabled={globalLoading}
+                    />
+                </div>
+            </div>
+
             <div style={{ background: 'white', borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.1)', padding: '20px', overflowX: 'auto' }}>
                 <Table style={{ tableLayout: 'fixed', width: '100%' }}>
                     <TableHeader>
@@ -413,6 +487,28 @@ const CompanyConfigsPage: React.FC = () => {
                                                 setCurrentConfig({ ...currentConfig, pilotSections: vals });
                                             }} 
                                             placeholder="ej. 416734, 415868" 
+                                        />
+                                    </div>
+                                )}
+                            </div>
+
+                            <div style={{ padding: '10px', background: '#fff1f1', borderRadius: '4px', border: '1px solid #f9d9d9' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                                    <WarningRegular style={{ color: '#d13438' }} />
+                                    <h4 style={{ margin: 0, color: '#d13438' }}>Modo Mantenimiento (Por Empresa)</h4>
+                                </div>
+                                <Switch 
+                                    label={currentConfig.isMaintenanceMode ? "Mantenimiento Activo" : "Operación Normal"} 
+                                    checked={currentConfig.isMaintenanceMode || false} 
+                                    onChange={(_, d) => setCurrentConfig({ ...currentConfig, isMaintenanceMode: d.checked })} 
+                                />
+                                {currentConfig.isMaintenanceMode && (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '10px' }}>
+                                        <Label>Mensaje Personalizado (Opcional)</Label>
+                                        <Input 
+                                            value={currentConfig.maintenanceMessage || ''} 
+                                            onChange={(_, d) => setCurrentConfig({ ...currentConfig, maintenanceMessage: d.value })} 
+                                            placeholder="ej. Estamos actualizando el servidor de Idat..." 
                                         />
                                     </div>
                                 )}

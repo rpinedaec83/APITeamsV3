@@ -18,11 +18,18 @@ namespace APITeamsV3.Infrastructure.Persistence.Contexts
         public DbSet<SyncScheduleExecution> SyncScheduleExecutions { get; set; }
         public DbSet<SyncJob> SyncJobs { get; set; }
         public DbSet<CompanyPilotSection> CompanyPilotSections { get; set; }
+        public DbSet<SystemSetting> SystemSettings { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
             
+            modelBuilder.Entity<SystemSetting>(entity =>
+            {
+                entity.HasKey(e => e.Key);
+                entity.Property(e => e.Key).HasMaxLength(100);
+            });
+
             modelBuilder.Entity<CompanyConfig>(entity =>
             {
                 entity.HasKey(e => e.Id);

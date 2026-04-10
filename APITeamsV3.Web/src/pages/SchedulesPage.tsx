@@ -328,6 +328,8 @@ const SchedulesPage: React.FC = () => {
                     isActive: true,
                     isPilotMode: false,
                     pilotSections: [],
+                    isMaintenanceMode: false,
+                    maintenanceMessage: '',
                 } as CompanyConfig];
             }
             setCompanies(fetchedCompanies);

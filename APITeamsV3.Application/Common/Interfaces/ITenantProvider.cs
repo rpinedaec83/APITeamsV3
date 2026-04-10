@@ -12,6 +12,9 @@ namespace APITeamsV3.Application.Common.Interfaces
         public string GraphClientSecret { get; set; } = string.Empty; // Decrypted/Retrieved secret
         public string SpaClientId { get; set; } = string.Empty; // For Frontend MSAL
         public string SpaTenantId { get; set; } = string.Empty; // For Frontend MSAL
+        
+        public bool IsMaintenanceMode { get; set; }
+        public string? MaintenanceMessage { get; set; }
     }
 
     public interface ITenantProvider

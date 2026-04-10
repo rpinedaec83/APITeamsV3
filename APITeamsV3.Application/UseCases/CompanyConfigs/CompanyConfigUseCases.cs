@@ -33,7 +33,9 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
         string MeetingPolicyMode,
         bool IsPilotMode,
         List<int> PilotSections,
-        string? TeacherAltDomain
+        string? TeacherAltDomain,
+        bool IsMaintenanceMode,
+        string? MaintenanceMessage
     );
 
     // --- Queries ---
@@ -84,7 +86,9 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
                     c.MeetingPolicyMode,
                     c.IsPilotMode,
                     c.PilotSections?.Select(p => p.IdSeccion).ToList() ?? new List<int>(),
-                    c.TeacherAltDomain));
+                    c.TeacherAltDomain,
+                    c.IsMaintenanceMode,
+                    c.MaintenanceMessage));
             }
             return dtos;
         }
@@ -134,7 +138,9 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
                 c.MeetingPolicyMode,
                 c.IsPilotMode,
                 c.PilotSections?.Select(p => p.IdSeccion).ToList() ?? new List<int>(),
-                c.TeacherAltDomain);
+                c.TeacherAltDomain,
+                c.IsMaintenanceMode,
+                c.MaintenanceMessage);
         }
     }
 
@@ -154,7 +160,9 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
         string GraphClientSecretRef,
         bool IsPilotMode,
         List<int> PilotSections,
-        string? TeacherAltDomain
+        string? TeacherAltDomain,
+        bool IsMaintenanceMode,
+        string? MaintenanceMessage
     ) : IRequest<int>;
 
     public class CreateCompanyConfigCommandHandler : IRequestHandler<CreateCompanyConfigCommand, int>
@@ -187,7 +195,9 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
                 LastSyncTimestamp = System.DateTime.UtcNow,
                 IsPilotMode = request.IsPilotMode,
                 PilotSections = request.PilotSections?.Select(id => new CompanyPilotSection { IdSeccion = id }).ToList() ?? new List<CompanyPilotSection>(),
-                TeacherAltDomain = request.TeacherAltDomain
+                TeacherAltDomain = request.TeacherAltDomain,
+                IsMaintenanceMode = request.IsMaintenanceMode,
+                MaintenanceMessage = request.MaintenanceMessage
             };
 
             _context.CompanyConfigs.Add(entity);
@@ -213,6 +223,8 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
         bool IsPilotMode,
         List<int> PilotSections,
         string? TeacherAltDomain,
+        bool IsMaintenanceMode,
+        string? MaintenanceMessage,
         bool IsAdminView = false
     ) : IRequest<bool>;
 
@@ -268,6 +280,8 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
             
             entity.IsPilotMode = request.IsPilotMode;
             entity.TeacherAltDomain = request.TeacherAltDomain;
+            entity.IsMaintenanceMode = request.IsMaintenanceMode;
+            entity.MaintenanceMessage = request.MaintenanceMessage;
             
             if (request.PilotSections != null)
             {

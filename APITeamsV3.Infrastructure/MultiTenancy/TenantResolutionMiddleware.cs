@@ -45,7 +45,11 @@ namespace APITeamsV3.Infrastructure.MultiTenancy
                 config = await dbContext.CompanyConfigs.FirstOrDefaultAsync(c => (c.ApiHost == host || c.FrontHost == host) && c.IsActive);
             }
 
-            // 3. Role/Tenancy Enforcement
+            // 3. Global Maintenance Check
+            var globalMaintenance = await dbContext.SystemSettings.FirstOrDefaultAsync(s => s.Key == "GlobalMaintenanceMode");
+            bool isGlobalMaintenance = globalMaintenance?.Value?.ToLower() == "true";
+
+            // 4. Role/Tenancy Enforcement
             if (context.User.Identity != null && context.User.Identity.IsAuthenticated)
             {
                 var roleClaims = context.User.FindAll("roles")
@@ -59,6 +63,26 @@ namespace APITeamsV3.Infrastructure.MultiTenancy
 
                 bool isIt = roleClaims.Contains("IT");
                 bool isAdmin = roleClaims.Contains("ADMIN");
+                bool isPrivileged = isIt || isAdmin;
+
+                // Check Global Maintenance
+                if (isGlobalMaintenance && !isPrivileged)
+                {
+                    context.Response.StatusCode = 503;
+                    await context.Response.WriteAsync("El sistema se encuentra en mantenimiento global. Por favor, intente más tarde.");
+                    return;
+                }
+
+                // Check Tenant Maintenance
+                if (config != null && config.IsMaintenanceMode && !isPrivileged)
+                {
+                    context.Response.StatusCode = 503;
+                    var msg = string.IsNullOrEmpty(config.MaintenanceMessage) 
+                        ? $"La empresa {config.DisplayName} se encuentra en mantenimiento." 
+                        : config.MaintenanceMessage;
+                    await context.Response.WriteAsync(msg);
+                    return;
+                }
 
                 if (isAdmin && !isIt)
                 {
@@ -79,6 +103,16 @@ namespace APITeamsV3.Infrastructure.MultiTenancy
                     }
                 }
                 // GESTION role follows the host-based resolution naturally
+            }
+            else if (isGlobalMaintenance || (config != null && config.IsMaintenanceMode))
+            {
+                // Public routes might still need to be accessible, but if it's maintenance, usually we block all except public API
+                if (!context.Request.Path.StartsWithSegments("/api/public"))
+                {
+                    context.Response.StatusCode = 503;
+                    await context.Response.WriteAsync("Sistema en mantenimiento.");
+                    return;
+                }
             }
 
             // 4. Set Context if resolution was successful
@@ -129,7 +163,9 @@ namespace APITeamsV3.Infrastructure.MultiTenancy
                 GraphClientId = config.GraphClientId,
                 GraphClientSecret = config.GraphClientSecretRef, // Retrieval from Secret Store here if needed
                 SpaClientId = config.SpaClientId ?? string.Empty,
-                SpaTenantId = config.SpaTenantId ?? config.GraphTenantId // Assumed same tenant for Graph and SPA if missing
+                SpaTenantId = config.SpaTenantId ?? config.GraphTenantId, // Assumed same tenant for Graph and SPA if missing
+                IsMaintenanceMode = config.IsMaintenanceMode,
+                MaintenanceMessage = config.MaintenanceMessage
             });
         }
     }

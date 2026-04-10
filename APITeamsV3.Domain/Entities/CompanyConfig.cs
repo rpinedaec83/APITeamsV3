@@ -32,6 +32,10 @@ namespace APITeamsV3.Domain.Entities
         public bool IsPilotMode { get; set; } = false;
         public ICollection<CompanyPilotSection> PilotSections { get; set; } = new List<CompanyPilotSection>();
 
+        // Maintenance Mode
+        public bool IsMaintenanceMode { get; set; } = false;
+        public string? MaintenanceMessage { get; set; }
+
         // Customization
         public string? TeacherAltDomain { get; set; }
     }

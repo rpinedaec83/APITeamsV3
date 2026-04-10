@@ -17,6 +17,8 @@ export interface CompanyConfig {
     isPilotMode: boolean;
     pilotSections: number[];
     teacherAltDomain?: string;
+    isMaintenanceMode: boolean;
+    maintenanceMessage?: string;
 }
 
 export interface CreateCompanyConfigRequest {
@@ -34,6 +36,8 @@ export interface CreateCompanyConfigRequest {
     isPilotMode: boolean;
     pilotSections: number[];
     teacherAltDomain?: string;
+    isMaintenanceMode: boolean;
+    maintenanceMessage?: string;
 }
 
 export interface UpdateCompanyConfigRequest {
@@ -51,4 +55,6 @@ export interface UpdateCompanyConfigRequest {
     isPilotMode: boolean;
     pilotSections: number[];
     teacherAltDomain?: string;
+    isMaintenanceMode: boolean;
+    maintenanceMessage?: string;
 }
