@@ -10,7 +10,7 @@ $publishDir   = "C:\Users\apoyoexterno15\Documents\Sources\APITeamsV3\publish_ou
 $iisApiPath   = "E:\APITEAMSV3\publish\api"
 $appPool      = "API"
 $dotnet       = "C:\Program Files\dotnet\dotnet.exe"
-$SkipDbRestore = $true  # Set to $true to overwrite production DBs with local ones
+$SkipDbRestore = $false # Set to $false to preserve production DBs
 
 # Verificar que dotnet SDK esté disponible
 Write-Host "[1/5] Verificando .NET SDK..." -ForegroundColor Cyan
@@ -82,7 +82,7 @@ if (Test-Path $iisApiPath) {
 }
 
 # Copiar todo el publish al directorio IIS (excluyendo archivos bloqueados de SQLite)
-robocopy $publishDir $iisApiPath /MIR /XF *.db-shm *.db-wal /R:3 /W:5 /NP | Out-Null
+robocopy $publishDir $iisApiPath /MIR /XF *.db-shm *.db-wal *.db /R:3 /W:5 /NP | Out-Null
 
 # Restaurar appsettings de produccion (no sobreescribir con el de dev)
 if (Test-Path $backupSettings) {

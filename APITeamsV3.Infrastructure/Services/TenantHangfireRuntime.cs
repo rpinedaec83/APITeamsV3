@@ -154,14 +154,15 @@ namespace APITeamsV3.Infrastructure.Services
                         var decryptedConnectionString = _encryptionService.Decrypt(config.SmartConnectionString);
                         if (string.IsNullOrWhiteSpace(decryptedConnectionString))
                         {
-                            _logger.LogWarning("Skipping Hangfire storage registration for tenant {CompanyKey}: SmartConnectionString is empty after decryption.", config.CompanyKey);
+                            _logger.LogCritical("CRITICAL: SmartConnectionString for tenant {CompanyKey} is empty after decryption! Registration aborted.", config.CompanyKey);
                             continue;
                         }
 
                         var builder = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(decryptedConnectionString);
                         if (string.IsNullOrWhiteSpace(builder.DataSource) || string.IsNullOrWhiteSpace(builder.InitialCatalog))
                         {
-                            _logger.LogWarning("Skipping Hangfire storage registration for tenant {CompanyKey}: SQL Server connection string is missing DataSource or InitialCatalog.", config.CompanyKey);
+                            _logger.LogError("ERROR: connection string for tenant {CompanyKey} has missing DataSource or InitialCatalog. DataSource: {DataSource}, Catalog: {Catalog}", 
+                                config.CompanyKey, builder.DataSource ?? "NULL", builder.InitialCatalog ?? "NULL");
                             continue;
                         }
 
@@ -175,7 +176,7 @@ namespace APITeamsV3.Infrastructure.Services
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(ex, "Skipping Hangfire storage registration for tenant {CompanyKey}: failed to resolve SQL Server connection string.", config.CompanyKey);
+                        _logger.LogError(ex, "CRITICAL ERROR: Failed to resolve Hangfire storage for tenant {CompanyKey}. This usually means a decryption key mismatch or corrupted payload in Central DB.", config.CompanyKey);
                     }
                 }
 

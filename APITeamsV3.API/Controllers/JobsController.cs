@@ -43,61 +43,75 @@ namespace APITeamsV3.API.Controllers
                 return BadRequest(new { Message = "No se pudo resolver el tenant actual." });
             }
 
-            var storage = await _tenantHangfireRuntime.GetStorageAsync(tenant.CompanyKey, HttpContext.RequestAborted);
-            var monitoring = storage.GetMonitoringApi();
             var pageSize = Math.Clamp(take, 1, 200);
-
             var snapshots = new Dictionary<string, HangfireJobSnapshotDto>(StringComparer.OrdinalIgnoreCase);
 
-            void AddSnapshot(string jobId, string state, DateTime? stateAt, Hangfire.Common.Job? job, string? error = null)
+            try
             {
-                if (string.IsNullOrWhiteSpace(jobId) || snapshots.ContainsKey(jobId))
+                var storage = await _tenantHangfireRuntime.GetStorageAsync(tenant.CompanyKey, HttpContext.RequestAborted);
+                var monitoring = storage.GetMonitoringApi();
+
+                void AddSnapshot(string jobId, string state, DateTime? stateAt, Hangfire.Common.Job? job, string? error = null)
                 {
-                    return;
+                    if (string.IsNullOrWhiteSpace(jobId) || snapshots.ContainsKey(jobId))
+                    {
+                        return;
+                    }
+
+                    var args = job?.Args?.Select(a => a?.ToString() ?? string.Empty).ToArray() ?? Array.Empty<string>();
+                    int? idSeccion = null;
+                    if (args.Length > 0 && int.TryParse(args[0], out var parsedSection))
+                    {
+                        idSeccion = parsedSection;
+                    }
+
+                    snapshots[jobId] = new HangfireJobSnapshotDto
+                    {
+                        JobId = jobId,
+                        State = state,
+                        Method = job?.Method?.Name ?? "Unknown",
+                        IdSeccion = idSeccion,
+                        Arguments = args,
+                        Error = error,
+                        Timestamp = stateAt ?? DateTime.UtcNow
+                    };
                 }
 
-                var args = job?.Args?.Select(a => a?.ToString() ?? string.Empty).ToArray() ?? Array.Empty<string>();
-                int? idSeccion = null;
-                if (args.Length > 0 && int.TryParse(args[0], out var parsedSection))
+                foreach (var item in monitoring.ProcessingJobs(0, pageSize))
                 {
-                    idSeccion = parsedSection;
+                    AddSnapshot(item.Key, "Processing", item.Value?.StartedAt, item.Value?.Job);
                 }
 
-                snapshots[jobId] = new HangfireJobSnapshotDto
+                foreach (var item in monitoring.EnqueuedJobs("default", 0, pageSize))
                 {
-                    JobId = jobId,
-                    State = state,
-                    Method = job?.Method?.Name ?? "Unknown",
-                    IdSeccion = idSeccion,
-                    Arguments = args,
-                    Error = error,
-                    Timestamp = stateAt ?? DateTime.UtcNow
-                };
-            }
+                    AddSnapshot(item.Key, "Enqueued", item.Value?.EnqueuedAt, item.Value?.Job);
+                }
 
-            foreach (var item in monitoring.ProcessingJobs(0, pageSize))
-            {
-                AddSnapshot(item.Key, "Processing", item.Value?.StartedAt, item.Value?.Job);
-            }
+                foreach (var item in monitoring.ScheduledJobs(0, pageSize))
+                {
+                    AddSnapshot(item.Key, "Scheduled", item.Value?.EnqueueAt, item.Value?.Job);
+                }
 
-            foreach (var item in monitoring.EnqueuedJobs("default", 0, pageSize))
-            {
-                AddSnapshot(item.Key, "Enqueued", item.Value?.EnqueuedAt, item.Value?.Job);
-            }
+                foreach (var item in monitoring.FailedJobs(0, pageSize))
+                {
+                    AddSnapshot(item.Key, "Failed", item.Value?.FailedAt, item.Value?.Job, item.Value?.ExceptionMessage ?? item.Value?.Reason);
+                }
 
-            foreach (var item in monitoring.ScheduledJobs(0, pageSize))
-            {
-                AddSnapshot(item.Key, "Scheduled", item.Value?.EnqueueAt, item.Value?.Job);
+                foreach (var item in monitoring.SucceededJobs(0, pageSize))
+                {
+                    AddSnapshot(item.Key, "Succeeded", item.Value?.SucceededAt, item.Value?.Job);
+                }
             }
-
-            foreach (var item in monitoring.FailedJobs(0, pageSize))
+            catch (InvalidOperationException ex)
             {
-                AddSnapshot(item.Key, "Failed", item.Value?.FailedAt, item.Value?.Job, item.Value?.ExceptionMessage ?? item.Value?.Reason);
+                return StatusCode(503, new { Message = ex.Message });
             }
-
-            foreach (var item in monitoring.SucceededJobs(0, pageSize))
+            catch (Exception ex)
             {
-                AddSnapshot(item.Key, "Succeeded", item.Value?.SucceededAt, item.Value?.Job);
+                return StatusCode(503, new { 
+                    Message = $"No se pudo consultar el estado de Hangfire para el tenant '{tenant.CompanyKey}'. Verifique que la base de datos sea accesible.",
+                    Detail = ex.Message 
+                });
             }
 
             var ordered = snapshots.Values
