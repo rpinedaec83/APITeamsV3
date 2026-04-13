@@ -861,6 +861,11 @@ namespace APITeamsV3.Infrastructure.Services
             string childFolderName,
             CancellationToken cancellationToken)
         {
+            if (string.IsNullOrWhiteSpace(childFolderName))
+            {
+                throw new InvalidOperationException("El nombre de la carpeta destino no puede estar vacio.");
+            }
+
             var children = await ListChildrenAsync(graphClient, driveId, parentFolderId, cancellationToken);
             var existing = children.FirstOrDefault(item =>
                 item.Folder != null &&
@@ -1027,6 +1032,7 @@ namespace APITeamsV3.Infrastructure.Services
             string folderId,
             CancellationToken cancellationToken)
         {
+            var items = new List<DriveItem>();
             DriveItemCollectionResponse? response;
 
             if (string.Equals(folderId, "root", StringComparison.OrdinalIgnoreCase))
@@ -1037,7 +1043,8 @@ namespace APITeamsV3.Infrastructure.Services
                     .GetAsync(
                         requestConfiguration =>
                         {
-                            requestConfiguration.QueryParameters.Select = ["id", "name", "file", "size", "webUrl", "createdDateTime", "lastModifiedDateTime"];
+                            requestConfiguration.QueryParameters.Select = ["id", "name", "file", "folder", "size", "webUrl", "createdDateTime", "lastModifiedDateTime"];
+                            requestConfiguration.QueryParameters.Top = _options.ListPageSize;
                         },
                         cancellationToken);
             }
@@ -1049,20 +1056,32 @@ namespace APITeamsV3.Infrastructure.Services
                     .GetAsync(
                         requestConfiguration =>
                         {
-                            requestConfiguration.QueryParameters.Select = ["id", "name", "file", "size", "webUrl", "createdDateTime", "lastModifiedDateTime"];
+                            requestConfiguration.QueryParameters.Select = ["id", "name", "file", "folder", "size", "webUrl", "createdDateTime", "lastModifiedDateTime"];
+                            requestConfiguration.QueryParameters.Top = _options.ListPageSize;
                         },
                         cancellationToken);
             }
 
-            if (!string.IsNullOrWhiteSpace(response?.OdataNextLink))
+            while (response != null)
             {
-                _logger.LogWarning(
-                    "Destination folder listing is paginated (drive {DriveId}, folder {FolderId}). Results are limited by RecordingTransfer:ListPageSize.",
-                    driveId,
-                    folderId);
+                if (response.Value != null)
+                {
+                    items.AddRange(response.Value);
+                }
+
+                if (string.IsNullOrWhiteSpace(response.OdataNextLink))
+                {
+                    break;
+                }
+
+                response = await graphClient.Drives[driveId]
+                    .Items[folderId]
+                    .Children
+                    .WithUrl(response.OdataNextLink)
+                    .GetAsync(cancellationToken: cancellationToken);
             }
 
-            return response?.Value?.ToList() ?? [];
+            return items;
         }
 
         private string BuildFriendlyName(DriveItem sourceItem, RecordingTransferRequest request, ISet<string> generatedNames)

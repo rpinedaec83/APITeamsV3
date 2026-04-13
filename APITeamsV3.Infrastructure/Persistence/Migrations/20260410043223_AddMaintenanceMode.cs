@@ -11,13 +11,6 @@ namespace APITeamsV3.Infrastructure.Persistence.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<int>(
-                name: "TotalSections",
-                table: "SyncScheduleExecutions",
-                type: "INTEGER",
-                nullable: false,
-                defaultValue: 0);
-
             migrationBuilder.AddColumn<bool>(
                 name: "IsMaintenanceMode",
                 table: "CompanyConfigs",
@@ -51,10 +44,6 @@ namespace APITeamsV3.Infrastructure.Persistence.Migrations
         {
             migrationBuilder.DropTable(
                 name: "SystemSettings");
-
-            migrationBuilder.DropColumn(
-                name: "TotalSections",
-                table: "SyncScheduleExecutions");
 
             migrationBuilder.DropColumn(
                 name: "IsMaintenanceMode",

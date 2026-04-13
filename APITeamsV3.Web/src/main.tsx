@@ -7,11 +7,19 @@ import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 import type { SpaBootstrapConfig } from './authConfig';
 import { getBaseApiUrl } from './utils/config';
+import { getMaintenanceMessage, installMaintenanceFetchInterceptor, isMaintenancePayload } from './utils/maintenance';
 
 const init = async () => {
   try {
+    installMaintenanceFetchInterceptor();
     const apiUrl = getBaseApiUrl();
     const response = await fetch(`${apiUrl}/public/spa-config`);
+    if (response.status === 503) {
+      const payload = await response.text();
+      if (isMaintenancePayload(payload)) {
+        throw new Error(getMaintenanceMessage(payload));
+      }
+    }
     if (!response.ok) {
       throw new Error(`Failed to load config: ${response.statusText}`);
     }

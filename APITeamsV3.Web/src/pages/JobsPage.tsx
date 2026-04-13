@@ -22,6 +22,7 @@ import {
     Spinner,
     Text,
     Tooltip,
+    Switch,
 } from '@fluentui/react-components';
 import {
     PlayRegular,
@@ -42,6 +43,7 @@ import {
 } from '@fluentui/react-icons';
 import { useApiClient } from '../hooks/useApiClient';
 import { showConfirm, showSuccess, showWarning } from '../utils/alerts';
+import { getApiErrorMessage } from '../utils/apiErrors';
 
 interface HangfireJobResult {
     jobId: string;
@@ -69,6 +71,26 @@ interface HangfireRecurringJobResult {
     error: string;
     removed: boolean;
 }
+
+interface RecordingTransferPilotJobConfig {
+    isEnabled: boolean;
+    cron: string;
+    timeZoneId: string;
+    isPilotMode: boolean;
+    pilotSectionsConfigured: number;
+}
+
+interface TenantConfigResponse {
+    timeZoneId?: string;
+}
+
+const WINDOWS_TO_IANA_TIMEZONES: Record<string, string> = {
+    'SA Pacific Standard Time': 'America/Lima',
+    'Pacific SA Standard Time': 'America/Santiago',
+    'Eastern Standard Time': 'America/New_York',
+    'SA Western Standard Time': 'America/La_Paz',
+    UTC: 'UTC',
+};
 
 const useStyles = makeStyles({
     root: {
@@ -287,6 +309,11 @@ const JobsPage: React.FC = () => {
     const [history, setHistory] = useState<HangfireJobResult[]>([]);
     const [recurringJobs, setRecurringJobs] = useState<HangfireRecurringJobResult[]>([]);
     const [selectedTab, setSelectedTab] = useState<TabValue>('all');
+    const [recordingConfig, setRecordingConfig] = useState<RecordingTransferPilotJobConfig | null>(null);
+    const [recordingCronDraft, setRecordingCronDraft] = useState('');
+    const [loadingRecordingConfig, setLoadingRecordingConfig] = useState(false);
+    const [savingRecordingConfig, setSavingRecordingConfig] = useState(false);
+    const [tenantTimeZone, setTenantTimeZone] = useState('America/Lima');
 
     const loadRecentJobs = async (silent = false) => {
         if (!silent) setLoadingHistory(true);
@@ -296,7 +323,7 @@ const JobsPage: React.FC = () => {
             setHistory(jobs);
         } catch (err: unknown) {
             if (!silent) {
-                const errorMessage = err instanceof Error ? err.message : 'No se pudo cargar historial de Hangfire.';
+                const errorMessage = getApiErrorMessage(err, 'No se pudo cargar historial de Hangfire.');
                 showWarning(errorMessage);
             }
         } finally {
@@ -312,7 +339,7 @@ const JobsPage: React.FC = () => {
             setRecurringJobs(jobs);
         } catch (err: unknown) {
             if (!silent) {
-                const errorMessage = err instanceof Error ? err.message : 'No se pudieron cargar los jobs recurrentes.';
+                const errorMessage = getApiErrorMessage(err, 'No se pudieron cargar los jobs recurrentes.');
                 showWarning(errorMessage);
             }
         } finally {
@@ -327,10 +354,67 @@ const JobsPage: React.FC = () => {
             await loadRecentJobs(true);
             await loadRecurringJobs(true);
         } catch (err: unknown) {
-            const errorMessage = err instanceof Error ? err.message : 'No se pudo encolar la transferencia piloto.';
+            const errorMessage = getApiErrorMessage(err, 'No se pudo encolar la transferencia piloto.');
             showWarning(errorMessage);
         } finally {
             setLoadingPilotTransfers(false);
+        }
+    };
+
+    const loadRecordingConfig = async (silent = false) => {
+        if (!silent) setLoadingRecordingConfig(true);
+        try {
+            const response = await apiClient.get('/jobs/recordings-transfer-pilot/config');
+            const config = response.data as RecordingTransferPilotJobConfig;
+            setRecordingConfig(config);
+            setRecordingCronDraft(config.cron ?? '');
+        } catch (err: unknown) {
+            if (!silent) {
+                const errorMessage = getApiErrorMessage(err, 'No se pudo cargar la configuracion del job de grabaciones.');
+                showWarning(errorMessage);
+            }
+        } finally {
+            if (!silent) setLoadingRecordingConfig(false);
+        }
+    };
+
+    const loadTenantConfig = async () => {
+        try {
+            const response = await apiClient.get('/config');
+            const config = (response.data ?? {}) as TenantConfigResponse;
+            const timeZoneId = config.timeZoneId ?? '';
+            setTenantTimeZone((WINDOWS_TO_IANA_TIMEZONES[timeZoneId] ?? timeZoneId) || 'America/Lima');
+        } catch {
+            setTenantTimeZone('America/Lima');
+        }
+    };
+
+    const handleSaveRecordingConfig = async () => {
+        if (!recordingConfig) return;
+
+        const cron = recordingCronDraft.trim();
+        if (recordingConfig.isEnabled && !cron) {
+            showWarning('Debe ingresar un CRON cuando el job esta habilitado.');
+            return;
+        }
+
+        setSavingRecordingConfig(true);
+        try {
+            const response = await apiClient.put('/jobs/recordings-transfer-pilot/config', {
+                isEnabled: recordingConfig.isEnabled,
+                cron: cron || null,
+            });
+
+            const updated = response.data as RecordingTransferPilotJobConfig;
+            setRecordingConfig(updated);
+            setRecordingCronDraft(updated.cron ?? '');
+            await loadRecurringJobs(true);
+            await showSuccess('Configuracion del job de grabaciones guardada.');
+        } catch (err: unknown) {
+            const errorMessage = getApiErrorMessage(err, 'No se pudo guardar la configuracion del job de grabaciones.');
+            showWarning(errorMessage);
+        } finally {
+            setSavingRecordingConfig(false);
         }
     };
 
@@ -347,7 +431,7 @@ const JobsPage: React.FC = () => {
             const job = response.data as HangfireJobResult;
             setHistory(job ? [job] : []);
         } catch (err: unknown) {
-            const errorMessage = err instanceof Error ? err.message : 'No se pudo consultar el Job ID.';
+            const errorMessage = getApiErrorMessage(err, 'No se pudo consultar el Job ID.');
             showWarning(errorMessage);
         } finally {
             setLoadingHistory(false);
@@ -365,7 +449,7 @@ const JobsPage: React.FC = () => {
             await apiClient.post(`/jobs/${encodeURIComponent(jobId)}/requeue`, {});
             await loadRecentJobs(true);
         } catch (err: unknown) {
-            const errorMessage = err instanceof Error ? err.message : 'No se pudo re-encolar el job.';
+            const errorMessage = getApiErrorMessage(err, 'No se pudo re-encolar el job.');
             showWarning(errorMessage);
         } finally {
             setRequeueingJobId(null);
@@ -390,7 +474,7 @@ const JobsPage: React.FC = () => {
             await loadRecentJobs(true);
             await loadRecurringJobs(true);
         } catch (err: unknown) {
-            const errorMessage = err instanceof Error ? err.message : 'No se pudo limpiar la empresa actual.';
+            const errorMessage = getApiErrorMessage(err, 'No se pudo limpiar la empresa actual.');
             showWarning(errorMessage);
         } finally {
             setPurgingCompanyData(false);
@@ -400,6 +484,8 @@ const JobsPage: React.FC = () => {
     useEffect(() => {
         void loadRecentJobs(false);
         void loadRecurringJobs(false);
+        void loadRecordingConfig(false);
+        void loadTenantConfig();
         const interval = window.setInterval(() => {
             void loadRecentJobs(true);
             void loadRecurringJobs(true);
@@ -429,7 +515,7 @@ const JobsPage: React.FC = () => {
             await apiClient.post(url, {});
             await loadRecentJobs(true);
         } catch (err: unknown) {
-            const errorMessage = err instanceof Error ? err.message : 'Error desconocido';
+            const errorMessage = getApiErrorMessage(err, 'Error desconocido');
             showWarning(errorMessage);
         } finally {
             setLoading(null);
@@ -453,9 +539,29 @@ const JobsPage: React.FC = () => {
         return 'informative';
     };
 
+    const parseUtcDate = (value: string): Date => {
+        if (!value) return new Date(Number.NaN);
+        const normalized = /z$|[+-]\d{2}:\d{2}$/i.test(value) ? value : `${value}Z`;
+        return new Date(normalized);
+    };
+
     const formatDateTime = (value?: string | null) => {
         if (!value) return '-';
-        return new Date(value).toLocaleString('es-PE');
+        const date = parseUtcDate(value);
+        if (Number.isNaN(date.getTime())) {
+            return value;
+        }
+
+        return new Intl.DateTimeFormat('es-PE', {
+            timeZone: tenantTimeZone,
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: true,
+        }).format(date);
     };
 
     const getStateIcon = (state: string) => {
@@ -510,6 +616,7 @@ const JobsPage: React.FC = () => {
                         onClick={() => {
                             void loadRecentJobs(false);
                             void loadRecurringJobs(false);
+                            void loadRecordingConfig(false);
                         }}
                     >
                         Actualizar
@@ -534,6 +641,53 @@ const JobsPage: React.FC = () => {
                             Info
                         </Button>
                     </Tooltip>
+                </div>
+
+                <div className={styles.sectionInput} style={{ marginTop: '16px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', minWidth: '260px' }}>
+                        <Label weight="semibold">Job Transferencia Grabaciones</Label>
+                        {loadingRecordingConfig ? (
+                            <Spinner size="tiny" label="Cargando configuracion..." />
+                        ) : recordingConfig ? (
+                            <>
+                                <Switch
+                                    label={recordingConfig.isEnabled ? 'Habilitado' : 'Deshabilitado'}
+                                    checked={recordingConfig.isEnabled}
+                                    onChange={(_, data) =>
+                                        setRecordingConfig(prev => prev ? { ...prev, isEnabled: data.checked } : prev)
+                                    }
+                                />
+                                <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
+                                    TZ: {recordingConfig.timeZoneId} | Pilot mode: {recordingConfig.isPilotMode ? 'On' : 'Off'} | Secciones: {recordingConfig.pilotSectionsConfigured}
+                                </Text>
+                            </>
+                        ) : (
+                            <Text size={200} style={{ color: tokens.colorPaletteRedForeground1 }}>
+                                No disponible.
+                            </Text>
+                        )}
+                    </div>
+                    <div className={styles.inputGroup} style={{ maxWidth: '360px' }}>
+                        <Label weight="semibold">CRON</Label>
+                        <Input
+                            placeholder="Ej. */30 * * * *"
+                            size="large"
+                            value={recordingCronDraft}
+                            onChange={(_, d) => setRecordingCronDraft(d.value)}
+                            disabled={loadingRecordingConfig || !recordingConfig}
+                        />
+                        <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
+                            Formato 5 campos o alias: @hourly, @daily.
+                        </Text>
+                    </div>
+                    <Button
+                        appearance="primary"
+                        icon={savingRecordingConfig ? <Spinner size="tiny" /> : <CheckmarkCircleRegular />}
+                        onClick={() => { void handleSaveRecordingConfig(); }}
+                        disabled={!recordingConfig || loadingRecordingConfig || savingRecordingConfig}
+                    >
+                        {savingRecordingConfig ? 'Guardando...' : 'Guardar config job'}
+                    </Button>
                 </div>
 
                 <div className={styles.sectionInput} style={{ marginTop: '16px' }}>
@@ -698,7 +852,7 @@ const JobsPage: React.FC = () => {
                 <div className={styles.sectionHeader}>
                     <Title3>Historial de Ejecucion (Hangfire)</Title3>
                     <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
-                        Refresco automatico cada 15s
+                        Refresco automatico cada 3 min
                     </Text>
                 </div>
                 <Divider />
@@ -744,7 +898,7 @@ const JobsPage: React.FC = () => {
                                         </Text>
                                     </TableCell>
                                     <TableCell style={{ fontSize: '12px', color: tokens.colorNeutralForeground3 }}>
-                                        {new Date(entry.timestamp).toLocaleString('es-PE')}
+                                        {formatDateTime(entry.timestamp)}
                                     </TableCell>
                                     <TableCell>
                                         {canRequeueJob(entry.state) ? (

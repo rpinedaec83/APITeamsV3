@@ -1,7 +1,10 @@
 using APITeamsV3.Application.Common.Interfaces;
+using APITeamsV3.Application.Common.Graph;
 using APITeamsV3.Domain.Entities;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -14,12 +17,21 @@ namespace APITeamsV3.Application.UseCases.Sections
         private readonly ISmartDbContext _context;
         private readonly ISectionEligibilityService _eligibilityService;
         private readonly ITenantProvider _tenantProvider;
+        private readonly IGraphClientFactory _graphClientFactory;
+        private readonly ILogger<GetSectionByCodeQueryHandler> _logger;
 
-        public GetSectionByCodeQueryHandler(ISmartDbContext context, ISectionEligibilityService eligibilityService, ITenantProvider tenantProvider)
+        public GetSectionByCodeQueryHandler(
+            ISmartDbContext context,
+            ISectionEligibilityService eligibilityService,
+            ITenantProvider tenantProvider,
+            IGraphClientFactory graphClientFactory,
+            ILogger<GetSectionByCodeQueryHandler> logger)
         {
             _context = context;
             _eligibilityService = eligibilityService;
             _tenantProvider = tenantProvider;
+            _graphClientFactory = graphClientFactory;
+            _logger = logger;
         }
 
         public async Task<SectionDetailDto?> Handle(GetSectionByCodeQuery request, CancellationToken cancellationToken)
@@ -86,6 +98,29 @@ namespace APITeamsV3.Application.UseCases.Sections
                 ? sectionJoinUrl
                 : latestSessionJoinUrl;
 
+            string? linkSharePoint = null;
+            if (team != null && !string.IsNullOrWhiteSpace(team.IdTeamsGroup))
+            {
+                try
+                {
+                    var graphClient = await _graphClientFactory.CreateClientAsync();
+                    var primaryChannel = await graphClient.Teams[team.IdTeamsGroup].PrimaryChannel.GetAsync(cancellationToken: cancellationToken);
+                    if (!string.IsNullOrWhiteSpace(primaryChannel?.Id))
+                    {
+                        var folder = await graphClient.Teams[team.IdTeamsGroup].Channels[primaryChannel.Id].FilesFolder.GetAsync(cancellationToken: cancellationToken);
+                        linkSharePoint = folder?.WebUrl;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "No se pudo resolver LinkSharePoint para IdSeccion={IdSeccion}, TeamId={TeamId}.",
+                        section.IdSeccion,
+                        team.IdTeamsGroup);
+                }
+            }
+
             // 4. Member Status Logic
             var memberIdentifiers = new HashSet<string>();
             if (team != null)
@@ -136,6 +171,18 @@ namespace APITeamsV3.Application.UseCases.Sections
                     ? section.EmailFacilitador
                     : $"{section.NombresFacilitador} ({section.EmailFacilitador})";
 
+            var promocionInfo = await _context.Database
+                .SqlQueryRaw<PromocionLookupRow>(
+                    "SELECT TOP(1) PromocionCodigo, PromocionNombre FROM Promocion WITH (NOLOCK) WHERE IdPromocion = {0}",
+                    section.IdPromocion)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            var promocionCodigo = !string.IsNullOrWhiteSpace(promocionInfo?.PromocionCodigo)
+                ? promocionInfo.PromocionCodigo
+                : section.IdPromocion.ToString();
+
+            var promocionNombre = promocionInfo?.PromocionNombre ?? string.Empty;
+
             var teamTeacher = team == null || string.IsNullOrWhiteSpace(team.Propietario3)
                 ? null
                 : team.Propietario3;
@@ -164,11 +211,14 @@ namespace APITeamsV3.Application.UseCases.Sections
                 TeacherReplacementStatus = teacherReplacementStatus,
                 Division = section.UnidadAcademicaNombre,
                 Programa = section.UnidadNegocioNombre,
+                PromocionCodigo = promocionCodigo,
+                PromocionNombre = promocionNombre,
                 Semestre = section.CodigoPeriodo,
                 UnidadNegocio = section.UnidadNegocioNombre,
                 FechaInicio = section.FechaInicio == default ? null : section.FechaInicio,
                 FechaFin = section.FechaFin == default ? null : section.FechaFin,
                 LinkGrabacion = linkGrabacion,
+                LinkSharePoint = linkSharePoint,
                 Members = students,
                 HasTeam = team != null,
                 EsTeams = eligibility.IsEligible,
@@ -204,6 +254,12 @@ namespace APITeamsV3.Application.UseCases.Sections
             var trimmed = value.Trim();
             var at = trimmed.IndexOf('@');
             return (at >= 0 ? trimmed.Substring(0, at) : trimmed).Trim().ToLowerInvariant();
+        }
+
+        private sealed class PromocionLookupRow
+        {
+            public string PromocionCodigo { get; set; } = string.Empty;
+            public string PromocionNombre { get; set; } = string.Empty;
         }
     }
 }

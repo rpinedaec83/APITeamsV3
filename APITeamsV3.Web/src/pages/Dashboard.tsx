@@ -270,12 +270,14 @@ const useStyles = makeStyles({
             right: 0,
             bottom: 0,
             background: 'linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.2) 50%, rgba(255,255,255,0) 100%)',
-            animation: 'shimmer 2s infinite linear',
+            animationDuration: '2s',
+            animationIterationCount: 'infinite',
+            animationTimingFunction: 'linear',
+            animationName: {
+                from: { transform: 'translateX(-100%)' },
+                to: { transform: 'translateX(100%)' },
+            },
         }
-    },
-    '@keyframes shimmer': {
-        '0%': { transform: 'translateX(-100%)' },
-        '100%': { transform: 'translateX(100%)' },
     },
     insightList: {
         display: 'flex',
@@ -376,6 +378,7 @@ const smallBoxColors = {
 };
 
 const Dashboard: React.FC = () => {
+    const REFRESH_INTERVAL_MS = 180000;
     const { accounts } = useMsal();
     const api = useApiClient();
     const styles = useStyles();
@@ -388,12 +391,40 @@ const Dashboard: React.FC = () => {
     const [selectedUnidad, setSelectedUnidad] = useState('all');
     const [selectedPrograma, setSelectedPrograma] = useState('all');
     const [selectedCoverage, setSelectedCoverage] = useState('all');
+    const [ultimaActualizacion, setUltimaActualizacion] = useState<Date | null>(null);
+    const [proximaActualizacion, setProximaActualizacion] = useState<Date | null>(null);
 
     useEffect(() => {
-        api.get('/reports/dashboard-summary')
-            .then(res => setSummary(res.data as DashboardSummary))
-            .catch(err => console.error(err))
-            .finally(() => setLoading(false));
+        let mounted = true;
+
+        const loadSummary = async (isInitialLoad: boolean) => {
+            try {
+                const res = await api.get('/reports/dashboard-summary');
+                if (mounted) {
+                    setSummary(res.data as DashboardSummary);
+                    const now = new Date();
+                    setUltimaActualizacion(now);
+                    setProximaActualizacion(new Date(now.getTime() + REFRESH_INTERVAL_MS));
+                }
+            } catch (err) {
+                console.error(err);
+            } finally {
+                if (isInitialLoad && mounted) {
+                    setLoading(false);
+                }
+            }
+        };
+
+        void loadSummary(true);
+
+        const interval = window.setInterval(() => {
+            void loadSummary(false);
+        }, REFRESH_INTERVAL_MS);
+
+        return () => {
+            mounted = false;
+            window.clearInterval(interval);
+        };
     }, [api]);
 
     const rows = summary?.rows ?? [];
@@ -487,6 +518,19 @@ const Dashboard: React.FC = () => {
         </div>
     );
 
+    const formatRefreshTime = (value: Date | null) => {
+        if (!value) return '-';
+        return new Intl.DateTimeFormat('es-PE', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: true,
+        }).format(value);
+    };
+
     return (
         <div className={styles.root}>
             <div className={styles.hero}>
@@ -514,6 +558,14 @@ const Dashboard: React.FC = () => {
                             {summary?.timeZoneId ? (
                                 <Badge appearance="filled">TZ: {summary.timeZoneId}</Badge>
                             ) : null}
+                        </div>
+                        <div style={{ display: 'flex', gap: '18px', flexWrap: 'wrap' }}>
+                            <Text size={200} style={{ color: 'rgba(255,255,255,0.78)' }}>
+                                Ultima actualizacion: <b>{formatRefreshTime(ultimaActualizacion)}</b>
+                            </Text>
+                            <Text size={200} style={{ color: 'rgba(255,255,255,0.78)' }}>
+                                Proxima actualizacion: <b>{formatRefreshTime(proximaActualizacion)}</b>
+                            </Text>
                         </div>
                         <div className={styles.heroMetricRow}>
                             <div className={styles.heroMetric}>

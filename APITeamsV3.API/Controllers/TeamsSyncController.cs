@@ -1,9 +1,17 @@
 using APITeamsV3.Application.UseCases.Teams.Commands;
 using APITeamsV3.Application.UseCases.Teams.DTOs;
+using APITeamsV3.Application.Common.Interfaces;
 using MediatR;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Data.SqlClient;
 using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
+using System;
+using System.Security.Claims;
+using Microsoft.Extensions.Logging;
 
 namespace APITeamsV3.API.Controllers
 {
@@ -13,10 +21,20 @@ namespace APITeamsV3.API.Controllers
     public class TeamsSyncController : ControllerBase
     {
         private readonly IMediator _mediator;
+        private readonly ITenantProvider _tenantProvider;
+        private readonly ICentralDbContext _centralDbContext;
+        private readonly ILogger<TeamsSyncController> _logger;
 
-        public TeamsSyncController(IMediator mediator)
+        public TeamsSyncController(
+            IMediator mediator,
+            ITenantProvider tenantProvider,
+            ICentralDbContext centralDbContext,
+            ILogger<TeamsSyncController> logger)
         {
             _mediator = mediator;
+            _tenantProvider = tenantProvider;
+            _centralDbContext = centralDbContext;
+            _logger = logger;
         }
 
         /// <summary>
@@ -80,38 +98,126 @@ namespace APITeamsV3.API.Controllers
         {
             // Opcionalmente se puede devolver Accepted() y encolar, pero para simplificar
             // se ejecuta síncrono si no toma mucho o se delega.
-            var result = await _mediator.Send(new SyncSectionTeamCommand(idSeccion, companyKey));
-            return Ok(result);
+            var executedByName = GetManualExecutorName();
+            _logger.LogInformation(
+                "ManualSyncRequest Action={Action} SectionId={SectionId} CompanyKey={CompanyKey} ExecutedByName={ExecutedByName}",
+                "SyncSectionTeam",
+                idSeccion,
+                companyKey,
+                executedByName);
+
+            var startedAtUtc = DateTime.UtcNow;
+            var success = false;
+            try
+            {
+                var result = await _mediator.Send(new SyncSectionTeamCommand(idSeccion, companyKey));
+                success = result.Failure == 0;
+                return Ok(result);
+            }
+            finally
+            {
+                LogManualSyncFinished("SyncSectionTeam", executedByName, startedAtUtc, success);
+            }
         }
 
         [HttpPost("section/{idSeccion}/members")]
         public async Task<ActionResult<SyncSectionMembersResult>> SyncSectionMembers(int idSeccion, [FromQuery] string companyKey = "idat")
         {
-            var result = await _mediator.Send(new SyncSectionMembersCommand(idSeccion));
-            if (!result.Success)
-                return BadRequest(result);
-            return Ok(result);
+            var executedByName = GetManualExecutorName();
+            _logger.LogInformation(
+                "ManualSyncRequest Action={Action} SectionId={SectionId} CompanyKey={CompanyKey} ExecutedByName={ExecutedByName}",
+                "SyncSectionMembers",
+                idSeccion,
+                companyKey,
+                executedByName);
+
+            var startedAtUtc = DateTime.UtcNow;
+            var success = false;
+            try
+            {
+                var result = await _mediator.Send(new SyncSectionMembersCommand(idSeccion));
+                success = result.Success;
+                if (!result.Success)
+                    return BadRequest(result);
+                return Ok(result);
+            }
+            finally
+            {
+                LogManualSyncFinished("SyncSectionMembers", executedByName, startedAtUtc, success);
+            }
         }
 
         [HttpPost("student/{codigoAlumno}")]
         public async Task<IActionResult> SyncStudentTeams(string codigoAlumno)
         {
-            var jobIds = await _mediator.Send(new SyncStudentTeamsCommand(codigoAlumno));
-            return Accepted(new { Message = "Jobs encolados para el alumno", JobIds = jobIds });
+            var executedByName = GetManualExecutorName();
+            _logger.LogInformation(
+                "ManualSyncRequest Action={Action} StudentCode={StudentCode} ExecutedByName={ExecutedByName}",
+                "SyncStudentTeams",
+                codigoAlumno,
+                executedByName);
+
+            var startedAtUtc = DateTime.UtcNow;
+            var success = false;
+            try
+            {
+                var jobIds = await _mediator.Send(new SyncStudentTeamsCommand(codigoAlumno));
+                success = true;
+                return Accepted(new { Message = "Jobs encolados para el alumno", JobIds = jobIds });
+            }
+            finally
+            {
+                LogManualSyncFinished("SyncStudentTeams", executedByName, startedAtUtc, success);
+            }
         }
 
         [HttpPost("verify/{idSeccion}")]
         public async Task<IActionResult> VerifyTeamState(int idSeccion)
         {
-            var result = await _mediator.Send(new VerifyTeamStateCommand(idSeccion));
-            return Ok(result);
+            var executedByName = GetManualExecutorName();
+            _logger.LogInformation(
+                "ManualSyncRequest Action={Action} SectionId={SectionId} ExecutedByName={ExecutedByName}",
+                "VerifyTeamState",
+                idSeccion,
+                executedByName);
+
+            var startedAtUtc = DateTime.UtcNow;
+            var success = false;
+            try
+            {
+                var result = await _mediator.Send(new VerifyTeamStateCommand(idSeccion));
+                success = result.IsValid;
+                return Ok(result);
+            }
+            finally
+            {
+                LogManualSyncFinished("VerifyTeamState", executedByName, startedAtUtc, success);
+            }
         }
 
         [HttpPost("agenda/regenerate/{idSeccion}")]
         public async Task<IActionResult> RegenerateAgenda(int idSeccion, [FromQuery] string companyKey = "idat")
         {
-            var result = await _mediator.Send(new RegenerateAgendaCommand(idSeccion, companyKey));
-            return Ok(result);
+            var executedByName = GetManualExecutorName();
+            _logger.LogInformation(
+                "ManualSyncRequest Action={Action} SectionId={SectionId} CompanyKey={CompanyKey} ExecutedByName={ExecutedByName}",
+                "RegenerateAgenda",
+                idSeccion,
+                companyKey,
+                executedByName);
+
+            var startedAtUtc = DateTime.UtcNow;
+            var success = false;
+            try
+            {
+                var result = await _mediator.Send(new RegenerateAgendaCommand(idSeccion, companyKey));
+                success = result.IsValid;
+                return Ok(result);
+            }
+            finally
+            {
+                LogManualSyncFinished("RegenerateAgenda", executedByName, startedAtUtc, success);
+            }
         }
 
         /// <summary>
@@ -121,10 +227,161 @@ namespace APITeamsV3.API.Controllers
         [HttpPost("recreate/{idSeccion}")]
         public async Task<IActionResult> RecreateTeam(int idSeccion, [FromQuery] string companyKey = "idat")
         {
-            var result = await _mediator.Send(new RecreateTeamCommand(idSeccion, companyKey));
-            if (result.Success)
-                return Ok(result);
-            return BadRequest(result);
+            var executedByName = GetManualExecutorName();
+            _logger.LogInformation(
+                "ManualSyncRequest Action={Action} SectionId={SectionId} CompanyKey={CompanyKey} ExecutedByName={ExecutedByName}",
+                "RecreateTeam",
+                idSeccion,
+                companyKey,
+                executedByName);
+
+            var startedAtUtc = DateTime.UtcNow;
+            var success = false;
+            try
+            {
+                var result = await _mediator.Send(new RecreateTeamCommand(idSeccion, companyKey));
+                success = result.Success;
+                if (result.Success)
+                    return Ok(result);
+                return BadRequest(result);
+            }
+            finally
+            {
+                LogManualSyncFinished("RecreateTeam", executedByName, startedAtUtc, success);
+            }
+        }
+
+        [HttpGet("automatic-status")]
+        public async Task<IActionResult> GetAutomaticSyncStatus()
+        {
+            var tenant = _tenantProvider.GetCurrentTenant();
+            var normalizedCompanyKey = (tenant.CompanyKey ?? string.Empty).Trim().ToLowerInvariant();
+
+            if (string.IsNullOrWhiteSpace(normalizedCompanyKey))
+            {
+                return Ok(new { IsAutomaticSyncRunning = false });
+            }
+
+            var isRunning = await TryGetAutomaticSyncStatusFromStoredProcedureAsync(normalizedCompanyKey, HttpContext.RequestAborted);
+            if (isRunning.HasValue)
+            {
+                return Ok(new { IsAutomaticSyncRunning = isRunning.Value });
+            }
+
+            var fallback = await GetAutomaticSyncStatusWithEfAsync(normalizedCompanyKey, HttpContext.RequestAborted);
+            return Ok(new { IsAutomaticSyncRunning = fallback });
+        }
+
+        private string GetManualExecutorName()
+        {
+            var claims = User?.Claims;
+            if (claims == null)
+            {
+                return "desconocido";
+            }
+
+            return claims.FirstOrDefault(c => c.Type == "name")?.Value
+                   ?? claims.FirstOrDefault(c => c.Type == ClaimTypes.Name)?.Value
+                   ?? claims.FirstOrDefault(c => c.Type == "preferred_username")?.Value
+                   ?? claims.FirstOrDefault(c => c.Type == "upn")?.Value
+                   ?? claims.FirstOrDefault(c => c.Type == ClaimTypes.Email)?.Value
+                   ?? claims.FirstOrDefault(c => c.Type == "unique_name")?.Value
+                   ?? "desconocido";
+        }
+
+        private void LogManualSyncFinished(string action, string executedByName, DateTime startedAtUtc, bool success)
+        {
+            var finishedAtUtc = DateTime.UtcNow;
+            var durationMs = (long)(finishedAtUtc - startedAtUtc).TotalMilliseconds;
+
+            _logger.LogInformation(
+                "ManualSyncFinished Action={Action} ExecutedByName={ExecutedByName} Success={Success} StartedAtUtc={StartedAtUtc} FinishedAtUtc={FinishedAtUtc} DurationMs={DurationMs}",
+                action,
+                executedByName,
+                success,
+                startedAtUtc,
+                finishedAtUtc,
+                durationMs);
+        }
+
+        private async Task<bool?> TryGetAutomaticSyncStatusFromStoredProcedureAsync(string normalizedCompanyKey, CancellationToken cancellationToken)
+        {
+            if (_centralDbContext is not DbContext centralDb)
+            {
+                return null;
+            }
+
+            var provider = centralDb.Database.ProviderName ?? string.Empty;
+            if (!provider.Contains("SqlServer", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            await using var connection = centralDb.Database.GetDbConnection();
+            if (connection.State != System.Data.ConnectionState.Open)
+            {
+                await connection.OpenAsync(cancellationToken);
+            }
+
+            await using var command = connection.CreateCommand();
+            command.CommandType = System.Data.CommandType.StoredProcedure;
+            command.CommandText = "dbo.cTeamsAutomaticSyncStatus";
+
+            var param = command.CreateParameter();
+            param.ParameterName = "@CompanyKey";
+            param.Value = normalizedCompanyKey;
+            command.Parameters.Add(param);
+
+            try
+            {
+                var scalar = await command.ExecuteScalarAsync(cancellationToken);
+                if (scalar is null || scalar == DBNull.Value)
+                {
+                    return false;
+                }
+
+                return scalar switch
+                {
+                    bool flag => flag,
+                    byte b => b != 0,
+                    short s => s != 0,
+                    int i => i != 0,
+                    long l => l != 0,
+                    string text => text == "1" || text.Equals("true", StringComparison.OrdinalIgnoreCase),
+                    _ => Convert.ToBoolean(scalar)
+                };
+            }
+            catch (SqlException ex) when (ex.Number == 2812)
+            {
+                return null;
+            }
+        }
+
+        private async Task<bool> GetAutomaticSyncStatusWithEfAsync(string normalizedCompanyKey, CancellationToken cancellationToken)
+        {
+            var companyConfigId = await _centralDbContext.CompanyConfigs
+                .AsNoTracking()
+                .Where(c => c.IsActive && c.CompanyKey.ToLower() == normalizedCompanyKey)
+                .Select(c => c.Id)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (companyConfigId == 0)
+            {
+                return false;
+            }
+
+            return await _centralDbContext.SyncScheduleExecutions
+                .AsNoTracking()
+                .AnyAsync(
+                    e => e.CompanyConfigId == companyConfigId
+                         && string.Equals(e.TriggerSource, "SchedulerService", StringComparison.OrdinalIgnoreCase)
+                         && e.CompletedAtUtc == null
+                         && (
+                             string.Equals(e.Status, "Started", StringComparison.OrdinalIgnoreCase)
+                             || string.Equals(e.Status, "Processing", StringComparison.OrdinalIgnoreCase)
+                             || string.Equals(e.Status, "Running", StringComparison.OrdinalIgnoreCase)
+                         ),
+                    cancellationToken);
         }
     }
 }

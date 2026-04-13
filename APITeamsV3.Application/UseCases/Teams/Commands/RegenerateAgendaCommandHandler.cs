@@ -116,6 +116,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     .ToList();
 
                 var createdMeetings = new List<CreatedMeetingBlock>();
+                var failedBlocks = new List<string>();
                 var hasMultipleBlocks = groupedSchedules.Count > 1;
 
                 foreach (var scheduleBlock in groupedSchedules)
@@ -184,48 +185,66 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     var subject = BuildSubject(sectionInfo, scheduleBlock.Key.Inicio, scheduleBlock.Key.Fin, hasMultipleBlocks);
                     var htmlContent = BuildContent(sectionInfo, scheduleBlock.Key.Inicio, scheduleBlock.Key.Fin);
 
-                    var meeting = await _agendaService.CreateRecurringChannelMeetingAsync(
-                        new TeamsMeetingRequest
+                    var blockLabel = $"{FormatHour(scheduleBlock.Key.Inicio)}-{FormatHour(scheduleBlock.Key.Fin)}";
+                    try
+                    {
+                        var meeting = await _agendaService.CreateRecurringChannelMeetingAsync(
+                            new TeamsMeetingRequest
+                            {
+                                TeamId = team.IdTeamsGroup,
+                                ChannelId = channelId,
+                                Subject = subject,
+                                HtmlContent = htmlContent,
+                                FirstOccurrenceStart = firstStart,
+                                FirstOccurrenceEnd = firstEnd,
+                                RecurrenceStartDate = firstOccurrenceDate,
+                                RecurrenceEndDate = courseEndDate,
+                                RecurrenceDays = recurrenceDays,
+                                RequiredAttendeeEmails = attendeeEmails,
+                                PresenterEmails = teacherEmails
+                            },
+                            cancellationToken);
+
+                        if (string.IsNullOrWhiteSpace(meeting.EventId))
                         {
-                            TeamId = team.IdTeamsGroup,
-                            ChannelId = channelId,
-                            Subject = subject,
-                            HtmlContent = htmlContent,
-                            FirstOccurrenceStart = firstStart,
-                            FirstOccurrenceEnd = firstEnd,
-                            RecurrenceStartDate = firstOccurrenceDate,
-                            RecurrenceEndDate = courseEndDate,
-                            RecurrenceDays = recurrenceDays,
-                            RequiredAttendeeEmails = attendeeEmails,
-                            PresenterEmails = teacherEmails
-                        },
-                        cancellationToken);
+                            throw new InvalidOperationException($"Graph no devolvio IdEvento para bloque {blockLabel}.");
+                        }
 
-                    if (string.IsNullOrWhiteSpace(meeting.EventId))
-                    {
-                        throw new InvalidOperationException($"Graph no devolvio IdEvento para bloque {FormatHour(scheduleBlock.Key.Inicio)}-{FormatHour(scheduleBlock.Key.Fin)}.");
+                        createdMeetings.Add(new CreatedMeetingBlock
+                        {
+                            EventId = meeting.EventId,
+                            JoinUrl = meeting.JoinUrl ?? string.Empty,
+                            Sessions = blockSessions
+                        });
+
+                        await LogOperativoAsync(
+                            "Info",
+                            "Agenda",
+                            meeting.EventId,
+                            $"Agenda recurrente creada para bloque {blockLabel} con {blockSessions.Count} sesiones.",
+                            request.JobId);
                     }
-
-                    createdMeetings.Add(new CreatedMeetingBlock
+                    catch (Exception ex)
                     {
-                        EventId = meeting.EventId,
-                        JoinUrl = meeting.JoinUrl ?? string.Empty,
-                        Sessions = blockSessions
-                    });
-
-                    await LogOperativoAsync(
-                        "Info",
-                        "Agenda",
-                        meeting.EventId,
-                        $"Agenda recurrente creada para bloque {FormatHour(scheduleBlock.Key.Inicio)}-{FormatHour(scheduleBlock.Key.Fin)} con {blockSessions.Count} sesiones.",
-                        request.JobId);
+                        failedBlocks.Add(blockLabel);
+                        _logger.LogWarning(ex, "Failed creating recurring agenda block {BlockLabel} for section {SectionId}", blockLabel, request.IdSeccion);
+                        await LogOperativoAsync(
+                            "Warning",
+                            "Agenda",
+                            request.IdSeccion.ToString(),
+                            $"Fallo creando bloque {blockLabel}.",
+                            request.JobId,
+                            ex.Message);
+                    }
                 }
 
                 if (createdMeetings.Count == 0)
                 {
-                    await LogOperativoAsync("Warning", "Agenda", request.IdSeccion.ToString(), "No hay ocurrencias pendientes dentro del rango del curso para generar agendas.", request.JobId);
                     result.IsValid = false;
-                    result.Summary = "No hay ocurrencias pendientes dentro del rango del curso para generar agendas.";
+                    result.Summary = failedBlocks.Count > 0
+                        ? $"Agenda regenerada: 0 exitosas, {failedBlocks.Count} fallidas. Bloques fallidos: {string.Join(", ", failedBlocks.Distinct(StringComparer.OrdinalIgnoreCase))}."
+                        : "No hay ocurrencias pendientes dentro del rango del curso para generar agendas.";
+                    await LogOperativoAsync("Warning", "Agenda", request.IdSeccion.ToString(), result.Summary, request.JobId);
                     return result;
                 }
 
@@ -242,15 +261,31 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                 await UpdateSeccionHorarioLinkAsync(request.IdSeccion, createdMeetings, cancellationToken);
 
                 var totalRows = createdMeetings.Sum(m => m.Sessions.Count * Math.Max(1, activeStudents.Count));
+                var failedDistinct = failedBlocks.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                var failedCount = failedDistinct.Count;
+                var failedDetails = failedCount > 0
+                    ? $" Bloques fallidos: {string.Join(", ", failedDistinct)}."
+                    : string.Empty;
+
+                result.IsValid = failedCount == 0;
+                result.Summary = $"Agenda regenerada: {createdMeetings.Count} exitosas, {failedCount} fallidas.{failedDetails}";
+
+                _logger.LogInformation(
+                    "RegenerateAgendaResult SectionId={SectionId} TeamId={TeamId} AgendasRegeneradas={SucceededCount} AgendasFallidas={FailedCount} FailedBlocks={FailedBlocks} SesionesEvaluadas={SessionsCount} TeamsHorariosRows={RowsCount}",
+                    request.IdSeccion,
+                    team.IdTeamsGroup,
+                    createdMeetings.Count,
+                    failedCount,
+                    failedCount > 0 ? string.Join(", ", failedDistinct) : "none",
+                    futureSessions.Count,
+                    totalRows);
+
                 await LogOperativoAsync(
-                    "Success",
+                    result.IsValid ? "Success" : "Warning",
                     "Agenda",
                     team.IdTeamsGroup,
-                    $"Agenda regenerada: {createdMeetings.Count} bloques, {futureSessions.Count} sesiones, {totalRows} filas TeamsHorarios.",
+                    $"{result.Summary} Sesiones evaluadas: {futureSessions.Count}. Filas TeamsHorarios: {totalRows}.",
                     request.JobId);
-
-                result.IsValid = true;
-                result.Summary = $"Agenda regenerada: {createdMeetings.Count} bloques recurrentes creados.";
             }
             catch (Exception ex)
             {

@@ -23,11 +23,14 @@ namespace APITeamsV3.Application.UseCases.Sections
         public string? TeacherReplacementStatus { get; set; }
         public string Division { get; set; } = string.Empty;
         public string Programa { get; set; } = string.Empty;
+        public string PromocionCodigo { get; set; } = string.Empty;
+        public string PromocionNombre { get; set; } = string.Empty;
         public string Semestre { get; set; } = string.Empty;
         public string UnidadNegocio { get; set; } = string.Empty;
         public DateTime? FechaInicio { get; set; }
         public DateTime? FechaFin { get; set; }
         public string? LinkGrabacion { get; set; }
+        public string? LinkSharePoint { get; set; }
         public List<StudentSummaryDto> Members { get; set; } = new();
         public bool HasTeam { get; set; }
         public bool EsTeams { get; set; }

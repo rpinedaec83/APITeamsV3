@@ -1,6 +1,6 @@
 
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { useEffect, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import Dashboard from './pages/Dashboard';
 import CompanyConfigsPage from './pages/CompanyConfigsPage';
 import OperationsPage from './pages/OperationsPage';
@@ -20,6 +20,8 @@ import RequiredRoleRoute from "./components/RequiredRoleRoute";
 import type { IPublicClientApplication } from "@azure/msal-browser";
 import NoAccessPage from './pages/NoAccessPage';
 import { AUTH_INTERACTION_REQUIRED_EVENT } from './hooks/useApiClient';
+import MaintenancePage from './pages/MaintenancePage';
+import { MAINTENANCE_REQUIRED_EVENT, getMaintenanceMessage } from './utils/maintenance';
 
 interface AppProps {
   spaConfig: SpaBootstrapConfig;
@@ -31,6 +33,7 @@ function AuthenticatedApp() {
   const account = accounts[0];
   const roles = (account?.idTokenClaims?.roles as string[]) || [];
   const loginRedirectPendingRef = useRef(false);
+  const [maintenanceMessage, setMaintenanceMessage] = React.useState<string | null>(null);
 
   useEffect(() => {
     if (inProgress === InteractionStatus.None) {
@@ -66,6 +69,18 @@ function AuthenticatedApp() {
     };
   }, [instance, inProgress]);
 
+  useEffect(() => {
+    const handleMaintenanceRequired = (event: Event) => {
+      const customEvent = event as CustomEvent<{ message?: string }>;
+      setMaintenanceMessage(getMaintenanceMessage(customEvent.detail?.message));
+    };
+
+    window.addEventListener(MAINTENANCE_REQUIRED_EVENT, handleMaintenanceRequired);
+    return () => {
+      window.removeEventListener(MAINTENANCE_REQUIRED_EVENT, handleMaintenanceRequired);
+    };
+  }, []);
+
   // If user has no roles, show the restricted access page (no sidebar)
   if (roles.length === 0) {
     return (
@@ -75,6 +90,10 @@ function AuthenticatedApp() {
         </Routes>
       </Router>
     );
+  }
+
+  if (maintenanceMessage) {
+    return <MaintenancePage message={maintenanceMessage} />;
   }
 
   return (

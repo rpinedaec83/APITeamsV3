@@ -23,9 +23,16 @@ namespace APITeamsV3.Infrastructure.Services
         {
             _logger = logger;
 
-            var configuredKey =
-                configuration["EncryptionKey"] ??
-                Environment.GetEnvironmentVariable("APITEAMSV3_ENCRYPTION_KEY");
+            var configuredKeyFromSettings = configuration["EncryptionKey"];
+            var configuredKeyFromEnvironment = Environment.GetEnvironmentVariable("APITEAMSV3_ENCRYPTION_KEY");
+            var keySource = "Configuration:EncryptionKey";
+
+            var configuredKey = configuredKeyFromSettings;
+            if (string.IsNullOrWhiteSpace(configuredKey))
+            {
+                configuredKey = configuredKeyFromEnvironment;
+                keySource = "Environment:APITEAMSV3_ENCRYPTION_KEY";
+            }
 
             if (string.IsNullOrWhiteSpace(configuredKey))
             {
@@ -35,12 +42,14 @@ namespace APITeamsV3.Infrastructure.Services
                 }
 
                 configuredKey = DevelopmentFallbackKey;
+                keySource = "DevelopmentFallback";
                 _logger.LogWarning("Using development fallback encryption key. Configure EncryptionKey before deploying.");
             }
 
             _key = NormalizeKey(configuredKey);
             _decryptKeyCandidates = BuildDecryptKeyCandidates(configuredKey, _key);
             _preferredDecryptKeyIndex = 0;
+
         }
 
         public string Encrypt(string plainText)
@@ -242,6 +251,13 @@ namespace APITeamsV3.Infrastructure.Services
             {
                 return false;
             }
+        }
+
+        private static string ComputeFingerprint(byte[] key)
+        {
+            using var sha = SHA256.Create();
+            var hash = sha.ComputeHash(key);
+            return Convert.ToHexString(hash[..6]);
         }
     }
 }

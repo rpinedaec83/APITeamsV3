@@ -20,6 +20,7 @@ import {
     tokens,
     Avatar,
     Badge,
+    Spinner,
 } from '@fluentui/react-components';
 import {
     SearchRegular,
@@ -35,8 +36,9 @@ import {
     TriangleDownRegular,
     CopyRegular,
 } from '@fluentui/react-icons';
+import { useMsal } from '@azure/msal-react';
 import { useApiClient } from '../hooks/useApiClient';
-import { showSuccess, showError, showConfirm } from '../utils/alerts';
+import { showSuccess, showError, showConfirm, showWarning } from '../utils/alerts';
 import Swal from 'sweetalert2';
 
 interface Member {
@@ -52,6 +54,8 @@ interface SectionData {
     division: string;
     curso: string;
     programa: string;
+    promocionCodigo?: string | null;
+    promocionNombre?: string | null;
     semestre: string;
     profesor?: string; // Optional/Nullable in API
     teamTeacher?: string | null;
@@ -61,6 +65,7 @@ interface SectionData {
     fechaInicio?: string | null;
     fechaFin?: string | null;
     linkGrabacion?: string | null;
+    linkSharePoint?: string | null;
     hasTeam: boolean;
     esTeams: boolean; // Added to enforce academic flag check
     ineligibilityReason?: string;
@@ -194,6 +199,24 @@ const useStyles = makeStyles({
     statusBadge: {
         textTransform: 'capitalize',
     },
+    loadingOverlay: {
+        position: 'fixed',
+        top: 0,
+        right: 0,
+        bottom: 0,
+        left: 0,
+        backgroundColor: 'rgba(255, 255, 255, 0.75)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 9999,
+    },
+    loadingOverlayContent: {
+        backgroundColor: tokens.colorNeutralBackground1,
+        ...shorthands.padding('20px', '24px'),
+        ...shorthands.borderRadius(tokens.borderRadiusLarge),
+        boxShadow: tokens.shadow16,
+    },
 });
 
 const formatDisplayDate = (value?: string | null) => {
@@ -236,6 +259,8 @@ const copyTextToClipboard = async (text: string) => {
 const OperationsPage: React.FC = () => {
     const styles = useStyles();
     const apiClient = useApiClient();
+    const { accounts } = useMsal();
+    const recreateProvisioningWaitMs = 5 * 60 * 1000;
 
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
@@ -247,6 +272,7 @@ const OperationsPage: React.FC = () => {
     // Form State (Seccion)
     const [seccionCodigo, setSeccionCodigo] = useState('');
     const [seccionData, setSeccionData] = useState<SectionData | null>(null);
+    const [recentRecreate, setRecentRecreate] = useState<{ idSeccion: number; at: number } | null>(null);
 
     // Form State (Alumno)
     const [alumnoCodigo, setAlumnoCodigo] = useState('');
@@ -352,6 +378,43 @@ const OperationsPage: React.FC = () => {
     };
 
     const getCompanyKey = () => window.location.hostname.includes('zegel') ? 'zegel' : 'idat';
+    const roles = (accounts[0]?.idTokenClaims?.roles as string[]) || [];
+    const canUseAdminItTeamActions = roles.includes('ADMIN') || roles.includes('IT');
+
+    const ensureCanUseAdminItTeamActions = async () => {
+        if (canUseAdminItTeamActions) {
+            return true;
+        }
+
+        await showWarning('Esta acción está disponible solo para ADMIN o IT');
+        return false;
+    };
+
+    const ensureAutomaticSyncNotRunning = async () => {
+        try {
+            const response = await apiClient.get('/sync/automatic-status');
+            const isRunning = Boolean(
+                response.data?.isAutomaticSyncRunning ??
+                response.data?.IsAutomaticSyncRunning ??
+                false
+            );
+
+            if (isRunning) {
+                await showWarning('Se está ejecutando la sincronización automática');
+                return false;
+            }
+        } catch {
+            // If status cannot be verified, do not block manual operation.
+        }
+
+        return true;
+    };
+
+    const showProvisioningCompleted = async (summary?: string) => {
+        const baseMessage = 'El proceso de aprovisionamiento ha finalizado. Puede continuar con las siguientes acciones.';
+        const message = summary?.trim() ? `${baseMessage} ${summary.trim()}` : baseMessage;
+        await showSuccess(message, 'Aprovisionamiento finalizado');
+    };
 
     const handleProvisionTeam = async () => {
         if (!seccionData?.idSeccion) return;
@@ -375,6 +438,22 @@ const OperationsPage: React.FC = () => {
 
     const handleRefreshMembers = async () => {
         if (!seccionData?.idSeccion) return;
+        if (!await ensureCanUseAdminItTeamActions()) return;
+        if (!await ensureAutomaticSyncNotRunning()) return;
+        if (false && (
+            recentRecreate?.idSeccion === seccionData?.idSeccion &&
+            (Date.now() - (recentRecreate?.at ?? 0)) < recreateProvisioningWaitMs
+        )) {
+            await showWarning('El Team aún se está aprovisionando en Microsoft 365, intente en unos 5 minutos volver a dar clic en el botón ‘Regenerar agenda’.');
+            return;
+        }
+        if (false && (
+            recentRecreate?.idSeccion === seccionData?.idSeccion &&
+            (Date.now() - (recentRecreate?.at ?? 0)) < recreateProvisioningWaitMs
+        )) {
+            await showWarning('El Team aún se está aprovisionando en Microsoft 365, intente en unos 5 minutos volver a dar clic en el botón ‘Regenerar agenda’.');
+            return;
+        }
         const result = await showConfirm('¿Estás seguro de refrescar alumnos y facilitadores para esta sección?');
         if (!result.isConfirmed) return;
 
@@ -399,13 +478,19 @@ const OperationsPage: React.FC = () => {
             const response = await apiClient.post(`/sync/verify/${seccionData.idSeccion}`);
             const result = response.data;
             if (result.isValid) {
-                showSuccess(result.summary, 'Verificación OK');
+                await showSuccess(
+                    result.summary || 'Se valido el Team y la informacion local quedo sincronizada.',
+                    'Validacion de Team completada'
+                );
             } else {
-                showError(result.summary, 'Inconsistencias halladas');
+                await showWarning(
+                    result.summary || 'Se detecto una inconsistencia durante la validacion del Team.',
+                    'Inconsistencia detectada'
+                );
             }
             await handleSearchSeccion();
         } catch (err: unknown) {
-            showError('Error al verificar equipo.');
+            await showError('Error al validar el estado del Team.');
         } finally {
             setLoading(false);
         }
@@ -413,8 +498,17 @@ const OperationsPage: React.FC = () => {
 
     const handleRegenerateAgenda = async () => {
         if (!seccionData?.idSeccion) return;
+        if (!await ensureCanUseAdminItTeamActions()) return;
+        if (!await ensureAutomaticSyncNotRunning()) return;
         const confirmResult = await showConfirm('Esto invalidará las reuniones pasadas y creará una nueva reunión de canal. ¿Proceder?');
         if (!confirmResult.isConfirmed) return;
+        if (
+            recentRecreate?.idSeccion === seccionData.idSeccion &&
+            (Date.now() - recentRecreate.at) < recreateProvisioningWaitMs
+        ) {
+            await showWarning('El Team aun se esta aprovisionando en Microsoft 365, intente en unos 5 minutos volver a dar clic en el boton "Regenerar agenda".');
+            return;
+        }
         setLoading(true);
         try {
             const companyKey = getCompanyKey();
@@ -429,6 +523,8 @@ const OperationsPage: React.FC = () => {
 
     const handleRecreateTeam = async () => {
         if (!seccionData?.idSeccion) return;
+        if (!await ensureCanUseAdminItTeamActions()) return;
+        if (!await ensureAutomaticSyncNotRunning()) return;
 
         // Step 1: Initial warning
         const step1 = await Swal.fire({
@@ -471,17 +567,24 @@ const OperationsPage: React.FC = () => {
         });
         if (!step2.isConfirmed) return;
 
+        let provisioningCompleted = false;
         setLoading(true);
         try {
             const companyKey = getCompanyKey();
             const response = await apiClient.post(`/sync/recreate/${seccionData.idSeccion}?companyKey=${companyKey}`);
             showSuccess(response.data.summary, 'Equipo recreado');
             await handleSearchSeccion();
+            setRecentRecreate({ idSeccion: seccionData.idSeccion, at: Date.now() });
+            provisioningCompleted = true;
         } catch (err: unknown) {
             const errorMessage = err instanceof Error ? err.message : 'Error al recrear equipo.';
             showError(errorMessage);
         } finally {
             setLoading(false);
+        }
+
+        if (provisioningCompleted) {
+            await showProvisioningCompleted();
         }
     };
 
@@ -521,7 +624,7 @@ const OperationsPage: React.FC = () => {
                 ['Docente a Reemplazar', seccionData.replacementTeacher || 'N/A'],
                 ['Estado Docente', seccionData.teacherReplacementStatus || 'N/A'],
                 ['Unidad Negocio', seccionData.unidadNegocio],
-                ['Link de grabación', seccionData.linkGrabacion || 'N/A'],
+                ['Link de clases', seccionData.linkGrabacion || 'N/A'],
                 [''],
                 ['LISTADO DE ALUMNOS'],
                 ['#', 'Código', 'Nombre', 'Estado']
@@ -583,19 +686,34 @@ const OperationsPage: React.FC = () => {
         }
     };
 
-    const handleCopyLinkGrabacion = async (link?: string | null) => {
+    const handleCopyLinkGrabacion = async (link?: string | null, source: 'class' | 'sharepoint' = 'class') => {
         if (!link) return;
 
         try {
             await copyTextToClipboard(link);
-            showSuccess('El link de grabación fue copiado al portapapeles.', 'Link copiado');
+            if (source === 'sharepoint') {
+                showSuccess('El link de SharePoint fue copiado al portapapeles.', 'Link copiado');
+            } else {
+                showSuccess('El link de clases fue copiado al portapapeles.', 'Link copiado');
+            }
         } catch {
-            showError('No se pudo copiar el link de grabación.');
+            if (source === 'sharepoint') {
+                showError('No se pudo copiar el link de SharePoint.');
+            } else {
+                showError('No se pudo copiar el link de clases.');
+            }
         }
     };
 
     return (
         <div className={styles.root}>
+            {loading && (
+                <div className={styles.loadingOverlay}>
+                    <div className={styles.loadingOverlayContent}>
+                        <Spinner label="Procesando..." labelPosition="below" size="extra-large" />
+                    </div>
+                </div>
+            )}
             <div className={styles.header}>
                 <div className={styles.headerTitle}>
                     <Avatar color="brand" icon={<GridDotsRegular />} size={48} />
@@ -645,7 +763,7 @@ const OperationsPage: React.FC = () => {
                                 {loading ? 'Buscando...' : 'Buscar'}
                             </Button>
                             <Button icon={<CheckmarkRegular />} size="large" onClick={handleVerifyTeam} disabled={loading || !seccionData}>
-                                Verificar Estado
+                                Validar estado del Team
                             </Button>
                         </div>
 
@@ -663,6 +781,8 @@ const OperationsPage: React.FC = () => {
                                 <DetailItem label="División" value={seccionData.division} />
                                 <DetailItem label="Curso" value={seccionData.curso} />
                                 <DetailItem label="Programa" value={seccionData.programa} />
+                                <DetailItem label="Promoción código" value={seccionData.promocionCodigo || 'N/A'} />
+                                <DetailItem label="Promoción nombre" value={seccionData.promocionNombre || 'N/A'} />
                                 <DetailItem label="Semestre" value={seccionData.semestre} />
                                 <DetailItem label="Inicio del Curso" value={formatDisplayDate(seccionData.fechaInicio)} />
                                 <DetailItem label="Fin del Curso" value={formatDisplayDate(seccionData.fechaFin)} />
@@ -672,8 +792,9 @@ const OperationsPage: React.FC = () => {
                                 <DetailItem label="Estado Docente" value={seccionData.teacherReplacementStatus || 'N/A'} />
                                 <DetailItem label="Unidad Negocio" value={seccionData.unidadNegocio} />
                                 <CopyDetailItem
-                                    label="Link de Grabación"
+                                    label="Link de clases"
                                     value={seccionData.linkGrabacion}
+                                    sharePointUrl={seccionData.linkSharePoint}
                                     onCopy={handleCopyLinkGrabacion}
                                 />
                             </div>
@@ -688,12 +809,27 @@ const OperationsPage: React.FC = () => {
                                             <Title3>Equipo Activo</Title3>
                                         </div>
                                         <span style={{ flex: 1 }}></span>
-                                        <Button icon={<SaveRegular />} onClick={handleRefreshMembers} disabled={loading}>Refrescar Miembros</Button>
-                                        <Button icon={<CalendarRegular />} onClick={handleRegenerateAgenda} disabled={loading}>Regenerar Agendas</Button>
+                                        <Button
+                                            icon={<SaveRegular />}
+                                            onClick={handleRefreshMembers}
+                                            disabled={loading || !canUseAdminItTeamActions}
+                                            title={!canUseAdminItTeamActions ? 'Disponible solo para ADMIN o IT' : undefined}
+                                        >
+                                            Refrescar Miembros
+                                        </Button>
+                                        <Button
+                                            icon={<CalendarRegular />}
+                                            onClick={handleRegenerateAgenda}
+                                            disabled={loading || !canUseAdminItTeamActions}
+                                            title={!canUseAdminItTeamActions ? 'Disponible solo para ADMIN o IT' : undefined}
+                                        >
+                                            Regenerar Agendas
+                                        </Button>
                                         <Button
                                             icon={<ArrowSyncRegular />}
                                             onClick={handleRecreateTeam}
-                                            disabled={loading}
+                                            disabled={loading || !canUseAdminItTeamActions}
+                                            title={!canUseAdminItTeamActions ? 'Disponible solo para ADMIN o IT' : undefined}
                                             style={{ color: tokens.colorPaletteRedForeground1, borderColor: tokens.colorPaletteRedBorderActive }}
                                         >
                                             Recrear Equipo
@@ -966,21 +1102,37 @@ const DetailItem: React.FC<{ label: string; value?: string | null }> = ({ label,
     );
 }
 
-const CopyDetailItem: React.FC<{ label: string; value?: string | null; onCopy: (value?: string | null) => void }> = ({ label, value, onCopy }) => {
+const CopyDetailItem: React.FC<{
+    label: string;
+    value?: string | null;
+    sharePointUrl?: string | null;
+    onCopy: (value?: string | null, source?: 'class' | 'sharepoint') => void
+}> = ({ label, value, sharePointUrl, onCopy }) => {
     const styles = useStyles();
     if (!value || value === 'N/A') return null;
 
     return (
         <div className={styles.detailItem}>
             <span className={styles.detailLabel}>{label}</span>
-            <Button
-                appearance="primary"
-                icon={<CopyRegular />}
-                onClick={() => void onCopy(value)}
-                style={{ width: 'fit-content' }}
-            >
-                Copiar link
-            </Button>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <Button
+                    appearance="primary"
+                    icon={<CopyRegular />}
+                    onClick={() => void onCopy(value, 'class')}
+                    style={{ width: 'fit-content' }}
+                >
+                    Copiar link
+                </Button>
+                <Button
+                    appearance="secondary"
+                    icon={<ArrowUploadRegular />}
+                    onClick={() => void onCopy(sharePointUrl, 'sharepoint')}
+                    disabled={!sharePointUrl}
+                    style={{ width: 'fit-content' }}
+                >
+                    Ir a SharePoint
+                </Button>
+            </div>
         </div>
     );
 }

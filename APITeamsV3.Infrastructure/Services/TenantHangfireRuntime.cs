@@ -86,6 +86,23 @@ namespace APITeamsV3.Infrastructure.Services
             throw new InvalidOperationException($"No Hangfire storage is configured for tenant '{companyKey}'.");
         }
 
+        public async Task<string> GetSqlConnectionStringAsync(string companyKey, CancellationToken cancellationToken = default)
+        {
+            if (TryGetEntry(companyKey, out var entry))
+            {
+                return entry.ConnectionString;
+            }
+
+            await RefreshAsync(cancellationToken);
+
+            if (TryGetEntry(companyKey, out entry))
+            {
+                return entry.ConnectionString;
+            }
+
+            throw new InvalidOperationException($"No Hangfire SQL connection is configured for tenant '{companyKey}'.");
+        }
+
         public async Task<IReadOnlyList<TenantHangfireDashboardRegistration>> GetDashboardRegistrationsAsync(CancellationToken cancellationToken = default)
         {
             await RefreshAsync(cancellationToken);
@@ -233,6 +250,22 @@ namespace APITeamsV3.Infrastructure.Services
             }
 
             storage = null!;
+            return false;
+        }
+
+        private bool TryGetEntry(string companyKey, out TenantStorageEntry entry)
+        {
+            lock (_stateLock)
+            {
+                if (_companyToStorageKey.TryGetValue(companyKey, out var storageKey) &&
+                    _storageEntries.TryGetValue(storageKey, out var found))
+                {
+                    entry = found;
+                    return true;
+                }
+            }
+
+            entry = null!;
             return false;
         }
 
@@ -454,11 +487,11 @@ namespace APITeamsV3.Infrastructure.Services
             return new SqlServerStorage(connectionString, new SqlServerStorageOptions
             {
                 PrepareSchemaIfNecessary = true,
+                TryAutoDetectSchemaDependentOptions = true,
                 CommandBatchMaxTimeout = TimeSpan.FromMinutes(5),
                 SlidingInvisibilityTimeout = TimeSpan.FromMinutes(5),
                 QueuePollInterval = TimeSpan.FromSeconds(15),
-                UseRecommendedIsolationLevel = true,
-                DisableGlobalLocks = true
+                UseRecommendedIsolationLevel = true
             });
         }
 

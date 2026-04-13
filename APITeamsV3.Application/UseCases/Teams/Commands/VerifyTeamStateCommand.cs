@@ -19,5 +19,9 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
     {
         public bool IsValid { get; set; }
         public string Summary { get; set; } = string.Empty;
+        public bool ReactivatedLocally { get; set; }
+        public bool MetadataAutoCorrected { get; set; }
+        public bool MarkedInactiveLocally { get; set; }
+        public bool TeamExistsInGraph { get; set; }
     }
 }

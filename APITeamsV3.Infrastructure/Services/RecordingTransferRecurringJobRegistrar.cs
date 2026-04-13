@@ -66,13 +66,13 @@ namespace APITeamsV3.Infrastructure.Services
                     var storage = await runtime.GetStorageAsync(company.CompanyKey, cancellationToken);
                     var manager = new RecurringJobManager(storage);
 
-                    if (!company.IsPilotMode || company.PilotSections.Count == 0)
+                    if (!company.IsPilotMode || company.PilotSections.Count == 0 || !company.IsRecordingTransferJobEnabled)
                     {
                         manager.RemoveIfExists(RecurringJobId);
                         continue;
                     }
 
-                    var cron = _configuration["Hangfire:RecordingTransferCron"] ?? Cron.Hourly();
+                    var cron = ResolveCron(company.RecordingTransferCron);
                     var timeZone = ResolveTimeZone(company.TimeZoneId);
 
                     manager.AddOrUpdate<HangfireJobService>(
@@ -92,6 +92,17 @@ namespace APITeamsV3.Infrastructure.Services
                         company.CompanyKey);
                 }
             }
+        }
+
+        private string ResolveCron(string? tenantCron)
+        {
+            if (!string.IsNullOrWhiteSpace(tenantCron))
+            {
+                return tenantCron.Trim();
+            }
+
+            var configuredCron = _configuration["Hangfire:RecordingTransferCron"];
+            return string.IsNullOrWhiteSpace(configuredCron) ? Cron.Hourly() : configuredCron.Trim();
         }
 
         private static TimeZoneInfo ResolveTimeZone(string? timeZoneId)

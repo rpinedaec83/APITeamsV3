@@ -217,9 +217,22 @@ const useStyles = makeStyles({
     },
     actionRow: {
         display: 'flex',
-        justifyContent: 'space-between',
+        flexDirection: 'column',
+        alignItems: 'stretch',
+        gap: '10px',
+    },
+    actionText: {
+        display: 'block',
+    },
+    actionButtons: {
+        display: 'flex',
+        gap: '8px',
         alignItems: 'center',
-        gap: '12px',
+        flexWrap: 'wrap',
+        justifyContent: 'flex-start',
+    },
+    statusBadge: {
+        whiteSpace: 'nowrap',
     },
     emptyState: {
         textAlign: 'center',
@@ -525,12 +538,16 @@ const SchedulesPage: React.FC = () => {
                                             </div>
                                         </div>
                                         <div className={styles.actionRow}>
-                                            <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>Ejecuta cada {formatDays(schedule.daysOfWeek)} a las {formatTime(schedule.hour, schedule.minute)}.</Text>
-                                            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                                            <Text size={200} className={styles.actionText} style={{ color: tokens.colorNeutralForeground3 }}>
+                                                Ejecuta cada {formatDays(schedule.daysOfWeek)} a las {formatTime(schedule.hour, schedule.minute)}.
+                                            </Text>
+                                            <div className={styles.actionButtons}>
                                                 <Button appearance="secondary" size="small" onClick={() => navigate(`/schedules/${schedule.id}/executions`)}>
                                                     Ver ejecuciones
                                                 </Button>
-                                                {schedule.isEnabled ? <Badge appearance="outline" color="success" icon={<CheckmarkCircleRegular />}>Lista para ejecutar</Badge> : <Badge appearance="outline" color="danger">Pausada</Badge>}
+                                                {schedule.isEnabled
+                                                    ? <Badge className={styles.statusBadge} appearance="outline" color="success" icon={<CheckmarkCircleRegular />}>Lista para ejecutar</Badge>
+                                                    : <Badge className={styles.statusBadge} appearance="outline" color="danger">Pausada</Badge>}
                                             </div>
                                         </div>
                                     </Card>

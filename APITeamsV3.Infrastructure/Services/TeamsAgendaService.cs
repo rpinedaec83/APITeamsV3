@@ -295,6 +295,7 @@ namespace APITeamsV3.Infrastructure.Services
                 }
 
                 var attendees = onlineMeeting.Participants?.Attendees?.ToList() ?? new List<MeetingParticipantInfo>();
+                var teacherUserIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var changed = false;
 
                 foreach (var email in (presenterEmails ?? Array.Empty<string>())
@@ -314,6 +315,8 @@ namespace APITeamsV3.Infrastructure.Services
                         continue;
                     }
 
+                    teacherUserIds.Add(user.Id);
+
                     var existing = attendees.FirstOrDefault(a =>
                         string.Equals(a.Identity?.User?.Id, user.Id, StringComparison.OrdinalIgnoreCase) ||
                         string.Equals(a.Identity?.User?.DisplayName, user.DisplayName, StringComparison.OrdinalIgnoreCase));
@@ -322,7 +325,7 @@ namespace APITeamsV3.Infrastructure.Services
                     {
                         attendees.Add(new MeetingParticipantInfo
                         {
-                            Role = OnlineMeetingRole.Presenter,
+                            Role = OnlineMeetingRole.Coorganizer,
                             Identity = new IdentitySet
                             {
                                 User = new Identity
@@ -334,9 +337,9 @@ namespace APITeamsV3.Infrastructure.Services
                         });
                         changed = true;
                     }
-                    else if (existing.Role != OnlineMeetingRole.Presenter)
+                    else if (existing.Role != OnlineMeetingRole.Coorganizer)
                     {
-                        existing.Role = OnlineMeetingRole.Presenter;
+                        existing.Role = OnlineMeetingRole.Coorganizer;
                         changed = true;
                     }
                 }
@@ -359,23 +362,62 @@ namespace APITeamsV3.Infrastructure.Services
                     return;
                 }
 
-                await PatchOnlineMeetingWithFallbackAsync(
-                    graphClient,
-                    onlineMeeting.Id,
-                    new OnlineMeeting
-                    {
-                        AllowedPresenters = OnlineMeetingPresenters.Everyone,
-                        AllowRecording = true,
-                        Participants = new MeetingParticipants
+                try
+                {
+                    await PatchOnlineMeetingWithFallbackAsync(
+                        graphClient,
+                        onlineMeeting.Id,
+                        new OnlineMeeting
                         {
-                            Attendees = attendees
-                        }
-                    },
-                    cancellationToken);
+                            AllowedPresenters = OnlineMeetingPresenters.Everyone,
+                            AllowRecording = true,
+                            Participants = new MeetingParticipants
+                            {
+                                Attendees = attendees
+                            }
+                        },
+                        cancellationToken);
 
-                _logger.LogInformation(
-                    "Promoted configured teachers and set allowedPresenters=everyone/allowRecording=true for onlineMeeting {MeetingId}.",
-                    onlineMeeting.Id);
+                    _logger.LogInformation(
+                        "Promoted configured teachers as co-organizers and set allowedPresenters=everyone/allowRecording=true for onlineMeeting {MeetingId}.",
+                        onlineMeeting.Id);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Could not assign co-organizer role for meeting {MeetingId}. Falling back to presenter role.",
+                        onlineMeeting.Id);
+
+                    foreach (var attendee in attendees)
+                    {
+                        var attendeeUserId = attendee.Identity?.User?.Id;
+                        if (!string.IsNullOrWhiteSpace(attendeeUserId) &&
+                            teacherUserIds.Contains(attendeeUserId) &&
+                            attendee.Role != OnlineMeetingRole.Presenter)
+                        {
+                            attendee.Role = OnlineMeetingRole.Presenter;
+                        }
+                    }
+
+                    await PatchOnlineMeetingWithFallbackAsync(
+                        graphClient,
+                        onlineMeeting.Id,
+                        new OnlineMeeting
+                        {
+                            AllowedPresenters = OnlineMeetingPresenters.Everyone,
+                            AllowRecording = true,
+                            Participants = new MeetingParticipants
+                            {
+                                Attendees = attendees
+                            }
+                        },
+                        cancellationToken);
+
+                    _logger.LogInformation(
+                        "Promoted configured teachers as presenters (co-organizer fallback) and set allowedPresenters=everyone/allowRecording=true for onlineMeeting {MeetingId}.",
+                        onlineMeeting.Id);
+                }
             }
             catch (Exception ex)
             {

@@ -43,19 +43,37 @@ namespace APITeamsV3.Application.UseCases.Recordings.Commands
 
         private async Task TryLogAsync(RecordingTransferResult result, string? jobId)
         {
+            var hasEffectiveStorageExecution = result.FilesCopied > 0;
+            var hasTransferErrors = result.FilesErrored > 0;
+
+            if (!hasEffectiveStorageExecution && !hasTransferErrors)
+            {
+                _logger.LogInformation(
+                    "RecordingTransfer log omitted because no recordings were stored. Found={FilesFound}, Copied={FilesCopied}, Skipped={FilesSkipped}.",
+                    result.FilesFound,
+                    result.FilesCopied,
+                    result.FilesSkipped);
+                return;
+            }
+
             try
             {
-                var logType = result.FilesErrored > 0 ? "Warning" : "Success";
+                var logType = hasTransferErrors
+                    ? (hasEffectiveStorageExecution ? "Warning" : "Error")
+                    : "Success";
                 var reference = !string.IsNullOrWhiteSpace(result.TeamGroupId) ? result.TeamGroupId : "N/A";
+                var message = hasEffectiveStorageExecution
+                    ? $"Grabaciones almacenadas en Team: Encontrados={result.FilesFound}, Copiados={result.FilesCopied}, Omitidos={result.FilesSkipped}, Errores={result.FilesErrored}, EliminadosOrigen={result.SourceFilesDeleted}, ErrorEliminacionOrigen={result.SourceFilesDeleteErrors}."
+                    : $"Transferencia de grabaciones ejecutada con errores y sin archivos almacenados: Encontrados={result.FilesFound}, Copiados={result.FilesCopied}, Omitidos={result.FilesSkipped}, Errores={result.FilesErrored}, EliminadosOrigen={result.SourceFilesDeleted}, ErrorEliminacionOrigen={result.SourceFilesDeleteErrors}.";
 
                 await _logRepository.LogAsync(new TeamsLogOperativo
                 {
                     Tipo = logType,
                     EntidadAfectada = "RecordingTransfer",
                     Referencia = reference,
-                    Mensaje = $"Transferencia de grabaciones: Encontrados={result.FilesFound}, Copiados={result.FilesCopied}, Omitidos={result.FilesSkipped}, Errores={result.FilesErrored}, EliminadosOrigen={result.SourceFilesDeleted}, ErrorEliminacionOrigen={result.SourceFilesDeleteErrors}.",
+                    Mensaje = message,
                     ContextoTecnico = string.Join(" | ", result.Errors),
-                    Severidad = result.FilesErrored > 0 ? "Medium" : "Low",
+                    Severidad = hasTransferErrors ? "Medium" : "Low",
                     JobId = jobId,
                     Fecha = DateTime.UtcNow
                 });

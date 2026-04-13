@@ -16,6 +16,8 @@ export interface CompanyConfig {
     meetingPolicyMode: string;
     isPilotMode: boolean;
     pilotSections: number[];
+    isRecordingTransferJobEnabled?: boolean;
+    recordingTransferCron?: string;
     teacherAltDomain?: string;
     isMaintenanceMode: boolean;
     maintenanceMessage?: string;
@@ -35,6 +37,8 @@ export interface CreateCompanyConfigRequest {
     graphClientSecretRef: string;
     isPilotMode: boolean;
     pilotSections: number[];
+    isRecordingTransferJobEnabled?: boolean;
+    recordingTransferCron?: string;
     teacherAltDomain?: string;
     isMaintenanceMode: boolean;
     maintenanceMessage?: string;
@@ -54,6 +58,8 @@ export interface UpdateCompanyConfigRequest {
     graphClientSecretRef: string;
     isPilotMode: boolean;
     pilotSections: number[];
+    isRecordingTransferJobEnabled?: boolean;
+    recordingTransferCron?: string;
     teacherAltDomain?: string;
     isMaintenanceMode: boolean;
     maintenanceMessage?: string;

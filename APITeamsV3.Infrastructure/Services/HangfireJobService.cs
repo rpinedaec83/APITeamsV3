@@ -289,6 +289,14 @@ namespace APITeamsV3.Infrastructure.Services
         {
             var hangfireJobId = performContext?.BackgroundJob?.Id;
             var config = await ResolveTenantAsync(companyKey, includePilotSections: true);
+            if (!config.IsRecordingTransferJobEnabled)
+            {
+                _logger.LogInformation(
+                    "Recording transfer job omitted for tenant {CompanyKey}: IsRecordingTransferJobEnabled is disabled.",
+                    companyKey);
+                return;
+            }
+
             if (!config.IsPilotMode)
             {
                 _logger.LogInformation(

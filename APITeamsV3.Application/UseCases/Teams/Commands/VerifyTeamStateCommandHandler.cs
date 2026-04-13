@@ -1,8 +1,9 @@
-using MediatR;
 using APITeamsV3.Application.Common.Interfaces;
 using APITeamsV3.Domain.Entities;
+using MediatR;
 using Microsoft.Extensions.Logging;
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -29,13 +30,17 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
 
         public async Task<DiagnosticResultDto> Handle(VerifyTeamStateCommand request, CancellationToken cancellationToken)
         {
-            var result = new DiagnosticResultDto { IsValid = true, Summary = "Verificado." };
+            var result = new DiagnosticResultDto
+            {
+                IsValid = true,
+                Summary = "Validacion completada."
+            };
 
             var team = await _teamRepository.GetBySeccionIdAsync(request.IdSeccion);
             if (team == null)
             {
                 result.IsValid = false;
-                result.Summary = "No existe registro local del Team para la sección.";
+                result.Summary = "No existe registro local del Team para la seccion.";
                 return result;
             }
 
@@ -43,62 +48,78 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
 
             try
             {
-                var group = await graphClient.Groups[team.IdTeamsGroup].GetAsync(rc => 
+                var group = await graphClient.Groups[team.IdTeamsGroup].GetAsync(rc =>
                 {
                     rc.QueryParameters.Select = new[] { "id", "displayName", "description" };
                 }, cancellationToken);
 
-                if (group != null)
+                if (group == null)
                 {
-                    bool requiresUpdate = false;
-                    
-                    // If the team exists in Graph but is locally marked as inactive, reactivate it
-                    if (team.EstadoTeam == "I")
-                    {
-                        _logger.LogInformation($"Team {team.IdTeamsGroup} exists in Graph but was locally inactive. Reactivating.");
-                        team.EstadoTeam = "A";
-                        team.IsActive = "A";
-                        requiresUpdate = true;
-                        result.Summary += " Team reactivado (existía en Graph pero estaba inactivo en BD).";
-                    }
+                    result.IsValid = false;
+                    result.TeamExistsInGraph = false;
+                    result.Summary = "Se detecto una inconsistencia: no se obtuvo informacion del Team en Microsoft Graph.";
+                    return result;
+                }
 
-                    if (group.DisplayName != team.NombreTeam || group.Description != team.DescripcionTeam)
-                    {
-                        // Graph es la fuente de verdad (o Smart). Dependiendo de reglas, 
-                        // si queremos alinear local con Graph o al revés:
-                        team.NombreTeam = group.DisplayName ?? string.Empty;
-                        team.DescripcionTeam = group.Description ?? string.Empty;
-                        requiresUpdate = true;
-                    }
+                result.TeamExistsInGraph = true;
+                var summaryMessages = new List<string>();
+                var requiresUpdate = false;
 
-                    if (requiresUpdate)
+                if (team.EstadoTeam == "I")
+                {
+                    team.EstadoTeam = "A";
+                    team.IsActive = "A";
+                    result.ReactivatedLocally = true;
+                    requiresUpdate = true;
+                    summaryMessages.Add("El Team existe en Microsoft Graph y estaba inactivo en la base local; se reactivo correctamente.");
+                    await LogOperativoAsync("Info", "TeamState", team.IdTeamsGroup, "Team reactivado porque existe en Graph y estaba inactivo localmente.", request.JobId);
+                }
+
+                if (group.DisplayName != team.NombreTeam || group.Description != team.DescripcionTeam)
+                {
+                    team.NombreTeam = group.DisplayName ?? string.Empty;
+                    team.DescripcionTeam = group.Description ?? string.Empty;
+                    result.MetadataAutoCorrected = true;
+                    requiresUpdate = true;
+                    summaryMessages.Add("Se detectaron diferencias en nombre o descripcion y se autocorrigieron los metadatos locales.");
+                }
+
+                if (requiresUpdate)
+                {
+                    team.FechaModificacion = DateTime.UtcNow;
+                    await _teamRepository.UpdateAsync(team);
+
+                    if (result.MetadataAutoCorrected)
                     {
-                        team.FechaModificacion = DateTime.UtcNow;
-                        await _teamRepository.UpdateAsync(team);
-                        await LogOperativoAsync("Info", "TeamMetadata", team.IdTeamsGroup, "Metadatos (Nombre/Descripción) autocorregidos.", request.JobId);
-                        result.Summary += " Metadatos autocorregidos.";
+                        await LogOperativoAsync("Info", "TeamMetadata", team.IdTeamsGroup, "Metadatos (Nombre/Descripcion) autocorregidos.", request.JobId);
                     }
                 }
+                else
+                {
+                    summaryMessages.Add("El Team existe en Microsoft Graph y ya estaba sincronizado en la base local.");
+                }
+
+                result.Summary = string.Join(" ", summaryMessages);
             }
             catch (Microsoft.Graph.Models.ODataErrors.ODataError ex) when (ex.ResponseStatusCode == 404)
             {
-                // El Team NO existe en Graph pero sí local.
-                _logger.LogWarning($"Team {team.IdTeamsGroup} not found in Graph. Marking as inactive/deleted logically.");
                 team.EstadoTeam = "I";
                 team.IsActive = "I";
                 team.FechaModificacion = DateTime.UtcNow;
                 await _teamRepository.UpdateAsync(team);
-                
-                await LogOperativoAsync("Error", "TeamInconsistency", team.IdTeamsGroup, "El Team no existe en Graph. Removido lógicamente en BD.", request.JobId);
-                
+
                 result.IsValid = false;
-                result.Summary = "Team inexistente en MS Graph. Borrado lógico aplicado.";
+                result.TeamExistsInGraph = false;
+                result.MarkedInactiveLocally = true;
+                result.Summary = "Se detecto una inconsistencia: el Team no existe en Microsoft Graph (404). Se marco como inactivo en la base local.";
+
+                await LogOperativoAsync("Error", "TeamInconsistency", team.IdTeamsGroup, "El Team no existe en Graph (404). Marcado como inactivo en BD local.", request.JobId);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Error verifying team {team.IdTeamsGroup}");
+                _logger.LogError(ex, "Error verifying team {TeamId}", team.IdTeamsGroup);
                 result.IsValid = false;
-                result.Summary = "Error técnico consultando MS Graph.";
+                result.Summary = "Error tecnico consultando Microsoft Graph.";
                 await LogOperativoAsync("Error", "TeamVerification", team.IdTeamsGroup, ex.Message, request.JobId);
             }
 

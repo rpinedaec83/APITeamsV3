@@ -6,6 +6,9 @@ using Hangfire.Storage;
 using Hangfire.Storage.Monitoring;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Configuration;
+using System.Text.Json;
 
 namespace APITeamsV3.API.Controllers
 {
@@ -19,19 +22,22 @@ namespace APITeamsV3.API.Controllers
         private readonly TenantHangfireRuntime _tenantHangfireRuntime;
         private readonly ICentralDbContext _centralDbContext;
         private readonly ISmartDbContext _smartDbContext;
+        private readonly IConfiguration _configuration;
 
         public JobsController(
             IHangfireJobService jobService,
             ITenantProvider tenantProvider,
             TenantHangfireRuntime tenantHangfireRuntime,
             ICentralDbContext centralDbContext,
-            ISmartDbContext smartDbContext)
+            ISmartDbContext smartDbContext,
+            IConfiguration configuration)
         {
             _jobService = jobService;
             _tenantProvider = tenantProvider;
             _tenantHangfireRuntime = tenantHangfireRuntime;
             _centralDbContext = centralDbContext;
             _smartDbContext = smartDbContext;
+            _configuration = configuration;
         }
 
         [HttpGet("recent")]
@@ -44,63 +50,24 @@ namespace APITeamsV3.API.Controllers
             }
 
             var pageSize = Math.Clamp(take, 1, 200);
-            var snapshots = new Dictionary<string, HangfireJobSnapshotDto>(StringComparer.OrdinalIgnoreCase);
 
             try
             {
-                var storage = await _tenantHangfireRuntime.GetStorageAsync(tenant.CompanyKey, HttpContext.RequestAborted);
-                var monitoring = storage.GetMonitoringApi();
-
-                void AddSnapshot(string jobId, string state, DateTime? stateAt, Hangfire.Common.Job? job, string? error = null)
+                if (string.IsNullOrWhiteSpace(tenant.ConnectionString))
                 {
-                    if (string.IsNullOrWhiteSpace(jobId) || snapshots.ContainsKey(jobId))
+                    return StatusCode(503, new
                     {
-                        return;
-                    }
-
-                    var args = job?.Args?.Select(a => a?.ToString() ?? string.Empty).ToArray() ?? Array.Empty<string>();
-                    int? idSeccion = null;
-                    if (args.Length > 0 && int.TryParse(args[0], out var parsedSection))
-                    {
-                        idSeccion = parsedSection;
-                    }
-
-                    snapshots[jobId] = new HangfireJobSnapshotDto
-                    {
-                        JobId = jobId,
-                        State = state,
-                        Method = job?.Method?.Name ?? "Unknown",
-                        IdSeccion = idSeccion,
-                        Arguments = args,
-                        Error = error,
-                        Timestamp = stateAt ?? DateTime.UtcNow
-                    };
+                        Message = $"No se pudo consultar el estado de Hangfire para el tenant '{tenant.CompanyKey}'. Verifique que la base de datos sea accesible.",
+                        Detail = "El tenant actual no tiene una cadena de conexión resuelta."
+                    });
                 }
 
-                foreach (var item in monitoring.ProcessingJobs(0, pageSize))
-                {
-                    AddSnapshot(item.Key, "Processing", item.Value?.StartedAt, item.Value?.Job);
-                }
+                var sqlConnectionString = await ResolveTenantSqlConnectionStringAsync(tenant.CompanyKey, HttpContext.RequestAborted);
+                await using var connection = new SqlConnection(sqlConnectionString);
+                await connection.OpenAsync(HttpContext.RequestAborted);
+                var snapshots = await QueryRecentHangfireJobsAsync(connection, pageSize, HttpContext.RequestAborted);
 
-                foreach (var item in monitoring.EnqueuedJobs("default", 0, pageSize))
-                {
-                    AddSnapshot(item.Key, "Enqueued", item.Value?.EnqueuedAt, item.Value?.Job);
-                }
-
-                foreach (var item in monitoring.ScheduledJobs(0, pageSize))
-                {
-                    AddSnapshot(item.Key, "Scheduled", item.Value?.EnqueueAt, item.Value?.Job);
-                }
-
-                foreach (var item in monitoring.FailedJobs(0, pageSize))
-                {
-                    AddSnapshot(item.Key, "Failed", item.Value?.FailedAt, item.Value?.Job, item.Value?.ExceptionMessage ?? item.Value?.Reason);
-                }
-
-                foreach (var item in monitoring.SucceededJobs(0, pageSize))
-                {
-                    AddSnapshot(item.Key, "Succeeded", item.Value?.SucceededAt, item.Value?.Job);
-                }
+                return Ok(snapshots);
             }
             catch (InvalidOperationException ex)
             {
@@ -114,12 +81,6 @@ namespace APITeamsV3.API.Controllers
                 });
             }
 
-            var ordered = snapshots.Values
-                .OrderByDescending(x => x.Timestamp)
-                .Take(pageSize)
-                .ToList();
-
-            return Ok(ordered);
         }
 
         [HttpGet("by-id/{jobId}")]
@@ -131,37 +92,81 @@ namespace APITeamsV3.API.Controllers
                 return BadRequest(new { Message = "No se pudo resolver el tenant actual." });
             }
 
-            var storage = await _tenantHangfireRuntime.GetStorageAsync(tenant.CompanyKey, HttpContext.RequestAborted);
-            using var connection = storage.GetConnection();
-
-            var jobData = connection.GetJobData(jobId);
-            if (jobData == null)
+            try
             {
-                return NotFound(new { Message = $"No se encontro el job {jobId} en Hangfire." });
+                if (string.IsNullOrWhiteSpace(tenant.ConnectionString))
+                {
+                    return StatusCode(503, new
+                    {
+                        Message = $"No se pudo consultar el estado de Hangfire para el tenant '{tenant.CompanyKey}'. Verifique que la base de datos sea accesible.",
+                        Detail = "El tenant actual no tiene una cadena de conexión resuelta."
+                    });
+                }
+
+                var sqlConnectionString = await ResolveTenantSqlConnectionStringAsync(tenant.CompanyKey, HttpContext.RequestAborted);
+                await using var connection = new SqlConnection(sqlConnectionString);
+                await connection.OpenAsync(HttpContext.RequestAborted);
+                await using var command = connection.CreateCommand();
+                command.CommandText = """
+                    SELECT
+                        CONVERT(varchar(50), j.Id) AS JobId,
+                        COALESCE(s.Name, j.StateName, 'Unknown') AS StateName,
+                        j.InvocationData,
+                        j.Arguments,
+                        COALESCE(s.CreatedAt, j.CreatedAt) AS TimestampUtc,
+                        s.Reason,
+                        s.Data
+                    FROM [HangFire].[Job] AS j
+                    OUTER APPLY (
+                        SELECT TOP (1)
+                            st.Name,
+                            st.Reason,
+                            st.Data,
+                            st.CreatedAt
+                        FROM [HangFire].[State] AS st
+                        WHERE st.JobId = j.Id
+                        ORDER BY st.Id DESC
+                    ) AS s
+                    WHERE j.Id = @jobId;
+                    """;
+                command.Parameters.Add(new SqlParameter("@jobId", System.Data.SqlDbType.BigInt) { Value = long.Parse(jobId) });
+
+                await using var reader = await command.ExecuteReaderAsync(HttpContext.RequestAborted);
+                if (!await reader.ReadAsync(HttpContext.RequestAborted))
+                {
+                    return NotFound(new { Message = $"No se encontro el job {jobId} en Hangfire." });
+                }
+
+                var args = ParseHangfireArguments(reader["Arguments"]?.ToString());
+                int? idSeccion = null;
+                if (args.Length > 0 && int.TryParse(args[0], out var parsedSection))
+                {
+                    idSeccion = parsedSection;
+                }
+
+                return Ok(new HangfireJobSnapshotDto
+                {
+                    JobId = reader["JobId"]?.ToString() ?? jobId,
+                    State = reader["StateName"]?.ToString() ?? "Unknown",
+                    Method = ParseHangfireMethod(reader["InvocationData"]?.ToString()),
+                    IdSeccion = idSeccion,
+                    Arguments = args,
+                    Error = ParseHangfireError(reader["Reason"] as string, reader["Data"] as string),
+                    Timestamp = reader["TimestampUtc"] is DateTime dt ? dt : DateTime.UtcNow
+                });
             }
-
-            var stateData = connection.GetStateData(jobId);
-            var args = jobData.Job?.Args?.Select(a => a?.ToString() ?? string.Empty).ToArray() ?? Array.Empty<string>();
-            int? idSeccion = null;
-            if (args.Length > 0 && int.TryParse(args[0], out var parsedSection))
+            catch (FormatException)
             {
-                idSeccion = parsedSection;
+                return BadRequest(new { Message = $"El jobId '{jobId}' no es válido." });
             }
-
-            var error = stateData?.Data != null && stateData.Data.TryGetValue("ExceptionMessage", out var exceptionMessage)
-                ? exceptionMessage
-                : stateData?.Reason;
-
-            return Ok(new HangfireJobSnapshotDto
+            catch (Exception ex)
             {
-                JobId = jobId,
-                State = stateData?.Name ?? jobData.State ?? "Unknown",
-                Method = jobData.Job?.Method?.Name ?? "Unknown",
-                IdSeccion = idSeccion,
-                Arguments = args,
-                Error = error,
-                Timestamp = jobData.CreatedAt
-            });
+                return StatusCode(503, new
+                {
+                    Message = $"No se pudo consultar el job {jobId} para el tenant '{tenant.CompanyKey}'.",
+                    Detail = ex.Message
+                });
+            }
         }
 
         [HttpPost("{jobId}/requeue")]
@@ -173,39 +178,81 @@ namespace APITeamsV3.API.Controllers
                 return BadRequest(new { Message = "No se pudo resolver el tenant actual." });
             }
 
-            var storage = await _tenantHangfireRuntime.GetStorageAsync(tenant.CompanyKey, HttpContext.RequestAborted);
-            using var connection = storage.GetConnection();
-
-            var jobData = connection.GetJobData(jobId);
-            if (jobData == null)
+            try
             {
-                return NotFound(new { Message = $"No se encontro el job {jobId} en Hangfire." });
-            }
-
-            var currentState = connection.GetStateData(jobId)?.Name ?? jobData.State ?? string.Empty;
-            if (!IsRequeueableState(currentState))
-            {
-                return BadRequest(new
+                if (string.IsNullOrWhiteSpace(tenant.ConnectionString))
                 {
-                    Message = $"El job {jobId} no se puede re-encolar desde el estado '{currentState}'."
+                    return StatusCode(503, new
+                    {
+                        Message = $"No se pudo re-encolar el job {jobId} para el tenant '{tenant.CompanyKey}'.",
+                        Detail = "El tenant actual no tiene una cadena de conexión resuelta."
+                    });
+                }
+
+                var sqlConnectionString = await ResolveTenantSqlConnectionStringAsync(tenant.CompanyKey, HttpContext.RequestAborted);
+                await using var sqlConnection = new SqlConnection(sqlConnectionString);
+                await sqlConnection.OpenAsync(HttpContext.RequestAborted);
+                await using var command = sqlConnection.CreateCommand();
+                command.CommandText = """
+                    SELECT
+                        CONVERT(varchar(50), j.Id) AS JobId,
+                        COALESCE(s.Name, j.StateName, 'Unknown') AS StateName
+                    FROM [HangFire].[Job] AS j
+                    OUTER APPLY (
+                        SELECT TOP (1)
+                            st.Name
+                        FROM [HangFire].[State] AS st
+                        WHERE st.JobId = j.Id
+                        ORDER BY st.Id DESC
+                    ) AS s
+                    WHERE j.Id = @jobId;
+                    """;
+                command.Parameters.Add(new SqlParameter("@jobId", System.Data.SqlDbType.BigInt) { Value = long.Parse(jobId) });
+
+                await using var reader = await command.ExecuteReaderAsync(HttpContext.RequestAborted);
+                if (!await reader.ReadAsync(HttpContext.RequestAborted))
+                {
+                    return NotFound(new { Message = $"No se encontro el job {jobId} en Hangfire." });
+                }
+
+                var currentState = reader["StateName"]?.ToString() ?? string.Empty;
+                if (!IsRequeueableState(currentState))
+                {
+                    return BadRequest(new
+                    {
+                        Message = $"El job {jobId} no se puede re-encolar desde el estado '{currentState}'."
+                    });
+                }
+
+                var storage = await _tenantHangfireRuntime.GetStorageAsync(tenant.CompanyKey, HttpContext.RequestAborted);
+                var client = new BackgroundJobClient(storage);
+                var changed = client.ChangeState(jobId, new EnqueuedState(), currentState);
+                if (!changed)
+                {
+                    return Conflict(new
+                    {
+                        Message = $"No se pudo re-encolar el job {jobId}. El estado pudo haber cambiado."
+                    });
+                }
+
+                return Ok(new
+                {
+                    JobId = jobId,
+                    Message = $"Job {jobId} re-encolado correctamente."
                 });
             }
-
-            var client = new BackgroundJobClient(storage);
-            var changed = client.ChangeState(jobId, new EnqueuedState(), currentState);
-            if (!changed)
+            catch (FormatException)
             {
-                return Conflict(new
+                return BadRequest(new { Message = $"El jobId '{jobId}' no es válido." });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(503, new
                 {
-                    Message = $"No se pudo re-encolar el job {jobId}. El estado pudo haber cambiado."
+                    Message = $"No se pudo re-encolar el job {jobId} para el tenant '{tenant.CompanyKey}'.",
+                    Detail = ex.Message
                 });
             }
-
-            return Ok(new
-            {
-                JobId = jobId,
-                Message = $"Job {jobId} re-encolado correctamente."
-            });
         }
 
         [HttpDelete("company-data")]
@@ -217,26 +264,46 @@ namespace APITeamsV3.API.Controllers
                 return BadRequest(new { Message = "No se pudo resolver el tenant actual." });
             }
 
-            var storage = await _tenantHangfireRuntime.GetStorageAsync(tenant.CompanyKey, HttpContext.RequestAborted);
-            var monitoring = storage.GetMonitoringApi();
-            using var connection = storage.GetConnection();
-            var client = new BackgroundJobClient(storage);
-            var recurringManager = new RecurringJobManager(storage);
-
-            var deletedRecurringJobs = 0;
-            foreach (var recurringJob in connection.GetRecurringJobs())
+            int deletedRecurringJobs;
+            int deletedJobs;
+            try
             {
-                recurringManager.RemoveIfExists(recurringJob.Id);
-                deletedRecurringJobs++;
-            }
+                if (string.IsNullOrWhiteSpace(tenant.ConnectionString))
+                {
+                    return StatusCode(503, new
+                    {
+                        Message = $"No se pudo limpiar los datos de Hangfire para el tenant '{tenant.CompanyKey}'.",
+                        Detail = "El tenant actual no tiene una cadena de conexión resuelta."
+                    });
+                }
 
-            var deletedJobs = 0;
-            deletedJobs += DeleteJobsBatch(monitoring.ProcessingJobs(0, 1000).Select(item => item.Key), client);
-            deletedJobs += DeleteJobsBatch(monitoring.EnqueuedJobs("default", 0, 1000).Select(item => item.Key), client);
-            deletedJobs += DeleteJobsBatch(monitoring.ScheduledJobs(0, 1000).Select(item => item.Key), client);
-            deletedJobs += DeleteJobsBatch(monitoring.FailedJobs(0, 1000).Select(item => item.Key), client);
-            deletedJobs += DeleteJobsBatch(monitoring.SucceededJobs(0, 1000).Select(item => item.Key), client);
-            deletedJobs += DeleteJobsBatch(monitoring.DeletedJobs(0, 1000).Select(item => item.Key), client);
+                var storage = await _tenantHangfireRuntime.GetStorageAsync(tenant.CompanyKey, HttpContext.RequestAborted);
+                var client = new BackgroundJobClient(storage);
+                var recurringManager = new RecurringJobManager(storage);
+
+                var sqlConnectionString = await ResolveTenantSqlConnectionStringAsync(tenant.CompanyKey, HttpContext.RequestAborted);
+                await using var sqlConnection = new SqlConnection(sqlConnectionString);
+                await sqlConnection.OpenAsync(HttpContext.RequestAborted);
+
+                var recurringIds = await QueryRecurringJobIdsAsync(sqlConnection, HttpContext.RequestAborted);
+                deletedRecurringJobs = 0;
+                foreach (var recurringJobId in recurringIds)
+                {
+                    recurringManager.RemoveIfExists(recurringJobId);
+                    deletedRecurringJobs++;
+                }
+
+                var jobIds = await QueryHangfireJobIdsAsync(sqlConnection, 5000, HttpContext.RequestAborted);
+                deletedJobs = DeleteJobsBatch(jobIds, client);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(503, new
+                {
+                    Message = $"No se pudo limpiar los datos de Hangfire para el tenant '{tenant.CompanyKey}'.",
+                    Detail = ex.Message
+                });
+            }
 
             var companyConfigId = await _centralDbContext.CompanyConfigs
                 .AsNoTracking()
@@ -281,48 +348,115 @@ namespace APITeamsV3.API.Controllers
                 return BadRequest(new { Message = "No se pudo resolver el tenant actual." });
             }
 
-            var storage = await _tenantHangfireRuntime.GetStorageAsync(tenant.CompanyKey, HttpContext.RequestAborted);
-            using var connection = storage.GetConnection();
-            var monitoring = storage.GetMonitoringApi();
-
-            var recurringJobs = connection.GetRecurringJobs()
-                .OrderByDescending(job => job.CreatedAt ?? job.LastExecution ?? job.NextExecution ?? DateTime.MinValue)
-                .Select(job =>
+            try
+            {
+                if (string.IsNullOrWhiteSpace(tenant.ConnectionString))
                 {
+                    return StatusCode(503, new
+                    {
+                        Message = $"No se pudo consultar los jobs recurrentes de Hangfire para el tenant '{tenant.CompanyKey}'. Verifique que la base de datos sea accesible.",
+                        Detail = "El tenant actual no tiene una cadena de conexión resuelta."
+                    });
+                }
+
+                var sqlConnectionString = await ResolveTenantSqlConnectionStringAsync(tenant.CompanyKey, HttpContext.RequestAborted);
+                await using var connection = new SqlConnection(sqlConnectionString);
+                await connection.OpenAsync(HttpContext.RequestAborted);
+                await using var command = connection.CreateCommand();
+                command.CommandText = """
+                    WITH RecurringHashes AS (
+                        SELECT
+                            s.Value AS RecurringJobId,
+                            MAX(CASE WHEN h.Field = 'Cron' THEN h.Value END) AS Cron,
+                            MAX(CASE WHEN h.Field = 'Queue' THEN h.Value END) AS Queue,
+                            MAX(CASE WHEN h.Field = 'Job' THEN h.Value END) AS JobPayload,
+                            MAX(CASE WHEN h.Field = 'TimeZoneId' THEN h.Value END) AS TimeZoneId,
+                            MAX(CASE WHEN h.Field = 'CreatedAt' THEN h.Value END) AS CreatedAt,
+                            MAX(CASE WHEN h.Field = 'LastExecution' THEN h.Value END) AS LastExecution,
+                            MAX(CASE WHEN h.Field = 'NextExecution' THEN h.Value END) AS NextExecution,
+                            MAX(CASE WHEN h.Field = 'LastJobId' THEN h.Value END) AS LastJobId,
+                            MAX(CASE WHEN h.Field = 'LastJobState' THEN h.Value END) AS LastJobState,
+                            MAX(CASE WHEN h.Field = 'Error' THEN h.Value END) AS ErrorText,
+                            MAX(CASE WHEN h.Field = 'Removed' THEN h.Value END) AS Removed
+                        FROM [HangFire].[Set] AS s
+                        INNER JOIN [HangFire].[Hash] AS h
+                            ON h.[Key] = CONCAT('recurring-job:', s.Value)
+                        WHERE s.[Key] = 'recurring-jobs'
+                        GROUP BY s.Value
+                    )
+                    SELECT
+                        rh.RecurringJobId,
+                        rh.Cron,
+                        rh.Queue,
+                        rh.JobPayload,
+                        rh.TimeZoneId,
+                        rh.CreatedAt,
+                        rh.LastExecution,
+                        rh.NextExecution,
+                        rh.LastJobId,
+                        rh.LastJobState,
+                        rh.ErrorText,
+                        rh.Removed,
+                        js.Reason AS LastJobReason,
+                        js.Data AS LastJobStateData
+                    FROM RecurringHashes AS rh
+                    OUTER APPLY (
+                        SELECT TOP (1)
+                            st.Reason,
+                            st.Data
+                        FROM [HangFire].[Job] AS j
+                        INNER JOIN [HangFire].[State] AS st ON st.Id = j.StateId
+                        WHERE CONVERT(varchar(50), j.Id) = rh.LastJobId
+                    ) AS js
+                    ORDER BY
+                        COALESCE(TRY_CONVERT(datetime2, rh.CreatedAt), TRY_CONVERT(datetime2, rh.LastExecution), TRY_CONVERT(datetime2, rh.NextExecution), '1900-01-01') DESC,
+                        rh.RecurringJobId DESC;
+                    """;
+
+                var recurringJobs = new List<HangfireRecurringJobSnapshotDto>();
+                await using var reader = await command.ExecuteReaderAsync(HttpContext.RequestAborted);
+                while (await reader.ReadAsync(HttpContext.RequestAborted))
+                {
+                    var jobPayload = reader["JobPayload"]?.ToString();
+                    var args = ParseHangfireArgumentsFromRecurringJob(jobPayload);
                     int? idSeccion = null;
-                    var args = job.Job?.Args?.Select(a => a?.ToString() ?? string.Empty).ToArray() ?? Array.Empty<string>();
                     if (args.Length > 0 && int.TryParse(args[0], out var parsedSection))
                     {
                         idSeccion = parsedSection;
                     }
 
-                    var jobDetails = !string.IsNullOrWhiteSpace(job.LastJobId)
-                        ? monitoring.JobDetails(job.LastJobId)
-                        : null;
-
-                    var result = BuildRecurringJobResult(job, jobDetails);
-
-                    return new HangfireRecurringJobSnapshotDto
+                    var error = reader["ErrorText"]?.ToString() ?? string.Empty;
+                    recurringJobs.Add(new HangfireRecurringJobSnapshotDto
                     {
-                        Id = job.Id,
-                        Cron = job.Cron ?? string.Empty,
-                        Queue = job.Queue ?? "default",
-                        Method = job.Job?.Method?.Name ?? "Unknown",
+                        Id = reader["RecurringJobId"]?.ToString() ?? string.Empty,
+                        Cron = reader["Cron"]?.ToString() ?? string.Empty,
+                        Queue = reader["Queue"]?.ToString() ?? "default",
+                        Method = ParseHangfireMethod(jobPayload),
                         IdSeccion = idSeccion,
-                        CreatedAt = job.CreatedAt,
-                        LastExecution = job.LastExecution,
-                        NextExecution = job.NextExecution,
-                        LastJobId = job.LastJobId ?? string.Empty,
-                        LastJobState = job.LastJobState ?? string.Empty,
-                        LastResult = result,
-                        TimeZoneId = job.TimeZoneId ?? string.Empty,
-                        Error = job.Error ?? string.Empty,
-                        Removed = job.Removed
-                    };
-                })
-                .ToList();
+                        CreatedAt = ParseHangfireDateTime(reader["CreatedAt"]?.ToString()),
+                        LastExecution = ParseHangfireDateTime(reader["LastExecution"]?.ToString()),
+                        NextExecution = ParseHangfireDateTime(reader["NextExecution"]?.ToString()),
+                        LastJobId = reader["LastJobId"]?.ToString() ?? string.Empty,
+                        LastJobState = reader["LastJobState"]?.ToString() ?? string.Empty,
+                        LastResult = string.IsNullOrWhiteSpace(error)
+                            ? ParseHangfireError(reader["LastJobReason"] as string, reader["LastJobStateData"] as string) ?? string.Empty
+                            : error,
+                        TimeZoneId = reader["TimeZoneId"]?.ToString() ?? string.Empty,
+                        Error = error,
+                        Removed = bool.TryParse(reader["Removed"]?.ToString(), out var removed) && removed
+                    });
+                }
 
-            return Ok(recurringJobs);
+                return Ok(recurringJobs);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(503, new
+                {
+                    Message = $"No se pudo consultar los jobs recurrentes de Hangfire para el tenant '{tenant.CompanyKey}'. Verifique que la base de datos sea accesible.",
+                    Detail = ex.Message
+                });
+            }
         }
 
         [HttpPost("recordings-transfer-pilot/run")]
@@ -339,6 +473,116 @@ namespace APITeamsV3.API.Controllers
             {
                 JobId = jobId,
                 Message = $"Recording transfer piloto encolado para tenant {tenant.CompanyKey}."
+            });
+        }
+
+        [HttpGet("recordings-transfer-pilot/config")]
+        public async Task<ActionResult<RecordingTransferPilotJobConfigDto>> GetPilotRecordingTransferConfig()
+        {
+            var tenant = _tenantProvider.GetCurrentTenant();
+            if (string.IsNullOrWhiteSpace(tenant.CompanyKey))
+            {
+                return BadRequest(new { Message = "No se pudo resolver el tenant actual." });
+            }
+
+            var company = await _centralDbContext.CompanyConfigs
+                .AsNoTracking()
+                .Include(c => c.PilotSections)
+                .FirstOrDefaultAsync(c => c.CompanyKey == tenant.CompanyKey, HttpContext.RequestAborted);
+
+            if (company == null)
+            {
+                return NotFound(new { Message = $"No se encontro configuracion para el tenant '{tenant.CompanyKey}'." });
+            }
+
+            var fallbackCron = ResolveGlobalRecordingTransferCron(_configuration);
+            var effectiveCron = string.IsNullOrWhiteSpace(company.RecordingTransferCron)
+                ? fallbackCron
+                : company.RecordingTransferCron.Trim();
+
+            return Ok(new RecordingTransferPilotJobConfigDto
+            {
+                IsEnabled = company.IsRecordingTransferJobEnabled,
+                Cron = effectiveCron,
+                TimeZoneId = company.TimeZoneId,
+                IsPilotMode = company.IsPilotMode,
+                PilotSectionsConfigured = company.PilotSections.Count
+            });
+        }
+
+        [HttpPut("recordings-transfer-pilot/config")]
+        public async Task<ActionResult<RecordingTransferPilotJobConfigDto>> UpdatePilotRecordingTransferConfig(
+            [FromBody] UpdateRecordingTransferPilotJobConfigRequest request)
+        {
+            var tenant = _tenantProvider.GetCurrentTenant();
+            if (string.IsNullOrWhiteSpace(tenant.CompanyKey))
+            {
+                return BadRequest(new { Message = "No se pudo resolver el tenant actual." });
+            }
+
+            var company = await _centralDbContext.CompanyConfigs
+                .Include(c => c.PilotSections)
+                .FirstOrDefaultAsync(c => c.CompanyKey == tenant.CompanyKey, HttpContext.RequestAborted);
+
+            if (company == null)
+            {
+                return NotFound(new { Message = $"No se encontro configuracion para el tenant '{tenant.CompanyKey}'." });
+            }
+
+            if (request.IsEnabled && string.IsNullOrWhiteSpace(request.Cron))
+            {
+                return BadRequest(new { Message = "Cron es requerido cuando el job esta habilitado." });
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.Cron) && !LooksLikeValidCron(request.Cron))
+            {
+                return BadRequest(new
+                {
+                    Message = "Cron invalido. Use formato de 5 campos (por ejemplo: '*/15 * * * *') o expresiones tipo '@hourly'."
+                });
+            }
+
+            var normalizedCron = string.IsNullOrWhiteSpace(request.Cron)
+                ? null
+                : request.Cron.Trim();
+
+            company.IsRecordingTransferJobEnabled = request.IsEnabled;
+            company.RecordingTransferCron = normalizedCron;
+            await _centralDbContext.SaveChangesAsync(HttpContext.RequestAborted);
+
+            var storage = await _tenantHangfireRuntime.GetStorageAsync(tenant.CompanyKey, HttpContext.RequestAborted);
+            var recurringManager = new RecurringJobManager(storage);
+
+            const string recurringJobId = "recordings-transfer-pilot";
+            if (!company.IsPilotMode || company.PilotSections.Count == 0 || !company.IsRecordingTransferJobEnabled)
+            {
+                recurringManager.RemoveIfExists(recurringJobId);
+            }
+            else
+            {
+                var effectiveCron = string.IsNullOrWhiteSpace(company.RecordingTransferCron)
+                    ? ResolveGlobalRecordingTransferCron(_configuration)
+                    : company.RecordingTransferCron.Trim();
+
+                recurringManager.AddOrUpdate<HangfireJobService>(
+                    recurringJobId,
+                    service => service.RunPilotRecordingTransfers(company.CompanyKey, null),
+                    effectiveCron,
+                    new RecurringJobOptions
+                    {
+                        TimeZone = ResolveTimeZone(company.TimeZoneId)
+                    });
+            }
+
+            return Ok(new RecordingTransferPilotJobConfigDto
+            {
+                IsEnabled = company.IsRecordingTransferJobEnabled,
+                Cron = string.IsNullOrWhiteSpace(company.RecordingTransferCron)
+                    ? ResolveGlobalRecordingTransferCron(_configuration)
+                    : company.RecordingTransferCron.Trim(),
+                TimeZoneId = company.TimeZoneId,
+                IsPilotMode = company.IsPilotMode,
+                PilotSectionsConfigured = company.PilotSections.Count
             });
         }
 
@@ -402,6 +646,401 @@ namespace APITeamsV3.API.Controllers
         {
             return string.Equals(state, "Failed", StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(state, "Deleted", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private async Task<string> ResolveTenantSqlConnectionStringAsync(string companyKey, CancellationToken cancellationToken)
+        {
+            return await _tenantHangfireRuntime.GetSqlConnectionStringAsync(companyKey, cancellationToken);
+        }
+
+        private static string ResolveGlobalRecordingTransferCron(IConfiguration configuration)
+        {
+            var configured = configuration["Hangfire:RecordingTransferCron"];
+            return string.IsNullOrWhiteSpace(configured) ? Cron.Hourly() : configured.Trim();
+        }
+
+        private static bool LooksLikeValidCron(string cron)
+        {
+            var value = cron.Trim();
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return false;
+            }
+
+            if (value.StartsWith("@", StringComparison.Ordinal))
+            {
+                return value is "@yearly" or "@annually" or "@monthly" or "@weekly" or "@daily" or "@hourly";
+            }
+
+            var parts = value.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            return parts.Length == 5;
+        }
+
+        private static TimeZoneInfo ResolveTimeZone(string? timeZoneId)
+        {
+            if (!string.IsNullOrWhiteSpace(timeZoneId))
+            {
+                try
+                {
+                    return TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
+                }
+                catch
+                {
+                }
+            }
+
+            try
+            {
+                return TimeZoneInfo.FindSystemTimeZoneById("SA Pacific Standard Time");
+            }
+            catch
+            {
+                return TimeZoneInfo.Utc;
+            }
+        }
+
+        private static async Task<List<HangfireJobSnapshotDto>> QueryRecentHangfireJobsAsync(
+            SqlConnection connection,
+            int take,
+            CancellationToken cancellationToken)
+        {
+            await TryEnsureRecentJobsStoredProcedureAsync(connection, cancellationToken);
+
+            await using var command = connection.CreateCommand();
+            command.CommandType = System.Data.CommandType.StoredProcedure;
+            command.CommandText = "dbo.cTeamsRecentHangfireJobs";
+            command.Parameters.Add(new SqlParameter("@Take", System.Data.SqlDbType.Int) { Value = take });
+
+            try
+            {
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+                return await ReadHangfireJobSnapshotsAsync(reader, take, cancellationToken);
+            }
+            catch (SqlException ex) when (ex.Number == 2812)
+            {
+                command.Parameters.Clear();
+                command.CommandType = System.Data.CommandType.Text;
+                command.CommandText = """
+                    SELECT TOP (@take)
+                        CONVERT(varchar(50), j.Id) AS JobId,
+                        COALESCE(s.Name, j.StateName, 'Unknown') AS StateName,
+                        j.InvocationData,
+                        j.Arguments,
+                        COALESCE(s.CreatedAt, j.CreatedAt) AS TimestampUtc,
+                        s.Reason,
+                        s.Data
+                    FROM [HangFire].[Job] AS j
+                    OUTER APPLY (
+                        SELECT TOP (1)
+                            st.Name,
+                            st.Reason,
+                            st.Data,
+                            st.CreatedAt
+                        FROM [HangFire].[State] AS st
+                        WHERE st.JobId = j.Id
+                        ORDER BY st.Id DESC
+                    ) AS s
+                    ORDER BY COALESCE(s.CreatedAt, j.CreatedAt) DESC, j.Id DESC;
+                    """;
+                command.Parameters.Add(new SqlParameter("@take", System.Data.SqlDbType.Int) { Value = take });
+
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+                return await ReadHangfireJobSnapshotsAsync(reader, take, cancellationToken);
+            }
+        }
+
+        private static async Task TryEnsureRecentJobsStoredProcedureAsync(
+            SqlConnection connection,
+            CancellationToken cancellationToken)
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandType = System.Data.CommandType.Text;
+            command.CommandText = """
+                IF OBJECT_ID(N'dbo.cTeamsRecentHangfireJobs', N'P') IS NULL
+                    EXEC('CREATE PROCEDURE dbo.cTeamsRecentHangfireJobs AS BEGIN SET NOCOUNT ON; SELECT 1 AS [JobId], ''Unknown'' AS [StateName], NULL AS [InvocationData], NULL AS [Arguments], GETUTCDATE() AS [TimestampUtc], NULL AS [Reason], NULL AS [Data]; END');
+                EXEC('
+                ALTER PROCEDURE dbo.cTeamsRecentHangfireJobs
+                    @Take INT
+                AS
+                BEGIN
+                    SET NOCOUNT ON;
+
+                    SELECT TOP (@Take)
+                        CONVERT(varchar(50), j.Id) AS JobId,
+                        COALESCE(s.Name, j.StateName, ''Unknown'') AS StateName,
+                        j.InvocationData,
+                        j.Arguments,
+                        COALESCE(s.CreatedAt, j.CreatedAt) AS TimestampUtc,
+                        s.Reason,
+                        s.Data
+                    FROM [HangFire].[Job] AS j
+                    OUTER APPLY (
+                        SELECT TOP (1)
+                            st.Name,
+                            st.Reason,
+                            st.Data,
+                            st.CreatedAt
+                        FROM [HangFire].[State] AS st
+                        WHERE st.JobId = j.Id
+                        ORDER BY st.Id DESC
+                    ) AS s
+                    ORDER BY COALESCE(s.CreatedAt, j.CreatedAt) DESC, j.Id DESC;
+                END
+                ');
+                """;
+
+            try
+            {
+                await command.ExecuteNonQueryAsync(cancellationToken);
+            }
+            catch (SqlException ex) when (ex.Number == 229 || ex.Number == 262 || ex.Number == 2760 || ex.Number == 15151)
+            {
+                // Fallback to inline query when the app login cannot create/alter procedures.
+            }
+        }
+
+        private static async Task<List<HangfireJobSnapshotDto>> ReadHangfireJobSnapshotsAsync(
+            SqlDataReader reader,
+            int capacity,
+            CancellationToken cancellationToken)
+        {
+            var snapshots = new List<HangfireJobSnapshotDto>(capacity);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var jobId = reader["JobId"]?.ToString() ?? string.Empty;
+                var state = reader["StateName"]?.ToString() ?? "Unknown";
+                var invocationData = reader["InvocationData"]?.ToString();
+                var argumentsData = reader["Arguments"]?.ToString();
+                var reason = reader["Reason"] as string;
+                var stateData = reader["Data"] as string;
+                var timestamp = reader["TimestampUtc"] is DateTime dt ? dt : DateTime.UtcNow;
+
+                var args = ParseHangfireArguments(argumentsData);
+                int? idSeccion = null;
+                if (args.Length > 0 && int.TryParse(args[0], out var parsedSection))
+                {
+                    idSeccion = parsedSection;
+                }
+
+                snapshots.Add(new HangfireJobSnapshotDto
+                {
+                    JobId = jobId,
+                    State = state,
+                    Method = ParseHangfireMethod(invocationData),
+                    IdSeccion = idSeccion,
+                    Arguments = args,
+                    Error = ParseHangfireError(reason, stateData),
+                    Timestamp = timestamp
+                });
+            }
+
+            return snapshots;
+        }
+
+        private static string ParseHangfireMethod(string? invocationData)
+        {
+            if (string.IsNullOrWhiteSpace(invocationData))
+            {
+                return "Unknown";
+            }
+
+            try
+            {
+                using var document = JsonDocument.Parse(invocationData);
+                if (TryGetJsonProperty(document.RootElement, out var methodElement, "Method", "method", "m"))
+                {
+                    var method = methodElement.GetString();
+                    if (!string.IsNullOrWhiteSpace(method))
+                    {
+                        return method;
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return "Unknown";
+        }
+
+        private static string[] ParseHangfireArguments(string? argumentsJson)
+        {
+            if (string.IsNullOrWhiteSpace(argumentsJson))
+            {
+                return Array.Empty<string>();
+            }
+
+            try
+            {
+                using var document = JsonDocument.Parse(argumentsJson);
+                if (document.RootElement.ValueKind != JsonValueKind.Array)
+                {
+                    return Array.Empty<string>();
+                }
+
+                return document.RootElement
+                    .EnumerateArray()
+                    .Select(static element => element.ValueKind switch
+                    {
+                        JsonValueKind.String => element.GetString() ?? string.Empty,
+                        JsonValueKind.Number => element.ToString(),
+                        JsonValueKind.True => bool.TrueString,
+                        JsonValueKind.False => bool.FalseString,
+                        JsonValueKind.Null => string.Empty,
+                        _ => element.ToString()
+                    })
+                    .ToArray();
+            }
+            catch
+            {
+                return Array.Empty<string>();
+            }
+        }
+
+        private static string? ParseHangfireError(string? reason, string? stateDataJson)
+        {
+            if (!string.IsNullOrWhiteSpace(reason))
+            {
+                return reason;
+            }
+
+            if (string.IsNullOrWhiteSpace(stateDataJson))
+            {
+                return null;
+            }
+
+            try
+            {
+                using var document = JsonDocument.Parse(stateDataJson);
+                if (document.RootElement.ValueKind != JsonValueKind.Object)
+                {
+                    return null;
+                }
+
+                if (document.RootElement.TryGetProperty("ExceptionMessage", out var exceptionMessage))
+                {
+                    return exceptionMessage.GetString();
+                }
+
+                if (document.RootElement.TryGetProperty("Result", out var result))
+                {
+                    return result.GetString();
+                }
+            }
+            catch
+            {
+            }
+
+            return null;
+        }
+
+        private static async Task<List<string>> QueryRecurringJobIdsAsync(SqlConnection connection, CancellationToken cancellationToken)
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT DISTINCT s.Value
+                FROM [HangFire].[Set] AS s
+                WHERE s.[Key] = 'recurring-jobs'
+                  AND s.Value IS NOT NULL
+                  AND s.Value <> '';
+                """;
+
+            var result = new List<string>();
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var value = reader.GetString(0);
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    result.Add(value);
+                }
+            }
+
+            return result;
+        }
+
+        private static async Task<List<string>> QueryHangfireJobIdsAsync(SqlConnection connection, int take, CancellationToken cancellationToken)
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT TOP (@take) CONVERT(varchar(50), j.Id) AS JobId
+                FROM [HangFire].[Job] AS j
+                ORDER BY j.Id DESC;
+                """;
+            command.Parameters.Add(new SqlParameter("@take", System.Data.SqlDbType.Int) { Value = take });
+
+            var result = new List<string>();
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var value = reader["JobId"]?.ToString();
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    result.Add(value);
+                }
+            }
+
+            return result;
+        }
+
+        private static string[] ParseHangfireArgumentsFromRecurringJob(string? recurringJobJson)
+        {
+            if (string.IsNullOrWhiteSpace(recurringJobJson))
+            {
+                return Array.Empty<string>();
+            }
+
+            try
+            {
+                using var document = JsonDocument.Parse(recurringJobJson);
+                if (TryGetJsonProperty(document.RootElement, out var argsElement, "Args", "args", "a"))
+                {
+                    return ParseHangfireArguments(argsElement.GetRawText());
+                }
+
+                if (TryGetJsonProperty(document.RootElement, out var invocationElement, "InvocationData", "invocationData"))
+                {
+                    using var nestedDocument = JsonDocument.Parse(invocationElement.GetString() ?? invocationElement.GetRawText());
+                    if (TryGetJsonProperty(nestedDocument.RootElement, out var nestedArgsElement, "Args", "args", "a"))
+                    {
+                        return ParseHangfireArguments(nestedArgsElement.GetRawText());
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return Array.Empty<string>();
+        }
+
+        private static bool TryGetJsonProperty(JsonElement element, out JsonElement value, params string[] names)
+        {
+            foreach (var name in names)
+            {
+                if (element.TryGetProperty(name, out value))
+                {
+                    return true;
+                }
+            }
+
+            value = default;
+            return false;
+        }
+
+        private static DateTime? ParseHangfireDateTime(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return null;
+            }
+
+            if (DateTime.TryParse(value, out var parsed))
+            {
+                return parsed;
+            }
+
+            return null;
         }
 
         private static int DeleteJobsBatch(
@@ -517,5 +1156,20 @@ namespace APITeamsV3.API.Controllers
         public string TimeZoneId { get; set; } = string.Empty;
         public string Error { get; set; } = string.Empty;
         public bool Removed { get; set; }
+    }
+
+    public class RecordingTransferPilotJobConfigDto
+    {
+        public bool IsEnabled { get; set; }
+        public string Cron { get; set; } = string.Empty;
+        public string TimeZoneId { get; set; } = string.Empty;
+        public bool IsPilotMode { get; set; }
+        public int PilotSectionsConfigured { get; set; }
+    }
+
+    public class UpdateRecordingTransferPilotJobConfigRequest
+    {
+        public bool IsEnabled { get; set; }
+        public string? Cron { get; set; }
     }
 }

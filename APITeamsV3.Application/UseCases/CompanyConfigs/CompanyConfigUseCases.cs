@@ -33,6 +33,8 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
         string MeetingPolicyMode,
         bool IsPilotMode,
         List<int> PilotSections,
+        bool? IsRecordingTransferJobEnabled,
+        string? RecordingTransferCron,
         string? TeacherAltDomain,
         bool IsMaintenanceMode,
         string? MaintenanceMessage
@@ -86,6 +88,8 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
                     c.MeetingPolicyMode,
                     c.IsPilotMode,
                     c.PilotSections?.Select(p => p.IdSeccion).ToList() ?? new List<int>(),
+                    c.IsRecordingTransferJobEnabled,
+                    c.RecordingTransferCron,
                     c.TeacherAltDomain,
                     c.IsMaintenanceMode,
                     c.MaintenanceMessage));
@@ -138,6 +142,8 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
                 c.MeetingPolicyMode,
                 c.IsPilotMode,
                 c.PilotSections?.Select(p => p.IdSeccion).ToList() ?? new List<int>(),
+                c.IsRecordingTransferJobEnabled,
+                c.RecordingTransferCron,
                 c.TeacherAltDomain,
                 c.IsMaintenanceMode,
                 c.MaintenanceMessage);
@@ -160,6 +166,8 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
         string GraphClientSecretRef,
         bool IsPilotMode,
         List<int> PilotSections,
+        bool? IsRecordingTransferJobEnabled,
+        string? RecordingTransferCron,
         string? TeacherAltDomain,
         bool IsMaintenanceMode,
         string? MaintenanceMessage
@@ -195,6 +203,8 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
                 LastSyncTimestamp = System.DateTime.UtcNow,
                 IsPilotMode = request.IsPilotMode,
                 PilotSections = request.PilotSections?.Select(id => new CompanyPilotSection { IdSeccion = id }).ToList() ?? new List<CompanyPilotSection>(),
+                IsRecordingTransferJobEnabled = request.IsRecordingTransferJobEnabled ?? true,
+                RecordingTransferCron = request.RecordingTransferCron,
                 TeacherAltDomain = request.TeacherAltDomain,
                 IsMaintenanceMode = request.IsMaintenanceMode,
                 MaintenanceMessage = request.MaintenanceMessage
@@ -222,6 +232,8 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
         string GraphClientSecretRef,
         bool IsPilotMode,
         List<int> PilotSections,
+        bool? IsRecordingTransferJobEnabled,
+        string? RecordingTransferCron,
         string? TeacherAltDomain,
         bool IsMaintenanceMode,
         string? MaintenanceMessage,
@@ -279,6 +291,8 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
             }
             
             entity.IsPilotMode = request.IsPilotMode;
+            entity.IsRecordingTransferJobEnabled = request.IsRecordingTransferJobEnabled ?? true;
+            entity.RecordingTransferCron = request.RecordingTransferCron;
             entity.TeacherAltDomain = request.TeacherAltDomain;
             entity.IsMaintenanceMode = request.IsMaintenanceMode;
             entity.MaintenanceMessage = request.MaintenanceMessage;

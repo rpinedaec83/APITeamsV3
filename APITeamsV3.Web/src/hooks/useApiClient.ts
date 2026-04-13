@@ -4,6 +4,7 @@ import { getApiScopes } from "../authConfig";
 import { useMemo } from "react";
 import { getBaseApiUrl } from "../utils/config";
 import { CacheLookupPolicy, InteractionRequiredAuthError } from "@azure/msal-browser";
+import { getMaintenanceMessage, isMaintenancePayload, notifyMaintenanceRequired } from "../utils/maintenance";
 
 export const AUTH_INTERACTION_REQUIRED_EVENT = "apiteams:auth-interaction-required";
 export const AUTH_TOKEN_REQUIRED_ERROR = "auth_token_required";
@@ -71,6 +72,13 @@ export const useApiClient = () => {
                     console.warn("Unauthorized request, interactive login required.");
                     notifyInteractiveAuthRequired();
                 }
+
+                if (error.response && error.response.status === 503) {
+                    if (isMaintenancePayload(error.response.data)) {
+                        notifyMaintenanceRequired(getMaintenanceMessage(error.response.data));
+                    }
+                }
+
                 return Promise.reject(error);
             }
         );

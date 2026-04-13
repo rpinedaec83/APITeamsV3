@@ -15,7 +15,10 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
 {
     public class SyncSectionAgendaCommandHandler : IRequestHandler<SyncSectionAgendaCommand, DiagnosticResultDto>
     {
+        private const string ChangeMarker = "CHG-2026-04-12-PILOT-GUARD-IDEMPOTENT-TEAMS-HORARIOS";
         private readonly ISmartDbContext _context;
+        private readonly ICentralDbContext _centralContext;
+        private readonly ITenantProvider _tenantProvider;
         private readonly ITeamAcademicoRepository _teamRepo;
         private readonly ITeamsAgendaService _agendaService;
         private readonly IGraphClientFactory _graphClientFactory;
@@ -25,6 +28,8 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
 
         public SyncSectionAgendaCommandHandler(
             ISmartDbContext context,
+            ICentralDbContext centralContext,
+            ITenantProvider tenantProvider,
             ITeamAcademicoRepository teamRepo,
             ITeamsAgendaService agendaService,
             IGraphClientFactory graphClientFactory,
@@ -33,6 +38,8 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
             ILogger<SyncSectionAgendaCommandHandler> logger)
         {
             _context = context;
+            _centralContext = centralContext;
+            _tenantProvider = tenantProvider;
             _teamRepo = teamRepo;
             _agendaService = agendaService;
             _graphClientFactory = graphClientFactory;
@@ -43,6 +50,11 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
 
         public async Task<DiagnosticResultDto> Handle(SyncSectionAgendaCommand request, CancellationToken cancellationToken)
         {
+            _logger.LogInformation(
+                "{ChangeMarker}: SyncSectionAgenda iniciado para IdSeccion={IdSeccion}.",
+                ChangeMarker,
+                request.IdSeccion);
+
             var result = new DiagnosticResultDto
             {
                 IsValid = true,
@@ -82,6 +94,24 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                 {
                     result.IsValid = false;
                     result.Summary = "Seccion no encontrada.";
+                    return result;
+                }
+
+                if (!await IsSectionAllowedInPilotModeAsync(request.IdSeccion, cancellationToken))
+                {
+                    _logger.LogInformation(
+                        "{ChangeMarker}: Seccion {IdSeccion} omitida por modo piloto (fuera de piloto).",
+                        ChangeMarker,
+                        request.IdSeccion);
+
+                    result.IsValid = false;
+                    result.Summary = "Seccion omitida: no pertenece al piloto configurado.";
+                    await LogOperativoAsync(
+                        "Warning",
+                        "Agenda",
+                        request.IdSeccion.ToString(),
+                        result.Summary,
+                        request.JobId);
                     return result;
                 }
 
@@ -583,6 +613,19 @@ WHERE TH.IdTeams = {0}
             CancellationToken cancellationToken)
         {
             const string insertSql = @"
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM TeamsHorarios WITH (NOLOCK)
+    WHERE IdTeams = {0}
+      AND IdEvento = {1}
+      AND IdHorario = {2}
+      AND IdCurso = {3}
+      AND NumeroReunion = {4}
+      AND CodigoAlumno = {9}
+      AND Estado = 'A'
+)
+BEGIN
 INSERT INTO TeamsHorarios
 (
     IdTeams,
@@ -622,7 +665,10 @@ VALUES
     {13},
     1,
     GETDATE()
-);";
+);
+END;";
+            var insertedRows = 0;
+            var skippedDuplicates = 0;
 
             foreach (var meeting in meetings)
             {
@@ -640,7 +686,7 @@ VALUES
 
                     foreach (var participant in participants)
                     {
-                        await _context.Database.ExecuteSqlRawAsync(
+                        var affectedRows = await _context.Database.ExecuteSqlRawAsync(
                             insertSql,
                             teamId,
                             meeting.EventId,
@@ -656,9 +702,25 @@ VALUES
                             effectiveTeacherCode,
                             effectiveTeacherEmail ?? string.Empty,
                             meeting.JoinUrl);
+
+                        if (affectedRows > 0)
+                        {
+                            insertedRows += affectedRows;
+                        }
+                        else
+                        {
+                            skippedDuplicates++;
+                        }
                     }
                 }
             }
+
+            _logger.LogInformation(
+                "{ChangeMarker}: PersistTeamsHorarios section={SectionId}, inserted={InsertedRows}, duplicatesSkipped={SkippedDuplicates}.",
+                ChangeMarker,
+                sectionId,
+                insertedRows,
+                skippedDuplicates);
         }
 
         private static List<StudentRow> ResolveParticipants(List<StudentRow> students, string teacherCode, string? teacherEmail)
@@ -680,6 +742,30 @@ VALUES
                     CorreoAlumno = teacherEmail ?? string.Empty
                 }
             ];
+        }
+
+        private async Task<bool> IsSectionAllowedInPilotModeAsync(int sectionId, CancellationToken cancellationToken)
+        {
+            var tenant = _tenantProvider.GetCurrentTenant();
+            if (string.IsNullOrWhiteSpace(tenant.CompanyKey))
+            {
+                return true;
+            }
+
+            var normalizedCompanyKey = tenant.CompanyKey.Trim().ToLowerInvariant();
+            var companyConfig = await _centralContext.CompanyConfigs
+                .Include(c => c.PilotSections)
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    c => c.IsActive && c.CompanyKey.ToLower() == normalizedCompanyKey,
+                    cancellationToken);
+
+            if (companyConfig?.IsPilotMode != true)
+            {
+                return true;
+            }
+
+            return companyConfig.PilotSections.Any(ps => ps.IdSeccion == sectionId);
         }
 
         private async Task UpdateSeccionHorarioLinkAsync(

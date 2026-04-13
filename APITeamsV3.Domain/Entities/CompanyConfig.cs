@@ -31,6 +31,8 @@ namespace APITeamsV3.Domain.Entities
         // Pilot Mode
         public bool IsPilotMode { get; set; } = false;
         public ICollection<CompanyPilotSection> PilotSections { get; set; } = new List<CompanyPilotSection>();
+        public bool IsRecordingTransferJobEnabled { get; set; } = true;
+        public string? RecordingTransferCron { get; set; }
 
         // Maintenance Mode
         public bool IsMaintenanceMode { get; set; } = false;

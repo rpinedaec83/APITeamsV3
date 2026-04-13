@@ -13,13 +13,56 @@ try
         return;
     }
 
+    var hangfireInstallPath = ResolveHangfireInstallPath(options.InstallSqlPath);
+    var installSql = File.ReadAllText(hangfireInstallPath);
+
+    if (!string.IsNullOrWhiteSpace(options.SqlConnection))
+    {
+        var builder = new SqlConnectionStringBuilder(options.SqlConnection);
+        if (string.IsNullOrWhiteSpace(builder.DataSource) || string.IsNullOrWhiteSpace(builder.InitialCatalog))
+        {
+            throw new InvalidOperationException("The value of --sql-connection must include Server/Data Source and Database/Initial Catalog.");
+        }
+
+        Console.WriteLine("Execution mode: direct SQL connection");
+        Console.WriteLine($"SqlServerTarget: {builder.DataSource}/{builder.InitialCatalog}");
+        Console.WriteLine($"InstallSqlPath:  {hangfireInstallPath}");
+        Console.WriteLine();
+
+        if (options.DryRun)
+        {
+            var action = options.Reinstall ? "reinstall" : "install";
+            Console.WriteLine($"[DRY-RUN] [direct] Would {action} Hangfire schema on {builder.DataSource}/{builder.InitialCatalog}");
+            return;
+        }
+
+        if (options.Reinstall)
+        {
+            Console.WriteLine($"[direct] Reinstalling Hangfire schema on {builder.DataSource}/{builder.InitialCatalog} (drop + install)...");
+            ReinstallHangfireSchema(builder.ConnectionString, installSql);
+        }
+        else
+        {
+            Console.WriteLine($"[direct] Installing Hangfire schema on {builder.DataSource}/{builder.InitialCatalog}...");
+            InstallHangfireSchema(builder.ConnectionString, installSql);
+        }
+
+        Console.WriteLine("[direct] Hangfire schema is ready.");
+        return;
+    }
+
     var repoRoot = FindRepoRoot(Directory.GetCurrentDirectory());
     var appSettingsPath = ResolveAppSettingsPath(options.AppSettingsPath, repoRoot);
-    var centralDbPath = ResolveCentralDbPath(appSettingsPath, options.CentralDbPath);
-    var hangfireInstallPath = ResolveHangfireInstallPath(options.InstallSqlPath);
+    var (centralDbPath, centralDbSource) = ResolveCentralDbPath(appSettingsPath, options.CentralDbPath);
     var encryptionKey = ResolveEncryptionKey(options.EncryptionKey);
     var encryptionKeyBytes = NormalizeKey(encryptionKey);
-    var installSql = File.ReadAllText(hangfireInstallPath);
+
+    Console.WriteLine($"RepositoryRoot: {repoRoot}");
+    Console.WriteLine($"AppSettingsPath: {appSettingsPath}");
+    Console.WriteLine($"CentralDbPath:   {centralDbPath}");
+    Console.WriteLine($"CentralDbSource: {centralDbSource}");
+    Console.WriteLine($"InstallSqlPath:  {hangfireInstallPath}");
+    Console.WriteLine();
 
     var companies = LoadCompanies(centralDbPath, options.CompanyKeys, options.IncludeInactive);
     if (companies.Count == 0)
@@ -53,14 +96,24 @@ try
 
         if (options.DryRun)
         {
-            Console.WriteLine($"[DRY-RUN] [{company.CompanyKey}] Would install Hangfire schema on {builder.DataSource}/{builder.InitialCatalog}");
+            var action = options.Reinstall ? "reinstall" : "install";
+            Console.WriteLine($"[DRY-RUN] [{company.CompanyKey}] Would {action} Hangfire schema on {builder.DataSource}/{builder.InitialCatalog}");
             processedTargets[targetKey] = company.CompanyKey;
             successfulCompanies.Add(company.CompanyKey);
             continue;
         }
 
-        Console.WriteLine($"[{company.CompanyKey}] Installing Hangfire schema on {builder.DataSource}/{builder.InitialCatalog}...");
-        InstallHangfireSchema(builder.ConnectionString, installSql);
+        if (options.Reinstall)
+        {
+            Console.WriteLine($"[{company.CompanyKey}] Reinstalling Hangfire schema on {builder.DataSource}/{builder.InitialCatalog} (drop + install)...");
+            ReinstallHangfireSchema(builder.ConnectionString, installSql);
+        }
+        else
+        {
+            Console.WriteLine($"[{company.CompanyKey}] Installing Hangfire schema on {builder.DataSource}/{builder.InitialCatalog}...");
+            InstallHangfireSchema(builder.ConnectionString, installSql);
+        }
+
         Console.WriteLine($"[{company.CompanyKey}] Hangfire schema is ready.");
 
         processedTargets[targetKey] = company.CompanyKey;
@@ -124,7 +177,7 @@ static string ResolveAppSettingsPath(string? configuredPath, string repoRoot)
     return defaultPath;
 }
 
-static string ResolveCentralDbPath(string appSettingsPath, string? configuredPath)
+static (string Path, string Source) ResolveCentralDbPath(string appSettingsPath, string? configuredPath)
 {
     if (!string.IsNullOrWhiteSpace(configuredPath))
     {
@@ -134,7 +187,23 @@ static string ResolveCentralDbPath(string appSettingsPath, string? configuredPat
             throw new FileNotFoundException($"Central SQLite DB was not found at '{explicitPath}'.");
         }
 
-        return explicitPath;
+        return (explicitPath, "--central-db");
+    }
+
+    var environmentCentralConnection = Environment.GetEnvironmentVariable("ConnectionStrings__CentralConnection");
+    if (!string.IsNullOrWhiteSpace(environmentCentralConnection))
+    {
+        var environmentBuilder = new SqliteConnectionStringBuilder(environmentCentralConnection);
+        if (!string.IsNullOrWhiteSpace(environmentBuilder.DataSource))
+        {
+            var environmentPath = Path.GetFullPath(environmentBuilder.DataSource, Path.GetDirectoryName(appSettingsPath)!);
+            if (!File.Exists(environmentPath))
+            {
+                throw new FileNotFoundException($"Central SQLite DB from env ConnectionStrings__CentralConnection was not found at '{environmentPath}'.");
+            }
+
+            return (environmentPath, "env:ConnectionStrings__CentralConnection");
+        }
     }
 
     using var document = JsonDocument.Parse(File.ReadAllText(appSettingsPath));
@@ -162,7 +231,7 @@ static string ResolveCentralDbPath(string appSettingsPath, string? configuredPat
         throw new FileNotFoundException($"Central SQLite DB was not found at '{candidatePath}'. Pass --central-db explicitly if needed.");
     }
 
-    return candidatePath;
+    return (candidatePath, "appsettings:ConnectionStrings.CentralConnection");
 }
 
 static string ResolveHangfireInstallPath(string? configuredPath)
@@ -381,6 +450,52 @@ static void InstallHangfireSchema(string connectionString, string sqlScript)
     }
 }
 
+static void ReinstallHangfireSchema(string connectionString, string sqlScript)
+{
+    using var connection = new SqlConnection(connectionString);
+    connection.Open();
+
+    using (var dropCommand = connection.CreateCommand())
+    {
+        dropCommand.CommandTimeout = 600;
+        dropCommand.CommandText = """
+SET NOCOUNT ON;
+DECLARE @schemaId INT = SCHEMA_ID(N'HangFire');
+IF @schemaId IS NULL
+    RETURN;
+
+DECLARE @sql NVARCHAR(MAX) = N'';
+
+-- Drop foreign keys first.
+SELECT @sql += N'ALTER TABLE ' + QUOTENAME(SCHEMA_NAME(t.schema_id)) + N'.' + QUOTENAME(t.name)
+             + N' DROP CONSTRAINT ' + QUOTENAME(fk.name) + N';' + CHAR(10)
+FROM sys.foreign_keys fk
+JOIN sys.tables t ON t.object_id = fk.parent_object_id
+WHERE t.schema_id = @schemaId;
+
+IF LEN(@sql) > 0
+    EXEC sp_executesql @sql;
+
+SET @sql = N'';
+
+-- Drop all tables in HangFire schema.
+SELECT @sql += N'DROP TABLE ' + QUOTENAME(SCHEMA_NAME(t.schema_id)) + N'.' + QUOTENAME(t.name) + N';' + CHAR(10)
+FROM sys.tables t
+WHERE t.schema_id = @schemaId;
+
+IF LEN(@sql) > 0
+    EXEC sp_executesql @sql;
+
+-- Finally drop schema itself.
+IF EXISTS (SELECT 1 FROM sys.schemas WHERE schema_id = @schemaId)
+    EXEC(N'DROP SCHEMA [HangFire];');
+""";
+        dropCommand.ExecuteNonQuery();
+    }
+
+    InstallHangfireSchema(connectionString, sqlScript);
+}
+
 static IEnumerable<string> SplitSqlBatches(string sqlScript)
 {
     using var reader = new StringReader(sqlScript);
@@ -416,9 +531,11 @@ sealed class InstallerOptions
     public string? AppSettingsPath { get; init; }
     public string? CentralDbPath { get; init; }
     public string? InstallSqlPath { get; init; }
+    public string? SqlConnection { get; init; }
     public string? EncryptionKey { get; init; }
     public bool IncludeInactive { get; init; }
     public bool DryRun { get; init; }
+    public bool Reinstall { get; init; }
     public bool ShowHelp { get; init; }
     public IReadOnlyCollection<string> CompanyKeys { get; init; } = Array.Empty<string>();
 
@@ -428,9 +545,11 @@ sealed class InstallerOptions
         string? appSettingsPath = null;
         string? centralDbPath = null;
         string? installSqlPath = null;
+        string? sqlConnection = null;
         string? encryptionKey = null;
         var includeInactive = false;
         var dryRun = false;
+        var reinstall = false;
         var showHelp = false;
 
         for (var i = 0; i < args.Length; i++)
@@ -446,6 +565,9 @@ sealed class InstallerOptions
                 case "--install-sql":
                     installSqlPath = ReadValue(args, ref i, "--install-sql");
                     break;
+                case "--sql-connection":
+                    sqlConnection = ReadValue(args, ref i, "--sql-connection");
+                    break;
                 case "--encryption-key":
                     encryptionKey = ReadValue(args, ref i, "--encryption-key");
                     break;
@@ -458,6 +580,9 @@ sealed class InstallerOptions
                     break;
                 case "--dry-run":
                     dryRun = true;
+                    break;
+                case "--reinstall":
+                    reinstall = true;
                     break;
                 case "--help":
                 case "-h":
@@ -474,9 +599,11 @@ sealed class InstallerOptions
             AppSettingsPath = appSettingsPath,
             CentralDbPath = centralDbPath,
             InstallSqlPath = installSqlPath,
+            SqlConnection = sqlConnection,
             EncryptionKey = encryptionKey,
             IncludeInactive = includeInactive,
             DryRun = dryRun,
+            Reinstall = reinstall,
             ShowHelp = showHelp,
             CompanyKeys = companyKeys
         };
@@ -492,10 +619,12 @@ Options:
   --appsettings <path>      Path to APITeamsV3.API appsettings.json.
   --central-db <path>       Override the central SQLite database path.
   --install-sql <path>      Override the Hangfire install.sql path.
+  --sql-connection <conn>   Execute directly against a SQL Server connection string.
   --encryption-key <key>    EncryptionKey used to decrypt SmartConnectionString values.
   --company-key <key[,key]> Restrict execution to specific tenants. Can be repeated.
   --include-inactive        Include inactive tenants.
   --dry-run                 Show target SQL Server databases without executing install.sql.
+  --reinstall               Drop and recreate the full HangFire schema before running install.sql.
   --help                    Show this help message.
 """);
     }
