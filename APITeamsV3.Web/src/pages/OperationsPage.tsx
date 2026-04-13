@@ -20,6 +20,7 @@ import {
     tokens,
     Avatar,
     Badge,
+    ProgressBar,
     Spinner,
 } from '@fluentui/react-components';
 import {
@@ -90,6 +91,8 @@ interface StudentData {
     codigo: string;
     enrolledSections: EnrolledSection[];
 }
+
+type TeamActionProgress = 'refresh-members' | 'regenerate-agenda' | 'recreate-team' | null;
 
 const useStyles = makeStyles({
     root: {
@@ -216,6 +219,17 @@ const useStyles = makeStyles({
         ...shorthands.padding('20px', '24px'),
         ...shorthands.borderRadius(tokens.borderRadiusLarge),
         boxShadow: tokens.shadow16,
+        minWidth: '360px',
+    },
+    loadingProgressTitle: {
+        fontSize: tokens.fontSizeBase300,
+        fontWeight: tokens.fontWeightSemibold,
+        marginBottom: '12px',
+    },
+    loadingProgressHint: {
+        marginTop: '10px',
+        fontSize: tokens.fontSizeBase200,
+        color: tokens.colorNeutralForeground2,
     },
 });
 
@@ -263,6 +277,7 @@ const OperationsPage: React.FC = () => {
     const recreateProvisioningWaitMs = 5 * 60 * 1000;
 
     const [loading, setLoading] = useState(false);
+    const [teamActionInProgress, setTeamActionInProgress] = useState<TeamActionProgress>(null);
     const [error, setError] = useState('');
 
     // State for Top Tabs
@@ -291,6 +306,19 @@ const OperationsPage: React.FC = () => {
             direction: prev.key === key && prev.direction === 'ascending' ? 'descending' : 'ascending'
         }));
     };
+
+    const teamActionProgressMessage = useMemo(() => {
+        switch (teamActionInProgress) {
+            case 'refresh-members':
+                return 'Refrescando miembros del Team...';
+            case 'regenerate-agenda':
+                return 'Regenerando agendas del Team...';
+            case 'recreate-team':
+                return 'Recreando Team y aprovisionando en Microsoft 365...';
+            default:
+                return '';
+        }
+    }, [teamActionInProgress]);
 
     const processedData = useMemo(() => {
         if (selectedTab === 'seccion') {
@@ -457,6 +485,7 @@ const OperationsPage: React.FC = () => {
         const result = await showConfirm('¿Estás seguro de refrescar alumnos y facilitadores para esta sección?');
         if (!result.isConfirmed) return;
 
+        setTeamActionInProgress('refresh-members');
         setLoading(true);
         try {
             const companyKey = getCompanyKey();
@@ -467,6 +496,7 @@ const OperationsPage: React.FC = () => {
             const errorMessage = err instanceof Error ? err.message : 'Error desconocido al refrescar miembros';
             showError(errorMessage);
         } finally {
+            setTeamActionInProgress(null);
             setLoading(false);
         }
     };
@@ -509,6 +539,7 @@ const OperationsPage: React.FC = () => {
             await showWarning('El Team aun se esta aprovisionando en Microsoft 365, intente en unos 5 minutos volver a dar clic en el boton "Regenerar agenda".');
             return;
         }
+        setTeamActionInProgress('regenerate-agenda');
         setLoading(true);
         try {
             const companyKey = getCompanyKey();
@@ -517,6 +548,7 @@ const OperationsPage: React.FC = () => {
         } catch (err: unknown) {
             showError('Error al regenerar agenda.');
         } finally {
+            setTeamActionInProgress(null);
             setLoading(false);
         }
     };
@@ -568,6 +600,7 @@ const OperationsPage: React.FC = () => {
         if (!step2.isConfirmed) return;
 
         let provisioningCompleted = false;
+        setTeamActionInProgress('recreate-team');
         setLoading(true);
         try {
             const companyKey = getCompanyKey();
@@ -580,6 +613,7 @@ const OperationsPage: React.FC = () => {
             const errorMessage = err instanceof Error ? err.message : 'Error al recrear equipo.';
             showError(errorMessage);
         } finally {
+            setTeamActionInProgress(null);
             setLoading(false);
         }
 
@@ -710,7 +744,15 @@ const OperationsPage: React.FC = () => {
             {loading && (
                 <div className={styles.loadingOverlay}>
                     <div className={styles.loadingOverlayContent}>
-                        <Spinner label="Procesando..." labelPosition="below" size="extra-large" />
+                        {teamActionInProgress ? (
+                            <>
+                                <div className={styles.loadingProgressTitle}>{teamActionProgressMessage}</div>
+                                <ProgressBar thickness="large" />
+                                <div className={styles.loadingProgressHint}>Espere por favor, el proceso puede tardar unos minutos.</div>
+                            </>
+                        ) : (
+                            <Spinner label="Procesando..." labelPosition="below" size="extra-large" />
+                        )}
                     </div>
                 </div>
             )}
