@@ -24,11 +24,15 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Las bases de datos NO se publican con el codigo: el servidor de produccion
+         mantiene sus propios archivos .db y el script de deploy los preserva. -->
     <None Update="Smart_IDAT.db">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </None>
     <None Update="APITeamsV3_Central.db">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </None>
   </ItemGroup>
 </Project>

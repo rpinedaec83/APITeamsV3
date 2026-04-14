@@ -10,7 +10,6 @@ $publishDir   = "C:\Users\apoyoexterno15\Documents\Sources\APITeamsV3\publish_ou
 $iisApiPath   = "E:\APITEAMSV3\publish\api"
 $appPool      = "API"
 $dotnet       = "C:\Program Files\dotnet\dotnet.exe"
-$SkipDbRestore = $false # Set to $false to preserve production DBs
 
 # Verificar que dotnet SDK esté disponible
 Write-Host "[1/5] Verificando .NET SDK..." -ForegroundColor Cyan
@@ -81,8 +80,17 @@ if (Test-Path $iisApiPath) {
     Get-ChildItem -Path $iisApiPath -File | Where-Object { $_.Name -ne "appsettings.json" -and $_.Extension -notmatch "^\.db(-shm|-wal)?$" } | Remove-Item -Force
 }
 
-# Copiar todo el publish al directorio IIS (excluyendo archivos bloqueados de SQLite)
-robocopy $publishDir $iisApiPath /MIR /XF *.db-shm *.db-wal *.db /R:3 /W:5 /NP | Out-Null
+# Verificacion de seguridad: los .db NO deben estar en publish_output
+Write-Host "  Verificando que no hay .db en publish_output..." -ForegroundColor Yellow
+$leakedDbs = Get-ChildItem -Path $publishDir -Filter "*.db" -ErrorAction SilentlyContinue
+if ($leakedDbs) {
+    Write-Host "  ADVERTENCIA: Se encontraron archivos .db en publish_output que seran excluidos:" -ForegroundColor Red
+    $leakedDbs | ForEach-Object { Write-Host "    - $($_.Name)" -ForegroundColor Red }
+}
+
+# Copiar todo el publish al directorio IIS (los .db ya estan excluidos del proyecto,
+# pero se excluyen tambien aqui como doble proteccion)
+robocopy $publishDir $iisApiPath /MIR /XF *.db *.db-shm *.db-wal /R:3 /W:5 /NP | Out-Null
 
 # Restaurar appsettings de produccion (no sobreescribir con el de dev)
 if (Test-Path $backupSettings) {
@@ -90,18 +98,21 @@ if (Test-Path $backupSettings) {
     Write-Host "  appsettings.json de produccion restaurado." -ForegroundColor Yellow
 }
 
-# Restaurar bases de datos de produccion
-if (-not $SkipDbRestore) {
-    foreach ($db in $databases) {
-        $backupDb = Join-Path $env:TEMP "$($db)_backup"
-        if (Test-Path $backupDb) {
-            $prodDb = Join-Path $iisApiPath $db
-            Copy-Item $backupDb $prodDb -Force
-            Write-Host "  $db de produccion restaurado." -ForegroundColor Yellow
+# Restaurar bases de datos de produccion (siempre, ya que no vienen del publish)
+foreach ($db in $databases) {
+    $backupDb = Join-Path $env:TEMP "$($db)_backup"
+    if (Test-Path $backupDb) {
+        $prodDb = Join-Path $iisApiPath $db
+        Copy-Item $backupDb $prodDb -Force
+        Write-Host "  $db de produccion restaurado desde backup." -ForegroundColor Yellow
+    } else {
+        $prodDb = Join-Path $iisApiPath $db
+        if (-not (Test-Path $prodDb)) {
+            Write-Host "  ADVERTENCIA: No existe $db en produccion ni backup. La BD debera inicializarse." -ForegroundColor Red
+        } else {
+            Write-Host "  $db ya existe en produccion (no habia backup, se mantiene intacta)." -ForegroundColor Green
         }
     }
-} else {
-    Write-Host "  Saltando restauracion de bases de datos. Se usaran las locales publicadas." -ForegroundColor Cyan
 }
 
 Write-Host "  Archivos copiados." -ForegroundColor Green
