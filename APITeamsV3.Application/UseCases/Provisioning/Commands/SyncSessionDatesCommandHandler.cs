@@ -6,16 +6,18 @@ using System.Threading.Tasks;
 
 namespace APITeamsV3.Application.UseCases.Provisioning.Commands
 {
-    public class SyncSessionDatesCommandHandler : IRequestHandler<SyncSessionDatesCommand, bool>
+    public class SyncSessionDatesCommandHandler : IRequestHandler<SyncSessionDatesCommand>
     {
         private readonly ISmartDbContext _context;
+        private readonly ICurrentUserService _currentUserService;
 
-        public SyncSessionDatesCommandHandler(ISmartDbContext context)
+        public SyncSessionDatesCommandHandler(ISmartDbContext context, ICurrentUserService currentUserService)
         {
             _context = context;
+            _currentUserService = currentUserService;
         }
 
-        public async Task<bool> Handle(SyncSessionDatesCommand request, CancellationToken cancellationToken)
+        public async Task Handle(SyncSessionDatesCommand request, CancellationToken cancellationToken)
         {
             // Option 12 Logic: Sync Dates
             var sql = @"
@@ -74,13 +76,13 @@ UPDATE
 SET TARGET.Fecha = SOURCE.Fecha,
   TARGET.Inicio = SOURCE.Inicio,
   TARGET.Fin = SOURCE.Fin,
-  TARGET.UsuarioModificacion = 1,
+  TARGET.UsuarioModificacion = {1},
   TARGET.FechaModificacion = GETDATE();
             ";
 
-            await _context.Database.ExecuteSqlRawAsync(sql, request.IdSeccion);
+            await _context.Database.ExecuteSqlRawAsync(sql, request.IdSeccion, _currentUserService.UserIdInt ?? 1);
 
-            return true;
+            return;
         }
     }
 }

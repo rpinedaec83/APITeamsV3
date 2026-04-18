@@ -9,10 +9,11 @@ namespace APITeamsV3.Application.UseCases.Provisioning.Commands
         EventSync = 1 // Option 37 (Upsert specific event)
     }
 
-    public class SyncSessionRosterCommand : IRequest<bool>
+    public class SyncSessionRosterCommand : IRequest
     {
         public int IdSeccion { get; set; }
         public SessionRosterSyncType Mode { get; set; }
+        public string? JobId { get; set; }
 
         // Parameters for FullSync (Options 9, 10)
         public DateTime? FechaMaximaAgendas { get; set; }

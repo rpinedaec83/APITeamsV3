@@ -20,6 +20,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
         private readonly IGraphClientFactory _graphClientFactory;
         private readonly ITeamsLogOperativoRepository _logRepository;
         private readonly ILogger<RegenerateAgendaCommandHandler> _logger;
+        private readonly ICurrentUserService _currentUserService;
 
         public RegenerateAgendaCommandHandler(
             ISmartDbContext context,
@@ -27,7 +28,8 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
             ITeamsAgendaService agendaService,
             IGraphClientFactory graphClientFactory,
             ITeamsLogOperativoRepository logRepository,
-            ILogger<RegenerateAgendaCommandHandler> logger)
+            ILogger<RegenerateAgendaCommandHandler> logger,
+            ICurrentUserService currentUserService)
         {
             _context = context;
             _teamRepo = teamRepo;
@@ -35,6 +37,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
             _graphClientFactory = graphClientFactory;
             _logRepository = logRepository;
             _logger = logger;
+            _currentUserService = currentUserService;
         }
 
         public async Task<DiagnosticResultDto> Handle(RegenerateAgendaCommand request, CancellationToken cancellationToken)
@@ -57,6 +60,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                 {
                     team.EstadoTeam = "I";
                     team.FechaModificacion = DateTime.UtcNow;
+                    team.UsuarioModificacion = _currentUserService.UserIdInt ?? 1;
                     await _teamRepo.UpdateAsync(team);
 
                     result.IsValid = false;
@@ -429,13 +433,13 @@ WHERE TH.IdTeams = {0}
             const string deactivateSql = @"
 UPDATE TeamsHorarios
 SET Estado = 'I',
-    UsuarioModificacion = 1,
+    UsuarioModificacion = {2},
     FechaModificacion = GETDATE()
 WHERE IdTeams = {0}
   AND IdCurso = {1}
   AND Estado = 'A';";
 
-            await _context.Database.ExecuteSqlRawAsync(deactivateSql, teamId, sectionId);
+            await _context.Database.ExecuteSqlRawAsync(deactivateSql, teamId, sectionId, _currentUserService.UserIdInt ?? 1);
         }
 
         private async Task PersistTeamsHorariosAsync(
@@ -484,7 +488,7 @@ VALUES
     {12},
     'A',
     {13},
-    1,
+    {14},
     GETDATE()
 );";
 
@@ -519,7 +523,8 @@ VALUES
                             participant.CorreoAlumno,
                             effectiveTeacherCode,
                             effectiveTeacherEmail ?? string.Empty,
-                            meeting.JoinUrl);
+                            meeting.JoinUrl,
+                            _currentUserService.UserIdInt ?? 1);
                     }
                 }
             }

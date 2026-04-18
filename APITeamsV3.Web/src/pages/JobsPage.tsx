@@ -84,6 +84,16 @@ interface TenantConfigResponse {
     timeZoneId?: string;
 }
 
+interface HangfireStats {
+    enqueued: number;
+    processing: number;
+    succeeded: number;
+    failed: number;
+    scheduled: number;
+    deleted: number;
+    recurring: number;
+}
+
 const WINDOWS_TO_IANA_TIMEZONES: Record<string, string> = {
     'SA Pacific Standard Time': 'America/Lima',
     'Pacific SA Standard Time': 'America/Santiago',
@@ -216,6 +226,43 @@ const useStyles = makeStyles({
         fontFamily: 'monospace',
         fontSize: '12px',
     },
+    summaryGrid: {
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+        gap: '16px',
+        marginBottom: '8px',
+    },
+    summaryCard: {
+        backgroundColor: tokens.colorNeutralBackground1,
+        ...shorthands.padding('16px', '20px'),
+        ...shorthands.borderRadius(tokens.borderRadiusLarge),
+        boxShadow: tokens.shadow4,
+        display: 'flex',
+        alignItems: 'center',
+        gap: '16px',
+        borderLeft: '4px solid transparent',
+        transition: 'all 0.2s ease',
+        ':hover': {
+            transform: 'translateY(-2px)',
+            boxShadow: tokens.shadow8,
+        },
+    },
+    summaryContent: {
+        display: 'flex',
+        flexDirection: 'column',
+    },
+    summaryValue: {
+        fontSize: '24px',
+        fontWeight: tokens.fontWeightBold,
+        lineHeight: '1',
+    },
+    summaryLabel: {
+        fontSize: '12px',
+        color: tokens.colorNeutralForeground2,
+        fontWeight: tokens.fontWeightSemibold,
+        textTransform: 'uppercase',
+        letterSpacing: '0.05em',
+    },
 });
 
 interface JobDefinition {
@@ -314,6 +361,8 @@ const JobsPage: React.FC = () => {
     const [loadingRecordingConfig, setLoadingRecordingConfig] = useState(false);
     const [savingRecordingConfig, setSavingRecordingConfig] = useState(false);
     const [tenantTimeZone, setTenantTimeZone] = useState('America/Lima');
+    const [stats, setStats] = useState<HangfireStats | null>(null);
+    const [loadingStats, setLoadingStats] = useState(false);
 
     const loadRecentJobs = async (silent = false) => {
         if (!silent) setLoadingHistory(true);
@@ -328,6 +377,18 @@ const JobsPage: React.FC = () => {
             }
         } finally {
             if (!silent) setLoadingHistory(false);
+        }
+    };
+
+    const loadStats = async (silent = false) => {
+        if (!silent) setLoadingStats(true);
+        try {
+            const response = await apiClient.get('/jobs/stats');
+            setStats(response.data as HangfireStats);
+        } catch (err: unknown) {
+            console.error('Failed to load stats', err);
+        } finally {
+            if (!silent) setLoadingStats(false);
         }
     };
 
@@ -485,10 +546,12 @@ const JobsPage: React.FC = () => {
         void loadRecentJobs(false);
         void loadRecurringJobs(false);
         void loadRecordingConfig(false);
+        void loadStats(false);
         void loadTenantConfig();
         const interval = window.setInterval(() => {
             void loadRecentJobs(true);
             void loadRecurringJobs(true);
+            void loadStats(true);
         }, 15000);
 
         return () => window.clearInterval(interval);
@@ -612,15 +675,66 @@ const JobsPage: React.FC = () => {
                     </Button>
                     <Button
                         appearance="secondary"
-                        icon={loadingHistory || loadingRecurring ? <Spinner size="tiny" /> : <ArrowSyncRegular />}
+                        icon={loadingHistory || loadingRecurring || loadingStats ? <Spinner size="tiny" /> : <ArrowSyncRegular />}
                         onClick={() => {
                             void loadRecentJobs(false);
                             void loadRecurringJobs(false);
                             void loadRecordingConfig(false);
+                            void loadStats(false);
                         }}
                     >
                         Actualizar
                     </Button>
+                </div>
+            </div>
+
+            <div className={styles.summaryGrid}>
+                <div className={styles.summaryCard} style={{ borderLeftColor: tokens.colorPaletteGreenBorderActive }}>
+                    <div className={styles.jobCardIcon} style={{ backgroundColor: `${tokens.colorPaletteGreenBorderActive}22`, color: tokens.colorPaletteGreenBorderActive }}>
+                        <CheckmarkCircleRegular />
+                    </div>
+                    <div className={styles.summaryContent}>
+                        <div className={styles.summaryLabel}>Completados</div>
+                        <div className={styles.summaryValue} style={{ color: tokens.colorPaletteGreenForeground1 }}>
+                            {stats?.succeeded ?? 0}
+                        </div>
+                    </div>
+                </div>
+
+                <div className={styles.summaryCard} style={{ borderLeftColor: tokens.colorPaletteRedBorderActive }}>
+                    <div className={styles.jobCardIcon} style={{ backgroundColor: `${tokens.colorPaletteRedBorderActive}22`, color: tokens.colorPaletteRedBorderActive }}>
+                        <DismissCircleRegular />
+                    </div>
+                    <div className={styles.summaryContent}>
+                        <div className={styles.summaryLabel}>Fallidos</div>
+                        <div className={styles.summaryValue} style={{ color: tokens.colorPaletteRedForeground1 }}>
+                            {stats?.failed ?? 0}
+                        </div>
+                    </div>
+                </div>
+
+                <div className={styles.summaryCard} style={{ borderLeftColor: tokens.colorBrandStroke1 }}>
+                    <div className={styles.jobCardIcon} style={{ backgroundColor: `${tokens.colorBrandStroke1}22`, color: tokens.colorBrandStroke1 }}>
+                        <Spinner size="tiny" />
+                    </div>
+                    <div className={styles.summaryContent}>
+                        <div className={styles.summaryLabel}>En Proceso</div>
+                        <div className={styles.summaryValue} style={{ color: tokens.colorBrandForeground1 }}>
+                            {stats?.processing ?? 0}
+                        </div>
+                    </div>
+                </div>
+
+                <div className={styles.summaryCard} style={{ borderLeftColor: tokens.colorPaletteMarigoldBorderActive }}>
+                    <div className={styles.jobCardIcon} style={{ backgroundColor: `${tokens.colorPaletteMarigoldBorderActive}22`, color: tokens.colorPaletteMarigoldBorderActive }}>
+                        <ClockRegular />
+                    </div>
+                    <div className={styles.summaryContent}>
+                        <div className={styles.summaryLabel}>En Cola</div>
+                        <div className={styles.summaryValue} style={{ color: tokens.colorPaletteMarigoldForeground1 }}>
+                            {(stats?.enqueued ?? 0) + (stats?.scheduled ?? 0)}
+                        </div>
+                    </div>
                 </div>
             </div>
 

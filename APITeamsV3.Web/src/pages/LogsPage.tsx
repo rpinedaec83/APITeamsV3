@@ -14,9 +14,42 @@ import {
     Badge,
     Select,
     Input,
-    Spinner
+    Spinner,
+    TabList,
+    Tab,
+    type TabValue,
+    Card,
+    CardHeader,
+    Text,
+    Subtitle2,
+    Caption1,
+    Dialog,
+    DialogSurface,
+    DialogTitle,
+    DialogBody,
+    DialogActions,
+    DialogTrigger,
 } from '@fluentui/react-components';
-import { ArrowClockwiseRegular, DismissRegular, DocumentErrorRegular, FilterRegular, SearchRegular } from '@fluentui/react-icons';
+import {
+    OpenRegular,
+    PeopleCommunityRegular,
+    CalendarMonthRegular,
+    GroupRegular,
+    ErrorCircleRegular,
+    WarningRegular,
+    ArrowClockwiseRegular,
+    DismissRegular,
+    DocumentErrorRegular,
+    SearchRegular,
+    DraftsRegular,
+    CodeRegular,
+    PersonRegular,
+    WrenchRegular,
+    CheckmarkCircleFilled,
+    ErrorCircleFilled,
+    WarningFilled,
+    InfoFilled
+} from '@fluentui/react-icons';
 import { useMsal } from '@azure/msal-react';
 import { useApiClient } from '../hooks/useApiClient';
 
@@ -30,6 +63,15 @@ interface TeamsLogOperativo {
     severidad: string;
     jobId: string;
     fecha: string;
+    contextoTecnico?: string;
+}
+
+interface LogOperationalSummaryDto {
+    studentsSuccess: number;
+    agendasSuccess: number;
+    teamsSuccess: number;
+    totalErrors: number;
+    totalWarnings: number;
 }
 
 interface CompanyOption {
@@ -60,38 +102,147 @@ const useStyles = makeStyles({
         maxWidth: '1520px',
         margin: '0 auto',
         minHeight: '100vh',
+        backgroundColor: tokens.colorNeutralBackground2,
     },
     header: {
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
         backgroundColor: tokens.colorNeutralBackground1,
-        ...shorthands.padding('20px', '24px'),
+        ...shorthands.padding('24px'),
         ...shorthands.borderRadius(tokens.borderRadiusLarge),
+        boxShadow: tokens.shadow8,
+        borderBottom: `2px solid ${tokens.colorBrandStroke1}`,
+    },
+    headerIcon: {
+        backgroundColor: tokens.colorBrandBackground2,
+        ...shorthands.padding('12px'),
+        ...shorthands.borderRadius('50%'),
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    viewSelector: {
+        backgroundColor: tokens.colorNeutralBackground1,
+        ...shorthands.padding('8px', '16px'),
+        ...shorthands.borderRadius(tokens.borderRadiusMedium),
         boxShadow: tokens.shadow4,
+        alignSelf: 'center',
+        display: 'flex',
+        gap: '8px',
     },
     filterRegion: {
         display: 'grid',
         gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-        gap: '14px',
+        gap: '16px',
         backgroundColor: tokens.colorNeutralBackground1,
-        ...shorthands.padding('20px'),
+        ...shorthands.padding('24px'),
         ...shorthands.borderRadius(tokens.borderRadiusLarge),
         border: `1px solid ${tokens.colorNeutralStroke2}`,
+        boxShadow: tokens.shadow4,
     },
     filterField: {
         display: 'flex',
         flexDirection: 'column',
-        gap: '6px',
+        gap: '8px',
+        "& label": {
+            fontSize: '12px',
+            fontWeight: tokens.fontWeightSemibold,
+            color: tokens.colorNeutralForeground2,
+        }
     },
     filterActions: {
         display: 'flex',
-        gap: '10px',
+        gap: '12px',
         alignItems: 'end',
         justifyContent: 'flex-end',
         gridColumn: '1 / -1',
+        marginTop: '8px',
     },
-    tableContainer: {
+    summaryContainer: {
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+        gap: '20px',
+    },
+    summaryCard: {
+        ...shorthands.padding('20px'),
+        backgroundColor: tokens.colorNeutralBackground1,
+        ...shorthands.borderRadius(tokens.borderRadiusLarge),
+        boxShadow: tokens.shadow8,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '12px',
+        position: 'relative',
+        overflow: 'hidden',
+        borderBottom: '4px solid transparent',
+        transition: 'all 0.3s ease',
+        ':hover': {
+            boxShadow: tokens.shadow16,
+            transform: 'translateY(-4px)',
+        }
+    },
+    summaryIcon: {
+        fontSize: '32px',
+        opacity: 0.8,
+    },
+    summaryValue: {
+        fontSize: '28px',
+        fontWeight: tokens.fontWeightBold,
+        lineHeight: '1',
+    },
+    summaryLabel: {
+        fontSize: '14px',
+        fontWeight: tokens.fontWeightSemibold,
+        color: tokens.colorNeutralForeground2,
+    },
+    summaryDecoration: {
+        position: 'absolute',
+        top: '-10px',
+        right: '-10px',
+        fontSize: '80px',
+        opacity: 0.05,
+        transform: 'rotate(15deg)',
+        pointerEvents: 'none',
+    },
+    cardStudents: { borderBottomColor: tokens.colorPaletteBlueBorderActive },
+    cardAgendas: { borderBottomColor: tokens.colorPalettePurpleBorderActive },
+    cardTeams: { borderBottomColor: tokens.colorPaletteTealBorderActive },
+    cardErrors: { borderBottomColor: tokens.colorPaletteRedBorderActive },
+    cardWarnings: { borderBottomColor: tokens.colorPaletteMarigoldBorderActive },
+    contentArea: {
+        flexGrow: 1,
+    },
+    emptyState: {
+        textAlign: 'center',
+        ...shorthands.padding('100px'),
+        backgroundColor: tokens.colorNeutralBackground1,
+        ...shorthands.borderRadius(tokens.borderRadiusLarge),
+        boxShadow: tokens.shadow4,
+    },
+    friendlyGrid: {
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))',
+        gap: '20px',
+    },
+    logCard: {
+        backgroundColor: tokens.colorNeutralBackground1,
+        transition: 'transform 0.2s, box-shadow 0.2s',
+        ':hover': {
+            boxShadow: tokens.shadow16,
+            transform: 'translateY(-2px)',
+        },
+        borderLeftWidth: '6px',
+        borderLeftStyle: 'solid',
+    },
+    cardAction: {
+        marginTop: '12px',
+        ...shorthands.padding('10px'),
+        backgroundColor: tokens.colorNeutralBackground3,
+        ...shorthands.borderRadius(tokens.borderRadiusSmall),
+        color: tokens.colorNeutralForeground1,
+        fontSize: '13px',
+    },
+    technicalContainer: {
         backgroundColor: tokens.colorNeutralBackground1,
         ...shorthands.borderRadius(tokens.borderRadiusLarge),
         border: `1px solid ${tokens.colorNeutralStroke2}`,
@@ -102,29 +253,29 @@ const useStyles = makeStyles({
         overflowX: 'auto',
     },
     footer: {
-        padding: '16px',
+        padding: '20px',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
         borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
+        backgroundColor: tokens.colorNeutralBackground1,
+    },
+    mono: {
+        fontFamily: 'Consolas, monospace',
+        fontSize: '11px',
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-all',
+        backgroundColor: tokens.colorNeutralBackground3,
+        padding: '12px',
+        ...shorthands.borderRadius(tokens.borderRadiusMedium),
+        maxHeight: '400px',
+        overflowY: 'auto',
     },
     pager: {
         display: 'flex',
         alignItems: 'center',
-        gap: '10px',
+        gap: '12px',
     },
-    meta: {
-        fontSize: tokens.fontSizeBase200,
-        color: tokens.colorNeutralForeground3,
-        display: 'flex',
-        alignItems: 'center',
-        gap: '10px',
-    },
-    errorText: {
-        color: tokens.colorPaletteRedForeground1,
-        fontSize: tokens.fontSizeBase200,
-        fontWeight: tokens.fontWeightSemibold,
-    }
 });
 
 const formatDateParam = (dateValue: string): string => {
@@ -145,10 +296,7 @@ const parseUtcDate = (value: string): Date => {
 
 const formatTenantDateTime = (value: string, timeZone: string): string => {
     const date = parseUtcDate(value);
-    if (Number.isNaN(date.getTime())) {
-        return value;
-    }
-
+    if (Number.isNaN(date.getTime())) return value;
     return new Intl.DateTimeFormat('es-PE', {
         timeZone,
         year: 'numeric',
@@ -161,16 +309,21 @@ const formatTenantDateTime = (value: string, timeZone: string): string => {
     }).format(date);
 };
 
-const getTipoBadgeColor = (tipo: string): 'danger' | 'success' | 'warning' | 'informative' => {
+const getTipoColor = (tipo: string): string => {
     switch ((tipo ?? '').toLowerCase()) {
-        case 'error':
-            return 'danger';
-        case 'success':
-            return 'success';
-        case 'warning':
-            return 'warning';
-        default:
-            return 'informative';
+        case 'error': return tokens.colorPaletteRedBorderActive;
+        case 'success': return tokens.colorPaletteGreenBorderActive;
+        case 'warning': return tokens.colorPaletteMarigoldBorderActive;
+        default: return tokens.colorPaletteBlueBorderActive;
+    }
+};
+
+const getTipoIcon = (tipo: string) => {
+    switch ((tipo ?? '').toLowerCase()) {
+        case 'error': return <ErrorCircleFilled style={{ color: tokens.colorPaletteRedForeground1 }} />;
+        case 'success': return <CheckmarkCircleFilled style={{ color: tokens.colorPaletteGreenForeground1 }} />;
+        case 'warning': return <WarningFilled style={{ color: tokens.colorPaletteMarigoldForeground1 }} />;
+        default: return <InfoFilled style={{ color: tokens.colorBrandForeground1 }} />;
     }
 };
 
@@ -184,10 +337,13 @@ const LogsPage: React.FC = () => {
     const isIt = roles.includes('IT');
 
     const [logs, setLogs] = useState<TeamsLogOperativo[]>([]);
+    const [summary, setSummary] = useState<LogOperationalSummaryDto | null>(null);
     const [companies, setCompanies] = useState<CompanyOption[]>([]);
     const [loading, setLoading] = useState(false);
+    const [summaryLoading, setSummaryLoading] = useState(false);
     const [error, setError] = useState('');
     const [tenantTimeZone, setTenantTimeZone] = useState('America/Lima');
+    const [viewMode, setViewMode] = useState<TabValue>('friendly');
 
     const [page, setPage] = useState(1);
     const [reloadTick, setReloadTick] = useState(0);
@@ -212,25 +368,20 @@ const LogsPage: React.FC = () => {
 
     useEffect(() => {
         if (!isIt) return;
-
         const loadCompanies = async () => {
             try {
                 const response = await apiClient.get('/admin/company-configs');
                 const data = Array.isArray(response.data) ? response.data : [];
                 setCompanies(
-                    data
-                        .map((item: any) => ({
-                            companyKey: item.companyKey ?? '',
-                            displayName: item.displayName ?? item.companyKey ?? ''
-                        }))
-                        .filter((item: CompanyOption) => item.companyKey)
-                        .sort((a: CompanyOption, b: CompanyOption) => a.companyKey.localeCompare(b.companyKey))
+                    data.map((item: any) => ({
+                        companyKey: item.companyKey ?? '',
+                        displayName: item.displayName ?? item.companyKey ?? ''
+                    }))
+                    .filter((item: CompanyOption) => item.companyKey)
+                    .sort((a: CompanyOption, b: CompanyOption) => a.companyKey.localeCompare(b.companyKey))
                 );
-            } catch {
-                setCompanies([]);
-            }
+            } catch { setCompanies([]); }
         };
-
         void loadCompanies();
     }, [apiClient, isIt]);
 
@@ -240,11 +391,8 @@ const LogsPage: React.FC = () => {
                 const response = await apiClient.get('/config');
                 const config = (response.data ?? {}) as TenantConfigResponse;
                 setTenantTimeZone(resolveBrowserTimeZone(config.timeZoneId));
-            } catch {
-                setTenantTimeZone('America/Lima');
-            }
+            } catch { setTenantTimeZone('America/Lima'); }
         };
-
         void loadTenantConfig();
     }, [apiClient]);
 
@@ -252,13 +400,8 @@ const LogsPage: React.FC = () => {
         const fetchLogs = async () => {
             setLoading(true);
             setError('');
-
             try {
-                const params: Record<string, string | number> = {
-                    page,
-                    pageSize: PAGE_SIZE
-                };
-
+                const params: Record<string, string | number> = { page, pageSize: PAGE_SIZE };
                 if (tipoFiltro) params.tipo = tipoFiltro;
                 if (severidadFiltro) params.severidad = severidadFiltro;
                 if (entidadFiltro) params.entidad = entidadFiltro;
@@ -266,271 +409,312 @@ const LogsPage: React.FC = () => {
                 if (jobIdFiltro.trim()) params.jobId = jobIdFiltro.trim();
                 if (deferredSearch) params.search = deferredSearch;
                 if (fechaDesde) params.fechaDesde = formatDateParam(fechaDesde);
-
                 if (isIt) {
                     params.scope = scopeFiltro;
-                    if (scopeFiltro === 'all' && companyFiltro) {
-                        params.companyKey = companyFiltro;
-                    }
+                    if (scopeFiltro === 'all' && companyFiltro) params.companyKey = companyFiltro;
                 }
-
                 const response = await apiClient.get('/reports/logs', { params });
-                const data = Array.isArray(response.data) ? response.data : [];
-                startTransition(() => setLogs(data));
+                startTransition(() => setLogs(Array.isArray(response.data) ? response.data : []));
             } catch (err: any) {
-                const message = err?.response?.data?.message || err?.message || 'No se pudo cargar el log operacional.';
-                setError(message);
+                setError(err?.response?.data?.message || err?.message || 'No se pudo cargar el log.');
                 startTransition(() => setLogs([]));
+            } finally { setLoading(false); }
+        };
+        void fetchLogs();
+    }, [apiClient, companyFiltro, deferredSearch, entidadFiltro, fechaDesde, isIt, jobIdFiltro, page, referenciaFiltro, reloadTick, scopeFiltro, severidadFiltro, tipoFiltro]);
+
+    useEffect(() => {
+        const fetchSummary = async () => {
+            setSummaryLoading(true);
+            try {
+                const params: Record<string, string | number> = {};
+                if (tipoFiltro) params.tipo = tipoFiltro;
+                if (severidadFiltro) params.severidad = severidadFiltro;
+                if (entidadFiltro) params.entidad = entidadFiltro;
+                if (referenciaFiltro.trim()) params.referencia = referenciaFiltro.trim();
+                if (jobIdFiltro.trim()) params.jobId = jobIdFiltro.trim();
+                if (deferredSearch) params.search = deferredSearch;
+                if (fechaDesde) params.fechaDesde = formatDateParam(fechaDesde);
+                if (isIt) {
+                    params.scope = scopeFiltro;
+                    if (scopeFiltro === 'all' && companyFiltro) params.companyKey = companyFiltro;
+                }
+                const response = await apiClient.get('/reports/logs-summary', { params });
+                setSummary(response.data);
+            } catch (err) {
+                console.error("Failed to fetch summary:", err);
             } finally {
-                setLoading(false);
+                setSummaryLoading(false);
             }
         };
-
-        void fetchLogs();
-    }, [
-        apiClient,
-        companyFiltro,
-        deferredSearch,
-        entidadFiltro,
-        fechaDesde,
-        isIt,
-        jobIdFiltro,
-        page,
-        referenciaFiltro,
-        reloadTick,
-        scopeFiltro,
-        severidadFiltro,
-        tipoFiltro
-    ]);
+        void fetchSummary();
+    }, [apiClient, companyFiltro, deferredSearch, entidadFiltro, fechaDesde, isIt, jobIdFiltro, reloadTick, scopeFiltro, severidadFiltro, tipoFiltro]);
 
     const entidadOptions = useMemo(() => {
         const values = new Set(logs.map(log => log.entidadAfectada).filter(Boolean));
-        if (entidadFiltro) values.add(entidadFiltro);
         return Array.from(values).sort((a, b) => a.localeCompare(b));
-    }, [entidadFiltro, logs]);
-
-    const severidadOptions = useMemo(() => {
-        const values = new Set(logs.map(log => log.severidad).filter(Boolean));
-        if (severidadFiltro) values.add(severidadFiltro);
-        return Array.from(values).sort((a, b) => a.localeCompare(b));
-    }, [logs, severidadFiltro]);
-
-    const showCompanyColumn = isIt && scopeFiltro === 'all';
-    const columnCount = showCompanyColumn ? 7 : 6;
+    }, [logs]);
 
     const handleRefresh = () => setReloadTick(current => current + 1);
-
     const handleClearFilters = () => {
-        setTipoFiltro('');
-        setSeveridadFiltro('');
-        setEntidadFiltro('');
-        setReferenciaFiltro('');
-        setJobIdFiltro('');
-        setSearchInput('');
-        setFechaDesde('');
-        setCompanyFiltro('');
-        setPage(1);
-        setReloadTick(current => current + 1);
+        setTipoFiltro(''); setSeveridadFiltro(''); setEntidadFiltro(''); setReferenciaFiltro('');
+        setJobIdFiltro(''); setSearchInput(''); setFechaDesde(''); setCompanyFiltro('');
+        setPage(1); setReloadTick(current => current + 1);
     };
+
+    const renderFriendlyLogs = () => (
+        <div className={styles.friendlyGrid}>
+            {logs.map(log => {
+                const hasAction = log.mensaje.includes('Acción:');
+                const parts = log.mensaje.split('Acción:');
+                const mainMsg = parts[0]?.trim();
+                const actionMsg = parts[1]?.trim();
+
+                return (
+                    <Card key={`${log.id}-${log.fecha}`} className={styles.logCard} style={{ borderLeftColor: getTipoColor(log.tipo) }}>
+                        <CardHeader
+                            image={getTipoIcon(log.tipo)}
+                            header={<Text weight="bold">{log.entidadAfectada} - {log.referencia}</Text>}
+                            description={<Caption1>{formatTenantDateTime(log.fecha, tenantTimeZone)}</Caption1>}
+                            action={
+                                <Badge appearance="outline" color={log.severidad === 'High' ? 'danger' : 'informative'}>
+                                    {log.severidad || 'Low'}
+                                </Badge>
+                            }
+                        />
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            <Text size={300}>{mainMsg}</Text>
+                            {hasAction && (
+                                <div className={styles.cardAction}>
+                                    <Text weight="semibold" style={{ color: tokens.colorBrandForeground1 }}>
+                                        <WrenchRegular style={{ verticalAlign: 'middle', marginRight: '6px' }} />
+                                        Acción Recomendada:
+                                    </Text>
+                                    <div style={{ marginTop: '4px' }}>{actionMsg}</div>
+                                </div>
+                            )}
+                        </div>
+                    </Card>
+                );
+            })}
+        </div>
+    );
+
+
+    const renderOperationalSummary = () => {
+        if (!summary) return null;
+
+        const metrics = [
+            { label: 'Alumnos Procesados', value: summary.studentsSuccess, icon: <PeopleCommunityRegular />, color: tokens.colorPaletteBlueForeground2, style: styles.cardStudents, decoration: <PeopleCommunityRegular /> },
+            { label: 'Agendas Sincronizadas', value: summary.agendasSuccess, icon: <CalendarMonthRegular />, color: tokens.colorPalettePurpleForeground2, style: styles.cardAgendas, decoration: <CalendarMonthRegular /> },
+            { label: 'Equipos Gestionados', value: summary.teamsSuccess, icon: <GroupRegular />, color: tokens.colorPaletteTealForeground2, style: styles.cardTeams, decoration: <GroupRegular /> },
+            { label: 'Errores Críticos', value: summary.totalErrors, icon: <ErrorCircleRegular />, color: tokens.colorPaletteRedForeground1, style: styles.cardErrors, decoration: <ErrorCircleRegular /> },
+            { label: 'Advertencias', value: summary.totalWarnings, icon: <WarningRegular />, color: tokens.colorPaletteMarigoldForeground1, style: styles.cardWarnings, decoration: <WarningRegular /> },
+        ];
+
+        return (
+            <div className={styles.summaryContainer}>
+                {metrics.map((m, i) => (
+                    <div key={i} className={`${styles.summaryCard} ${m.style}`}>
+                        <div className={styles.summaryIcon} style={{ color: m.color }}>{m.icon}</div>
+                        <div>
+                            {summaryLoading ? <Spinner size="tiny" /> : <div className={styles.summaryValue}>{m.value}</div>}
+                            <div className={styles.summaryLabel}>{m.label}</div>
+                        </div>
+                        <div className={styles.summaryDecoration} style={{ color: m.color }}>{m.decoration}</div>
+                    </div>
+                ))}
+            </div>
+        );
+    };
+
+    const renderTechnicalLogs = () => (
+        <div className={styles.technicalContainer}>
+            <div className={styles.tableScroll}>
+                <Table>
+                    <TableHeader>
+                        <TableRow>
+                            <TableHeaderCell>Fecha / Job</TableHeaderCell>
+                            <TableHeaderCell>Tipo</TableHeaderCell>
+                            <TableHeaderCell>Referencia</TableHeaderCell>
+                            <TableHeaderCell>Mensaje / Contexto</TableHeaderCell>
+                            <TableHeaderCell>Acciones</TableHeaderCell>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        {logs.map(log => (
+                            <TableRow key={`${log.id}-${log.fecha}-tech`}>
+                                <TableCell>
+                                    <div style={{ fontWeight: 600 }}>{formatTenantDateTime(log.fecha, tenantTimeZone)}</div>
+                                    <div style={{ fontFamily: 'monospace', fontSize: '11px', color: tokens.colorNeutralForeground3 }}>{log.jobId || 'N/A'}</div>
+                                </TableCell>
+                                <TableCell>
+                                    <Badge appearance="filled" color={
+                                        log.tipo.toLowerCase() === 'error' ? 'danger' : 
+                                        log.tipo.toLowerCase() === 'success' ? 'success' :
+                                        log.tipo.toLowerCase() === 'warning' ? 'warning' : 'informative'
+                                    }>
+                                        {log.tipo}
+                                    </Badge>
+                                </TableCell>
+                                <TableCell>
+                                    <div>{log.entidadAfectada}</div>
+                                    <code style={{ fontSize: '10px' }}>{log.referencia}</code>
+                                </TableCell>
+                                <TableCell>
+                                    <TextBlock data={log.mensaje} />
+                                </TableCell>
+                                <TableCell>
+                                    <Dialog>
+                                        <DialogTrigger disableButtonEnhancement>
+                                            <Button icon={<OpenRegular />} size="small">Detalle</Button>
+                                        </DialogTrigger>
+                                        <DialogSurface>
+                                            <DialogBody>
+                                                <DialogTitle>Detalle Técnico del Log</DialogTitle>
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '16px' }}>
+                                                    <div>
+                                                        <Subtitle2>Mensaje</Subtitle2>
+                                                        <Text block>{log.mensaje}</Text>
+                                                    </div>
+                                                    <div>
+                                                        <Subtitle2>Contexto Técnico (Stacktrace / RAW)</Subtitle2>
+                                                        <div className={styles.mono}>{log.contextoTecnico || 'Sin contexto adicional.'}</div>
+                                                    </div>
+                                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                                                        <div><Text block weight="semibold" size={200}>Referencia:</Text><Text block size={200}>{log.referencia}</Text></div>
+                                                        <div><Text block weight="semibold" size={200}>JobId:</Text><Text block size={200}>{log.jobId || 'N/A'}</Text></div>
+                                                    </div>
+                                                </div>
+                                                <DialogActions>
+                                                    <DialogTrigger disableButtonEnhancement>
+                                                        <Button appearance="secondary">Cerrar</Button>
+                                                    </DialogTrigger>
+                                                </DialogActions>
+                                            </DialogBody>
+                                        </DialogSurface>
+                                    </Dialog>
+                                </TableCell>
+                            </TableRow>
+                        ))}
+                    </TableBody>
+                </Table>
+            </div>
+        </div>
+    );
 
     return (
         <div className={styles.root}>
             <div className={styles.header}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <DocumentErrorRegular fontSize={32} color={tokens.colorBrandForeground1} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                    <div className={styles.headerIcon}>
+                        <DocumentErrorRegular fontSize={32} color={tokens.colorBrandForeground1} />
+                    </div>
                     <div>
-                        <Title3>Log Operacional</Title3>
-                        <div style={{ fontSize: '12px', color: tokens.colorNeutralForeground2 }}>
-                            Filtros inteligentes y trazabilidad por empresa según rol
+                        <Title3>Trazabilidad Operacional</Title3>
+                        <div style={{ fontSize: '12px', color: tokens.colorNeutralForeground2, fontWeight: 500 }}>
+                            Monitoreo de equipos, agendas y alumnos en tiempo real
                         </div>
                     </div>
                 </div>
-                <Button icon={<ArrowClockwiseRegular />} appearance="primary" onClick={handleRefresh} disabled={loading}>
-                    Refrescar
-                </Button>
+                <div style={{ display: 'flex', gap: '12px' }}>
+                    <div className={styles.viewSelector}>
+                        <TabList selectedValue={viewMode} onTabSelect={(_, d) => setViewMode(d.value)}>
+                            <Tab value="friendly" icon={<PersonRegular />}>Administrador</Tab>
+                            <Tab value="technical" icon={<CodeRegular />}>Técnico</Tab>
+                        </TabList>
+                    </div>
+                    <Button icon={<ArrowClockwiseRegular />} appearance="primary" onClick={handleRefresh} disabled={loading}>
+                        Refrescar
+                    </Button>
+                </div>
             </div>
 
-            <div className={styles.filterRegion}>
-                <div className={styles.filterField}>
-                    <label>Búsqueda inteligente</label>
-                    <Input
-                        contentBefore={<SearchRegular />}
-                        placeholder="Mensaje, referencia, Job ID, entidad..."
-                        value={searchInput}
-                        onChange={(_, data) => {
-                            setSearchInput(data.value);
-                            setPage(1);
-                        }}
-                    />
-                </div>
+            {renderOperationalSummary()}
 
+            <div className={styles.filterRegion}>
+                <div className={styles.filterField} style={{ gridColumn: 'span 2' }}>
+                    <label>Búsqueda Global</label>
+                    <Input contentBefore={<SearchRegular />} placeholder="Buscar por mensaje, referencia o ID de job..." 
+                           value={searchInput} onChange={(_, d) => { setSearchInput(d.value); setPage(1); }} />
+                </div>
                 <div className={styles.filterField}>
-                    <label>Tipo de Evento</label>
-                    <Select value={tipoFiltro} onChange={(_, data) => { setTipoFiltro(data.value); setPage(1); }}>
-                        <option value="">(Todos)</option>
-                        <option value="Info">Info</option>
-                        <option value="Success">Success</option>
-                        <option value="Warning">Warning</option>
+                    <label>Tipo</label>
+                    <Select value={tipoFiltro} onChange={(_, d) => { setTipoFiltro(d.value); setPage(1); }}>
+                        <option value="">Todos</option>
+                        <option value="Info">Información</option>
+                        <option value="Success">Éxito</option>
+                        <option value="Warning">Advertencia</option>
                         <option value="Error">Error</option>
                     </Select>
                 </div>
-
-                <div className={styles.filterField}>
-                    <label>Severidad</label>
-                    <Select value={severidadFiltro} onChange={(_, data) => { setSeveridadFiltro(data.value); setPage(1); }}>
-                        <option value="">(Todas)</option>
-                        {severidadOptions.map(severidad => (
-                            <option key={severidad} value={severidad}>{severidad}</option>
-                        ))}
-                    </Select>
-                </div>
-
                 <div className={styles.filterField}>
                     <label>Entidad</label>
-                    <Select value={entidadFiltro} onChange={(_, data) => { setEntidadFiltro(data.value); setPage(1); }}>
-                        <option value="">(Todas)</option>
-                        {entidadOptions.map(entidad => (
-                            <option key={entidad} value={entidad}>{entidad}</option>
-                        ))}
+                    <Select value={entidadFiltro} onChange={(_, d) => { setEntidadFiltro(d.value); setPage(1); }}>
+                        <option value="">Todas</option>
+                        {entidadOptions.map(o => <option key={o} value={o}>{o}</option>)}
                     </Select>
                 </div>
-
                 <div className={styles.filterField}>
-                    <label>Referencia</label>
-                    <Input
-                        placeholder="Ej. 410087 o GUID"
-                        value={referenciaFiltro}
-                        onChange={(_, data) => {
-                            setReferenciaFiltro(data.value);
-                            setPage(1);
-                        }}
-                    />
+                    <label>Desde</label>
+                    <Input type="date" value={fechaDesde} onChange={(_, d) => { setFechaDesde(d.value); setPage(1); }} />
                 </div>
-
-                <div className={styles.filterField}>
-                    <label>Job ID</label>
-                    <Input
-                        placeholder="Filtrar por Job ID"
-                        value={jobIdFiltro}
-                        onChange={(_, data) => {
-                            setJobIdFiltro(data.value);
-                            setPage(1);
-                        }}
-                    />
-                </div>
-
-                <div className={styles.filterField}>
-                    <label>Desde Fecha</label>
-                    <Input
-                        type="date"
-                        value={fechaDesde}
-                        onChange={(_, data) => {
-                            setFechaDesde(data.value);
-                            setPage(1);
-                        }}
-                    />
-                </div>
-
                 {isIt && (
                     <div className={styles.filterField}>
                         <label>Alcance</label>
-                        <Select value={scopeFiltro} onChange={(_, data) => { setScopeFiltro(data.value === 'current' ? 'current' : 'all'); setPage(1); }}>
-                            <option value="all">Todas las empresas</option>
-                            <option value="current">Solo empresa actual</option>
+                        <Select value={scopeFiltro} onChange={(_, d) => { setScopeFiltro(d.value as any); setPage(1); }}>
+                            <option value="all">Multicompañía</option>
+                            <option value="current">Empresa Actual</option>
                         </Select>
                     </div>
                 )}
-
                 {isIt && scopeFiltro === 'all' && (
                     <div className={styles.filterField}>
                         <label>Empresa</label>
-                        <Select value={companyFiltro} onChange={(_, data) => { setCompanyFiltro(data.value); setPage(1); }}>
+                        <Select value={companyFiltro} onChange={(_, d) => { setCompanyFiltro(d.value); setPage(1); }}>
                             <option value="">(Todas)</option>
-                            {companies.map(company => (
-                                <option key={company.companyKey} value={company.companyKey}>
-                                    {company.companyKey} - {company.displayName}
-                                </option>
-                            ))}
+                            {companies.map(c => <option key={c.companyKey} value={c.companyKey}>{c.companyKey}</option>)}
                         </Select>
                     </div>
                 )}
-
                 <div className={styles.filterActions}>
-                    <Button icon={<FilterRegular />} onClick={handleRefresh} disabled={loading}>
-                        Aplicar
-                    </Button>
-                    <Button icon={<DismissRegular />} appearance="subtle" onClick={handleClearFilters} disabled={loading}>
-                        Limpiar Filtros
-                    </Button>
+                    <Button icon={<DismissRegular />} appearance="subtle" onClick={handleClearFilters}>Limpiar</Button>
                 </div>
             </div>
 
-            <div className={styles.tableContainer}>
-                <div className={styles.tableScroll}>
-                    <Table>
-                        <TableHeader>
-                            <TableRow>
-                                <TableHeaderCell>Fecha</TableHeaderCell>
-                                <TableHeaderCell>Tipo</TableHeaderCell>
-                                {showCompanyColumn && <TableHeaderCell>Empresa</TableHeaderCell>}
-                                <TableHeaderCell>Entidad</TableHeaderCell>
-                                <TableHeaderCell>Referencia</TableHeaderCell>
-                                <TableHeaderCell>Mensaje</TableHeaderCell>
-                                <TableHeaderCell>Job ID</TableHeaderCell>
-                            </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                            {loading && logs.length === 0 ? (
-                                <TableRow>
-                                    <TableCell colSpan={columnCount} style={{ textAlign: 'center', padding: '20px' }}>
-                                        <Spinner label="Cargando logs..." />
-                                    </TableCell>
-                                </TableRow>
-                            ) : logs.length === 0 ? (
-                                <TableRow>
-                                    <TableCell colSpan={columnCount} style={{ textAlign: 'center', padding: '20px' }}>
-                                        No hay registros para mostrar con los filtros actuales.
-                                    </TableCell>
-                                </TableRow>
-                            ) : (
-                                logs.map(log => (
-                                    <TableRow key={`${log.companyKey ?? 'tenant'}-${log.id}-${log.fecha}`}>
-                                        <TableCell>{formatTenantDateTime(log.fecha, tenantTimeZone)}</TableCell>
-                                        <TableCell>
-                                            <Badge appearance="filled" color={getTipoBadgeColor(log.tipo)}>
-                                                {log.tipo}
-                                            </Badge>
-                                        </TableCell>
-                                        {showCompanyColumn && <TableCell style={{ fontFamily: 'monospace' }}>{log.companyKey}</TableCell>}
-                                        <TableCell>{log.entidadAfectada}</TableCell>
-                                        <TableCell style={{ fontFamily: 'monospace' }}>{log.referencia}</TableCell>
-                                        <TableCell>{log.mensaje}</TableCell>
-                                        <TableCell style={{ fontFamily: 'monospace', fontSize: '11px' }}>{log.jobId}</TableCell>
-                                    </TableRow>
-                                ))
-                            )}
-                        </TableBody>
-                    </Table>
-                </div>
+            <div className={styles.contentArea}>
+                {loading && logs.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '100px' }}><Spinner label="Procesando datos del log..." size="large" /></div>
+                ) : logs.length === 0 ? (
+                    <div className={styles.emptyState}>
+                        <DraftsRegular fontSize={64} style={{ opacity: 0.2, marginBottom: '20px' }} />
+                        <Title3 block>No se encontraron registros</Title3>
+                        <Text>Intente ajustar los filtros de búsqueda.</Text>
+                    </div>
+                ) : (
+                    viewMode === 'friendly' ? renderFriendlyLogs() : renderTechnicalLogs()
+                )}
+            </div>
 
-                <div className={styles.footer}>
-                    <div className={styles.meta}>
-                        <span>{logs.length} registros en esta página</span>
-                        {error && <span className={styles.errorText}>{error}</span>}
-                    </div>
-                    <div className={styles.pager}>
-                        <Button disabled={page === 1 || loading} onClick={() => setPage(current => current - 1)}>
-                            Anterior
-                        </Button>
-                        <span>Página {page}</span>
-                        <Button disabled={logs.length < PAGE_SIZE || loading} onClick={() => setPage(current => current + 1)}>
-                            Siguiente
-                        </Button>
-                    </div>
+            <div className={styles.footer}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <Badge appearance="outline" size="large">{logs.length} resultados</Badge>
+                    {error && <Text style={{ color: tokens.colorPaletteRedForeground1 }}>{error}</Text>}
+                </div>
+                <div className={styles.pager}>
+                    <Button disabled={page === 1 || loading} onClick={() => setPage(p => p - 1)}>Anterior</Button>
+                    <Text weight="semibold">Página {page}</Text>
+                    <Button disabled={logs.length < PAGE_SIZE || loading} onClick={() => setPage(p => p + 1)}>Siguiente</Button>
                 </div>
             </div>
         </div>
     );
 };
+
+const TextBlock: React.FC<{ data: string }> = ({ data }) => (
+    <Text size={200} block style={{ maxWidth: '500px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {data}
+    </Text>
+);
 
 export default LogsPage;

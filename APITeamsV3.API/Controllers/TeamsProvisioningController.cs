@@ -38,8 +38,8 @@ namespace APITeamsV3.API.Controllers
         [HttpPost("sync-roster")]
         public async Task<ActionResult<bool>> SyncRoster([FromBody] SyncSessionRosterCommand command)
         {
-            var result = await _mediator.Send(command);
-            return Ok(result);
+            await _mediator.Send(command);
+            return Ok(true);
         }
 
         [HttpPost("update-join-url")]
@@ -53,16 +53,16 @@ namespace APITeamsV3.API.Controllers
         public async Task<ActionResult<bool>> SyncDates(int idSeccion)
         {
             var command = new SyncSessionDatesCommand(idSeccion);
-            var result = await _mediator.Send(command);
-            return Ok(result);
+            await _mediator.Send(command);
+            return Ok(true);
         }
 
         [HttpPost("sync-facilitator/{idSeccion}")]
         public async Task<ActionResult<bool>> SyncFacilitator(int idSeccion)
         {
             var command = new SyncSessionFacilitatorCommand(idSeccion);
-            var result = await _mediator.Send(command);
-            return Ok(result);
+            await _mediator.Send(command);
+            return Ok(true);
         }
     }
 }

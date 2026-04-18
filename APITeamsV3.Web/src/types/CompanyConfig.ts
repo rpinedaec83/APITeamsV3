@@ -7,6 +7,7 @@ export interface CompanyConfig {
     spaClientId?: string;
     spaTenantId?: string;
     smartConnectionString?: string; // Optional/Masked
+    smartServer?: string;
     timeZoneId: string;
     isActive: boolean;
     graphTenantId: string;

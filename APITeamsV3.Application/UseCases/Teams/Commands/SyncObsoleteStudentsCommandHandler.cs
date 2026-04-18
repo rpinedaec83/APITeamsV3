@@ -21,19 +21,22 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
         private readonly IGraphUserLookupService _userLookupService;
         private readonly ITeamsLogOperativoRepository _logRepository;
         private readonly ILogger<SyncObsoleteStudentsCommandHandler> _logger;
+        private readonly ICurrentUserService _currentUserService;
 
         public SyncObsoleteStudentsCommandHandler(
             ISmartDbContext context,
             IGraphClientFactory graphFactory,
             IGraphUserLookupService userLookupService,
             ITeamsLogOperativoRepository logRepository,
-            ILogger<SyncObsoleteStudentsCommandHandler> logger)
+            ILogger<SyncObsoleteStudentsCommandHandler> logger,
+            ICurrentUserService currentUserService)
         {
             _context = context;
             _graphFactory = graphFactory;
             _userLookupService = userLookupService;
             _logRepository = logRepository;
             _logger = logger;
+            _currentUserService = currentUserService;
         }
 
         public async Task<List<ObsoleteStudentDto>> Handle(SyncObsoleteStudentsCommand request, CancellationToken cancellationToken)
@@ -144,7 +147,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     {
                         localMember.Estado = "I";
                         localMember.FechaModificacion = DateTime.UtcNow;
-                        localMember.UsuarioModificacion = 1;
+                        localMember.UsuarioModificacion = _currentUserService.UserIdInt ?? 1;
                         hasChanges = true;
                     }
                 }
@@ -156,10 +159,12 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                         student.CodigoAlumno,
                         student.IdTeamsGroup);
 
-                    await LogErrorAsync(
+                    await LogOperativoAsync(
+                        "Error",
                         "Student",
                         student.CodigoAlumno,
-                        $"Failed to remove obsolete student from Team {student.IdTeamsGroup}: {ex.Message}");
+                        $"Failed to remove obsolete student from Team {student.IdTeamsGroup}: {ex.Message}",
+                        request.JobId);
                 }
             }
 
@@ -284,18 +289,19 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                    ex.Message.Contains("resource not found", StringComparison.OrdinalIgnoreCase);
         }
 
-        private async Task LogErrorAsync(string target, string reference, string message)
+        private async Task LogOperativoAsync(string type, string target, string reference, string message, string? jobId)
         {
             try
             {
                 await _logRepository.LogAsync(new TeamsLogOperativo
                 {
-                    Tipo = "Error",
+                    Tipo = type,
                     EntidadAfectada = target,
                     Referencia = reference,
                     Mensaje = message,
+                    JobId = jobId,
                     Fecha = DateTime.UtcNow,
-                    Severidad = "High"
+                    Severidad = type == "Error" ? "High" : "Low"
                 });
             }
             catch
@@ -333,7 +339,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     setters => setters
                         .SetProperty(team => team.EstadoTeam, "I")
                         .SetProperty(team => team.FechaModificacion, DateTime.UtcNow)
-                        .SetProperty(team => team.UsuarioModificacion, 1),
+                        .SetProperty(team => team.UsuarioModificacion, _currentUserService.UserIdInt ?? 1),
                     cancellationToken);
 
             if (affected > 0)

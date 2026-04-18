@@ -24,6 +24,7 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
         string? SpaClientId,
         string? SpaTenantId,
         string SmartConnectionString,
+        string? SmartServer,
         string TimeZoneId,
         bool IsActive,
         string GraphTenantId,
@@ -48,11 +49,31 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
     {
         private readonly ICentralDbContext _context;
         private readonly ITenantProvider _tenantProvider;
+        private readonly IEncryptionService _encryptionService;
 
-        public GetCompanyConfigsQueryHandler(ICentralDbContext context, ITenantProvider tenantProvider)
+        public GetCompanyConfigsQueryHandler(ICentralDbContext context, ITenantProvider tenantProvider, IEncryptionService encryptionService)
         {
             _context = context;
             _tenantProvider = tenantProvider;
+            _encryptionService = encryptionService;
+        }
+
+        private string? ExtractServer(string? encryptedConnectionString)
+        {
+            if (string.IsNullOrWhiteSpace(encryptedConnectionString)) return null;
+            try
+            {
+                var decrypted = _encryptionService.Decrypt(encryptedConnectionString);
+                if (string.IsNullOrWhiteSpace(decrypted)) return null;
+
+                // Match both "Server=..." and "Data Source=..."
+                var match = System.Text.RegularExpressions.Regex.Match(decrypted, @"(?i)(?:Server|Data Source)\s*=\s*([^;]+)");
+                return match.Success ? match.Groups[1].Value.Trim() : "Format not recognized";
+            }
+            catch
+            {
+                return "Error decrypting";
+            }
         }
 
         public async Task<List<CompanyConfigDto>> Handle(GetCompanyConfigsQuery request, CancellationToken cancellationToken)
@@ -79,6 +100,7 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
                     c.SpaClientId,
                     c.SpaTenantId,
                     CompanyConfigMasks.Secret,
+                    ExtractServer(c.SmartConnectionString),
                     c.TimeZoneId,
                     c.IsActive,
                     c.GraphTenantId,
@@ -102,11 +124,30 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
     {
         private readonly ICentralDbContext _context;
         private readonly ITenantProvider _tenantProvider;
+        private readonly IEncryptionService _encryptionService;
 
-        public GetCompanyConfigByIdQueryHandler(ICentralDbContext context, ITenantProvider tenantProvider)
+        public GetCompanyConfigByIdQueryHandler(ICentralDbContext context, ITenantProvider tenantProvider, IEncryptionService encryptionService)
         {
             _context = context;
             _tenantProvider = tenantProvider;
+            _encryptionService = encryptionService;
+        }
+
+        private string? ExtractServer(string? encryptedConnectionString)
+        {
+            if (string.IsNullOrWhiteSpace(encryptedConnectionString)) return null;
+            try
+            {
+                var decrypted = _encryptionService.Decrypt(encryptedConnectionString);
+                if (string.IsNullOrWhiteSpace(decrypted)) return null;
+
+                var match = System.Text.RegularExpressions.Regex.Match(decrypted, @"(?i)(?:Server|Data Source)\s*=\s*([^;]+)");
+                return match.Success ? match.Groups[1].Value.Trim() : "Format not recognized";
+            }
+            catch
+            {
+                return "Error decrypting";
+            }
         }
 
         public async Task<CompanyConfigDto?> Handle(GetCompanyConfigByIdQuery request, CancellationToken cancellationToken)
@@ -133,6 +174,7 @@ namespace APITeamsV3.Application.UseCases.CompanyConfigs
                 c.SpaClientId,
                 c.SpaTenantId,
                 CompanyConfigMasks.Secret,
+                ExtractServer(c.SmartConnectionString),
                 c.TimeZoneId,
                 c.IsActive,
                 c.GraphTenantId,

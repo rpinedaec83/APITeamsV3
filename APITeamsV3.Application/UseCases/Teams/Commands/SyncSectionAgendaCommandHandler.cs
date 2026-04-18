@@ -3,6 +3,7 @@ using APITeamsV3.Application.Common.Interfaces;
 using APITeamsV3.Application.UseCases.Provisioning.Commands;
 using APITeamsV3.Domain.Entities;
 using MediatR;
+using Microsoft.Kiota.Abstractions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System;
@@ -25,6 +26,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
         private readonly ITeamsLogOperativoRepository _logRepository;
         private readonly IMediator _mediator;
         private readonly ILogger<SyncSectionAgendaCommandHandler> _logger;
+        private readonly ICurrentUserService _currentUserService;
 
         public SyncSectionAgendaCommandHandler(
             ISmartDbContext context,
@@ -35,7 +37,8 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
             IGraphClientFactory graphClientFactory,
             ITeamsLogOperativoRepository logRepository,
             IMediator mediator,
-            ILogger<SyncSectionAgendaCommandHandler> logger)
+            ILogger<SyncSectionAgendaCommandHandler> logger,
+            ICurrentUserService currentUserService)
         {
             _context = context;
             _centralContext = centralContext;
@@ -46,6 +49,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
             _logRepository = logRepository;
             _mediator = mediator;
             _logger = logger;
+            _currentUserService = currentUserService;
         }
 
         public async Task<DiagnosticResultDto> Handle(SyncSectionAgendaCommand request, CancellationToken cancellationToken)
@@ -199,12 +203,13 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     return result;
                 }
 
-                await _mediator.Send(new SyncSessionFacilitatorCommand(request.IdSeccion), cancellationToken);
-                await _mediator.Send(new SyncSessionDatesCommand(request.IdSeccion), cancellationToken);
+                await _mediator.Send(new SyncSessionFacilitatorCommand(request.IdSeccion, request.JobId), cancellationToken);
+                await _mediator.Send(new SyncSessionDatesCommand(request.IdSeccion, request.JobId), cancellationToken);
                 await _mediator.Send(new SyncSessionRosterCommand
                 {
                     IdSeccion = request.IdSeccion,
-                    Mode = SessionRosterSyncType.FullSync
+                    Mode = SessionRosterSyncType.FullSync,
+                    JobId = request.JobId
                 }, cancellationToken);
 
                 existingBlocks = await GetExistingMeetingBlocksAsync(team.IdTeamsGroup, request.IdSeccion, cancellationToken);
@@ -251,20 +256,70 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     {
                         if (existingBySlot.TryGetValue(slotKey, out var existingMeeting))
                         {
-                            await _agendaService.UpdateMeetingAsync(
-                                new TeamsMeetingUpdateRequest
-                                {
-                                    TeamId = team.IdTeamsGroup,
-                                    EventId = existingMeeting.EventId,
-                                    JoinUrl = existingMeeting.JoinUrl,
-                                    Start = firstStart,
-                                    End = firstEnd,
-                                    RequiredAttendeeEmails = attendeeEmails,
-                                    PresenterEmails = teacherEmails
-                                },
-                                cancellationToken);
+                            try
+                            {
+                                await _agendaService.UpdateMeetingAsync(
+                                    new TeamsMeetingUpdateRequest
+                                    {
+                                        TeamId = team.IdTeamsGroup,
+                                        EventId = existingMeeting.EventId,
+                                        JoinUrl = existingMeeting.JoinUrl,
+                                        Start = firstStart,
+                                        End = firstEnd,
+                                        RequiredAttendeeEmails = attendeeEmails,
+                                        PresenterEmails = teacherEmails
+                                    },
+                                    cancellationToken);
 
-                            updatedCount++;
+                                updatedCount++;
+                            }
+                            catch (Exception ex) when (IsMeetingNotFoundError(ex))
+                            {
+                                _logger.LogWarning(
+                                    ex,
+                                    "Meeting {EventId} for slot {Inicio}-{Fin} in section {SectionId} not found in Teams storage. Inactivating local link to force re-creation.",
+                                    existingMeeting.EventId,
+                                    scheduleBlock.Key.Inicio,
+                                    scheduleBlock.Key.Fin,
+                                    request.IdSeccion);
+
+                                await LogOperativoAsync(
+                                    "Warning",
+                                    "Agenda",
+                                    team.IdTeamsGroup,
+                                    $"Aviso: El bloque {FormatHour(scheduleBlock.Key.Inicio)}-{FormatHour(scheduleBlock.Key.Fin)} desapareció de Teams. Acción: El sistema lo está recreando automáticamente ahora.",
+                                    request.JobId,
+                                    ex.Message);
+
+                                await InactivateTeamsHorarioByEventIdAsync(team.IdTeamsGroup, existingMeeting.EventId, cancellationToken);
+
+
+                                // Fallback: try to re-create the block in this same run
+                                if (string.IsNullOrWhiteSpace(primaryChannelId))
+                                {
+                                    primaryChannelId = await _agendaService.GetPrimaryChannelIdAsync(team.IdTeamsGroup, cancellationToken);
+                                }
+
+                                if (string.IsNullOrWhiteSpace(primaryChannelId))
+                                {
+                                    throw new InvalidOperationException("No se pudo resolver el canal principal del Team para recrear el bloque desaparecido.");
+                                }
+
+                                var recreatedBlock = await CreateMissingBlockAsync(
+                                    team.IdTeamsGroup,
+                                    primaryChannelId,
+                                    scheduleBlock.Key.Inicio,
+                                    scheduleBlock.Key.Fin,
+                                    blockSessions,
+                                    attendeeEmails,
+                                    teacherEmails,
+                                    section,
+                                    courseStartDate,
+                                    courseEndDate,
+                                    cancellationToken);
+
+                                createdMissingBlocks.Add(recreatedBlock);
+                            }
                         }
                         else
                         {
@@ -398,6 +453,14 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
             }
 
             return result;
+        }
+
+        private static bool IsMeetingNotFoundError(Exception ex)
+        {
+            var message = (ex.Message ?? string.Empty).ToLowerInvariant();
+            return message.Contains("object was not found") ||
+                   message.Contains("itemnotfound") ||
+                   (ex is ApiException apiEx && apiEx.ResponseStatusCode == 404);
         }
 
         private static bool IsTransientProvisioningError(Exception ex)
@@ -663,7 +726,7 @@ VALUES
     {12},
     'A',
     {13},
-    1,
+    {14},
     GETDATE()
 );
 END;";
@@ -701,7 +764,8 @@ END;";
                             participant.CorreoAlumno,
                             effectiveTeacherCode,
                             effectiveTeacherEmail ?? string.Empty,
-                            meeting.JoinUrl);
+                            meeting.JoinUrl,
+                            _currentUserService.UserIdInt ?? 1);
 
                         if (affectedRows > 0)
                         {
@@ -792,6 +856,18 @@ SET UrlClaseVirtual = '',
 WHERE IdSeccion = {0};";
 
             await _context.Database.ExecuteSqlRawAsync(clearSql, sectionId);
+        }
+
+        private async Task InactivateTeamsHorarioByEventIdAsync(string teamId, string eventId, CancellationToken cancellationToken)
+        {
+            const string sql = @"
+UPDATE TeamsHorarios 
+SET Estado = 'I', 
+    UsuarioModificacion = {2}, 
+    FechaModificacion = GETDATE() 
+WHERE IdTeams = {0} AND IdEvento = {1} AND Estado = 'A'";
+
+            await _context.Database.ExecuteSqlRawAsync(sql, [teamId, eventId, _currentUserService.UserIdInt ?? 1], cancellationToken);
         }
 
         private static List<string> BuildTeacherEmails(

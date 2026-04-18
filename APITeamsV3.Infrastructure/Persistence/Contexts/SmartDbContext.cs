@@ -17,11 +17,13 @@ namespace APITeamsV3.Infrastructure.Persistence.Contexts
         public DbSet<APITeamsV3.Domain.Entities.TeamSession> TeamsHorarios { get; set; }
         public DbSet<APITeamsV3.Domain.Entities.AplicativoTeams> AplicativosTeams { get; set; }
         private readonly ITenantProvider _tenantProvider;
+        private readonly ICurrentUserService _currentUserService;
 
-        public SmartDbContext(DbContextOptions<SmartDbContext> options, ITenantProvider tenantProvider) 
+        public SmartDbContext(DbContextOptions<SmartDbContext> options, ITenantProvider tenantProvider, ICurrentUserService currentUserService) 
             : base(options)
         {
             _tenantProvider = tenantProvider;
+            _currentUserService = currentUserService;
         }
 
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
@@ -201,6 +203,24 @@ namespace APITeamsV3.Infrastructure.Persistence.Contexts
                 entity.Property(e => e.PorCursoxAlumnos).HasPrecision(5, 2);
                 entity.Property(e => e.PorAlumnos).HasPrecision(5, 2);
             });
+        }
+        public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            // Default to 1 (System) if no user context, otherwise use actual user ID (defaulting to 888888 if authenticated but not mapped)
+            int currentUserId = _currentUserService.UserIdInt ?? 1;
+
+            foreach (var entry in ChangeTracker.Entries<APITeamsV3.Domain.Entities.TeamEntity>())
+            {
+                if (entry.State == EntityState.Added)
+                {
+                    entry.Entity.UsuarioCreacion = currentUserId;
+                }
+                else if (entry.State == EntityState.Modified)
+                {
+                    entry.Entity.UsuarioModificacion = currentUserId;
+                }
+            }
+            return base.SaveChangesAsync(cancellationToken);
         }
     }
 }

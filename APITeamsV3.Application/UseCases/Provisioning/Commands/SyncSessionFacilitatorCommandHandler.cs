@@ -6,16 +6,18 @@ using System.Threading.Tasks;
 
 namespace APITeamsV3.Application.UseCases.Provisioning.Commands
 {
-    public class SyncSessionFacilitatorCommandHandler : IRequestHandler<SyncSessionFacilitatorCommand, bool>
+    public class SyncSessionFacilitatorCommandHandler : IRequestHandler<SyncSessionFacilitatorCommand>
     {
         private readonly ISmartDbContext _context;
+        private readonly ICurrentUserService _currentUserService;
 
-        public SyncSessionFacilitatorCommandHandler(ISmartDbContext context)
+        public SyncSessionFacilitatorCommandHandler(ISmartDbContext context, ICurrentUserService currentUserService)
         {
             _context = context;
+            _currentUserService = currentUserService;
         }
 
-        public async Task<bool> Handle(SyncSessionFacilitatorCommand request, CancellationToken cancellationToken)
+        public async Task Handle(SyncSessionFacilitatorCommand request, CancellationToken cancellationToken)
         {
             // Option 13 Logic: Sync Facilitator
             var sql = @"
@@ -72,13 +74,13 @@ AND TARGET.NumeroReunion = SOURCE.NumeroReunion THEN
 UPDATE
 SET TARGET.CodigoFacilitador = SOURCE.CodigoAnterior,
   TARGET.CorreoFacilitador = SOURCE.EmailInstitucion,
-  TARGET.UsuarioModificacion = 1,
+  TARGET.UsuarioModificacion = {1},
   TARGET.FechaModificacion = GETDATE();
             ";
 
-            await _context.Database.ExecuteSqlRawAsync(sql, request.IdSeccion);
+            await _context.Database.ExecuteSqlRawAsync(sql, request.IdSeccion, _currentUserService.UserIdInt ?? 1);
 
-            return true;
+            return;
         }
     }
 }

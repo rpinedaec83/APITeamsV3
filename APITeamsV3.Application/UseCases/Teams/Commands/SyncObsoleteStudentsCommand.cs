@@ -6,11 +6,13 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
 {
     public class SyncObsoleteStudentsCommand : IRequest<List<ObsoleteStudentDto>>
     {
-        public int IdSeccion { get; set; }
+        public int IdSeccion { get; }
+        public string? JobId { get; }
 
-        public SyncObsoleteStudentsCommand(int idSeccion)
+        public SyncObsoleteStudentsCommand(int idSeccion, string? jobId = null)
         {
             IdSeccion = idSeccion;
+            JobId = jobId;
         }
     }
 }

@@ -212,7 +212,7 @@ const useStyles = makeStyles({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        zIndex: 9999,
+        zIndex: 1040,
     },
     loadingOverlayContent: {
         backgroundColor: tokens.colorNeutralBackground1,
@@ -507,6 +507,7 @@ const OperationsPage: React.FC = () => {
         try {
             const response = await apiClient.post(`/sync/verify/${seccionData.idSeccion}`);
             const result = response.data;
+            setLoading(false);
             if (result.isValid) {
                 await showSuccess(
                     result.summary || 'Se valido el Team y la informacion local quedo sincronizada.',
@@ -520,9 +521,8 @@ const OperationsPage: React.FC = () => {
             }
             await handleSearchSeccion();
         } catch (err: unknown) {
-            await showError('Error al validar el estado del Team.');
-        } finally {
             setLoading(false);
+            await showError('Error al validar el estado del Team.');
         }
     };
 

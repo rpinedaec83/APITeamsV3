@@ -12,10 +12,12 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
     public class SoftDeleteTeamCommandHandler : IRequestHandler<SoftDeleteTeamCommand, Unit>
     {
         private readonly ISmartDbContext _context;
+        private readonly ITeamsLogOperativoRepository _logRepository;
 
-        public SoftDeleteTeamCommandHandler(ISmartDbContext context)
+        public SoftDeleteTeamCommandHandler(ISmartDbContext context, ITeamsLogOperativoRepository logRepository)
         {
             _context = context;
+            _logRepository = logRepository;
         }
 
         public async Task<Unit> Handle(SoftDeleteTeamCommand request, CancellationToken cancellationToken)
@@ -29,6 +31,16 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                 team.EstadoTeam = "I";
                 team.IsActive = "I";
                 team.FechaModificacion = DateTime.UtcNow;
+
+                await _logRepository.LogAsync(new TeamsLogOperativo
+                {
+                    Tipo = "Info",
+                    EntidadAfectada = "Team",
+                    Referencia = request.IdTeamsGroup,
+                    Mensaje = $"[Manual/Command] Team {request.IdTeamsGroup} SOFT-DELETED (Status I). Affected: Team, Members, Sessions.",
+                    Fecha = DateTime.UtcNow,
+                    Severidad = "Low"
+                });
             }
 
             // 2. Soft-delete TeamsUsuarios

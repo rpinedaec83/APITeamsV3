@@ -17,7 +17,7 @@ namespace APITeamsV3.Domain.Entities
         public string IsActive { get; set; } = "A"; // Using string 'A'/'I'
         public DateTime FechaCreacion { get; set; }
         public DateTime? FechaModificacion { get; set; }
-        public int UsuarioCreacion { get; set; } = 1;
+        public int UsuarioCreacion { get; set; } = 99999999;
         public int? UsuarioModificacion { get; set; }
 
         // Navigation

@@ -171,4 +171,13 @@ namespace APITeamsV3.Application.UseCases.Teams.DTOs
         public decimal PorcentajeAvance { get; set; }
         public int ErroresUltimas24h { get; set; }
     }
+
+    public class LogOperationalSummaryDto
+    {
+        public int StudentsSuccess { get; set; }
+        public int AgendasSuccess { get; set; }
+        public int TeamsSuccess { get; set; }
+        public int TotalErrors { get; set; }
+        public int TotalWarnings { get; set; }
+    }
 }

@@ -1,106 +1,81 @@
-using MediatR;
-using APITeamsV3.Application.Common.Graph;
 using APITeamsV3.Application.Common.Interfaces;
-using APITeamsV3.Application.UseCases.Teams.DTOs;
-using APITeamsV3.Application.UseCases.Provisioning.Commands;
+using MediatR;
+using Microsoft.EntityFrameworkCore;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
-using Microsoft.EntityFrameworkCore;
-using System.Linq;
 using APITeamsV3.Domain.Entities;
 using System;
+using System.Linq;
+using APITeamsV3.Application.Common.Graph;
 
 namespace APITeamsV3.Application.UseCases.Teams.Commands
 {
     public class SyncSectionTeamCommandHandler : IRequestHandler<SyncSectionTeamCommand, SyncSectionTeamResult>
     {
-        private readonly ISectionEligibilityService _eligibilityService;
-        private readonly ITeamAcademicoRepository _teamRepository;
-        private readonly ITeamProvisioningService _provisioningService;
-        private readonly IGraphClientFactory _graphClientFactory;
         private readonly ISmartDbContext _context;
+        private readonly ITeamProvisioningService _provisioningService;
+        private readonly ITeamAcademicoRepository _teamRepository;
+        private readonly IMediator _mediator;
         private readonly ILogger<SyncSectionTeamCommandHandler> _logger;
         private readonly ITeamsLogOperativoRepository _logRepository;
-        private readonly IMediator _mediator;
+        private readonly IGraphClientFactory _graphClientFactory;
 
         public SyncSectionTeamCommandHandler(
-            ISectionEligibilityService eligibilityService,
-            ITeamAcademicoRepository teamRepository,
-            ITeamProvisioningService provisioningService,
-            IGraphClientFactory graphClientFactory,
             ISmartDbContext context,
+            ITeamProvisioningService provisioningService,
+            ITeamAcademicoRepository teamRepository,
+            IMediator mediator,
             ILogger<SyncSectionTeamCommandHandler> logger,
             ITeamsLogOperativoRepository logRepository,
-            IMediator mediator)
+            IGraphClientFactory graphClientFactory)
         {
-            _eligibilityService = eligibilityService;
-            _teamRepository = teamRepository;
-            _provisioningService = provisioningService;
-            _graphClientFactory = graphClientFactory;
             _context = context;
+            _provisioningService = provisioningService;
+            _teamRepository = teamRepository;
+            _mediator = mediator;
             _logger = logger;
             _logRepository = logRepository;
-            _mediator = mediator;
+            _graphClientFactory = graphClientFactory;
         }
 
         public async Task<SyncSectionTeamResult> Handle(SyncSectionTeamCommand request, CancellationToken cancellationToken)
         {
             var result = new SyncSectionTeamResult();
-            
+
             try
             {
-                await _mediator.Send(
-                    new GenerateSectionScheduleCommand(request.IdSeccion) { Force = true },
-                    cancellationToken);
+                var existingTeam = await _context.TeamsEquipos
+                    .FirstOrDefaultAsync(t => t.IdSeccionSmart == request.IdSeccion, cancellationToken);
 
-                // 1. Refresh staging data for section essentially means load from local vw_MatriculasActivas or similar
-                // Here we fetch the Seccion entity.
-                var section = await _context.Set<Seccion>()
-                                            .AsNoTracking()
-                                            .FirstOrDefaultAsync(s => s.IdSeccion == request.IdSeccion, cancellationToken);
-                                            
-                if (section == null)
+                if (existingTeam == null)
                 {
-                    await LogOperativoAsync("Error", "Seccion", request.IdSeccion.ToString(), "La sección no existe en el repositorio local.", request.JobId);
-                    result.Failure++;
-                    return result;
-                }
+                    // Fetch the section data for provisioning
+                    var section = await _context.Set<Seccion>()
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(s => s.IdSeccion == request.IdSeccion, cancellationToken);
 
-                // 2. Elegibilidad
-                var eligibility = await _eligibilityService.IsEligibleForTeamsAsync(section, request.CompanyKey);
-                if (!eligibility.IsEligible)
-                {
-                    await LogOperativoAsync("Info", "Seccion", request.IdSeccion.ToString(), $"Sección no elegible: {eligibility.Reason}", request.JobId);
-                    result.Ignored++;
-                    return result;
-                }
-
-                // 3. Revisar existencia local
-                var existingTeam = await _teamRepository.GetBySeccionIdAsync(request.IdSeccion);
-
-                if (existingTeam == null || existingTeam.EstadoTeam == "I")
-                {
-                    // Flujo 3: Crear Team
-                    _logger.LogInformation($"Creating Team for section {request.IdSeccion}");
-                    
-                    // We delegate to the specific ITeamProvisioningService to handle Graph interactions and naming rules
-                    // We prioritize the facilitator's email, then a default admin per company
-                    // 3.1 Enforce teacher requirement — the section must have a facilitator
-                    if (string.IsNullOrEmpty(section.EmailFacilitador))
+                    if (section == null)
                     {
-                        string warnMsg = "No se puede crear el equipo: La sección no tiene un docente (Facilitador) asignado.";
-                        _logger.LogWarning($"{warnMsg} Section ID: {request.IdSeccion}");
-                        await LogOperativoAsync("Warning", "Seccion", request.IdSeccion.ToString(), warnMsg, request.JobId);
-                        result.Ignored++;
+                        _logger.LogWarning($"Section {request.IdSeccion} not found in database. Aborting provision.");
+                        result.Failure++;
                         return result;
                     }
 
+                    // Flujo 1: Crear Team desde cero
+                    _logger.LogInformation($"No existing team found for section {request.IdSeccion}. Provisioning new Microsoft 365 Group.");
+                    
                     var newGraphId = await _provisioningService.ProvisionTeamAsync(section);
                     
                     if (string.IsNullOrEmpty(newGraphId)) 
                     {
-                        await LogOperativoAsync("Error", "Team", request.IdSeccion.ToString(), "Fallo aprovisionamiento en Graph", request.JobId);
+                        await LogOperativoAsync(
+                            "Error", 
+                            "Team", 
+                            request.IdSeccion.ToString(), 
+                            "Error: Falló el aprovisionamiento en Microsoft Graph. Acción: Verifique que el administrador de la empresa tenga permisos suficientes y que el docente tenga una licencia válida de M365.", 
+                            request.JobId);
                         result.Failure++;
                         return result;
                     }
@@ -108,8 +83,8 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     // Keep creation flow aligned with RECREAR:
                     // owners are assigned during ProvisionTeamAsync; then we reconcile teachers/students deltas.
                     _logger.LogInformation($"Reconciling initial members and facilitators for new team {newGraphId}");
-                    await _mediator.Send(new SyncTeamFacilitatorsCommand(request.IdSeccion), cancellationToken);
-                    await _mediator.Send(new SyncMissingStudentsCommand(request.IdSeccion), cancellationToken);
+                    await _mediator.Send(new SyncTeamFacilitatorsCommand(request.IdSeccion, request.JobId), cancellationToken);
+                    await _mediator.Send(new SyncMissingStudentsCommand(request.IdSeccion, request.JobId), cancellationToken);
                     await _provisioningService.EnsureMembershipOpenAsync(newGraphId);
                     
                     await LogOperativoAsync("Success", "Team", newGraphId, "Equipo creado exitosamente con miembros y propietarios.", request.JobId);
@@ -131,7 +106,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                             "Warning",
                             "Team",
                             existingTeam.IdTeamsGroup,
-                            "El Team local apunta a un grupo inexistente en Graph. Se marco como inactivo y no se ejecuto la sincronizacion de miembros.",
+                            "Advertencia: El equipo vinculado ya no existe en Microsoft 365 (borrado externo). Acción: El sistema ha marcado el registro local como inactivo y creará un nuevo equipo automáticamente.",
                             request.JobId);
 
                         result.Ignored++;
@@ -141,18 +116,13 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     // Call the granular commands to synchronize changes
                     
                     // 1. Sync Nombres (Renamed)
-                    await _mediator.Send(new SyncRenamedTeamsCommand(request.IdSeccion), cancellationToken);
+                    await _mediator.Send(new SyncRenamedTeamsCommand(request.IdSeccion, request.JobId), cancellationToken);
                     
-                    // 2. Sync Facilitadores (Owners)
-                    await _mediator.Send(new SyncTeamFacilitatorsCommand(request.IdSeccion), cancellationToken);
+                    // 2. Sync Teachers
+                    await _mediator.Send(new SyncTeamFacilitatorsCommand(request.IdSeccion, request.JobId), cancellationToken);
                     
-                    // 3. Sync Estudiantes (Miembros)
-                    await _mediator.Send(new SyncMissingStudentsCommand(request.IdSeccion), cancellationToken);
-                    await _mediator.Send(new SyncObsoleteStudentsCommand(request.IdSeccion), cancellationToken);
-                    await _provisioningService.EnsureMembershipOpenAsync(existingTeam.IdTeamsGroup);
-
-                    // If needed, evaluate Agenda (Regenerate)
-                    // If team went from Active to Inactive -> SoftDeleteTeamCommand
+                    // 3. Sync Students
+                    await _mediator.Send(new SyncMissingStudentsCommand(request.IdSeccion, request.JobId), cancellationToken);
                     
                     await LogOperativoAsync("Success", "Team", existingTeam.IdTeamsGroup, "Equipo actualizado exitosamente (Nombres, Owners, Miembros).", request.JobId);
                     result.Success++;
@@ -186,7 +156,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to write operational log. This might be due to a missing LogOperativo table.");
+                _logger.LogWarning(ex, "Failed to write operational log in section sync.");
             }
         }
     }

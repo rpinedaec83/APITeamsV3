@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using System.Linq;
 using System;
+using APITeamsV3.Domain.Entities;
 
 namespace APITeamsV3.Application.UseCases.Teams.Commands
 {
@@ -18,6 +19,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
         private readonly IGraphUserLookupService _userLookupService;
         private readonly ICentralDbContext _centralContext;
         private readonly ITenantProvider _tenantProvider;
+        private readonly ITeamsLogOperativoRepository _logRepository;
         private readonly ILogger<SyncTeamFacilitatorsCommandHandler> _logger;
 
         public SyncTeamFacilitatorsCommandHandler(
@@ -26,6 +28,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
             IGraphUserLookupService userLookupService,
             ICentralDbContext centralContext,
             ITenantProvider tenantProvider,
+            ITeamsLogOperativoRepository logRepository,
             ILogger<SyncTeamFacilitatorsCommandHandler> logger)
         {
             _context = context;
@@ -33,6 +36,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
             _userLookupService = userLookupService;
             _centralContext = centralContext;
             _tenantProvider = tenantProvider;
+            _logRepository = logRepository;
             _logger = logger;
         }
 
@@ -58,7 +62,6 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     cancellationToken);
 
             // Paso 3: Obtener el facilitador esperado desde la fuente academica real
-            // en vez de depender del snapshot TeamsProgramacionAlumnos.
             const string facilitatorDeltaSql = @"
 SELECT DISTINCT
     TE.IdTeamsGroup AS IdTeam,
@@ -117,7 +120,9 @@ WHERE TE.IdSeccionSmart = {0}
 
                         if (user?.Id == null)
                         {
-                            _logger.LogWarning("Facilitator {EmailFacilitador} could not be resolved in Azure AD for Team {IdTeam}.", change.EmailFacilitador, change.IdTeam);
+                            var warnMsg = $"Información: El facilitador {change.EmailFacilitador} no existe en Azure AD. Acción: Verifique que el docente tenga su cuenta activa en Office 365.";
+                            _logger.LogWarning(warnMsg);
+                            await LogOperativoAsync("Warning", "Teacher", request.IdSeccion.ToString(), warnMsg, request.JobId);
                             continue;
                         }
 
@@ -157,13 +162,6 @@ WHERE TE.IdSeccionSmart = {0}
                                 $"teacher {change.EmailFacilitador}",
                                 cancellationToken);
                         }
-                        else
-                        {
-                            _logger.LogWarning(
-                                "EducationClassId could not be resolved for Group {GroupId}. Facilitator {Facilitador} was added as Group owner only.",
-                                change.IdTeam,
-                                change.EmailFacilitador);
-                        }
 
                         // Update the P3 record in DB to reflect the new facilitator is now synchronized
                         await _context.TeamsEquipos
@@ -172,12 +170,36 @@ WHERE TE.IdSeccionSmart = {0}
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(ex, $"Failed to add facilitator {change.EmailFacilitador} to Graph Group {change.IdTeam}");
+                        var errMsg = $"Error al sincronizar facilitador {change.EmailFacilitador} para la sección {request.IdSeccion}: {ex.Message}. Acción: Verifique los permisos del administrador en Microsoft Graph.";
+                        _logger.LogWarning(ex, errMsg);
+                        await LogOperativoAsync("Error", "Teacher", request.IdSeccion.ToString(), errMsg, request.JobId, ex.Message);
                     }
                 }
             }
 
             return result;
+        }
+
+        private async Task LogOperativoAsync(string type, string target, string reference, string msg, string? jobId, string context = "")
+        {
+            try
+            {
+                await _logRepository.LogAsync(new TeamsLogOperativo
+                {
+                    Tipo = type,
+                    EntidadAfectada = target,
+                    Referencia = reference,
+                    Mensaje = msg,
+                    ContextoTecnico = context ?? string.Empty,
+                    JobId = jobId,
+                    Severidad = type == "Error" ? "High" : "Low",
+                    Fecha = DateTime.UtcNow
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to write operational log in facilitators sync.");
+            }
         }
 
         private async Task RemoveFormerFacilitatorAsync(
@@ -201,10 +223,6 @@ WHERE TE.IdSeccionSmart = {0}
 
             if (string.IsNullOrWhiteSpace(oldUser?.Id))
             {
-                _logger.LogWarning(
-                    "Former facilitator {OldEmail} could not be resolved in Azure AD for Team {TeamId}.",
-                    change.OldEmailFacilitador,
-                    change.IdTeam);
                 return;
             }
 
@@ -235,18 +253,10 @@ WHERE TE.IdSeccionSmart = {0}
                 }
                 catch (Exception ex) when (IsAlreadyExistsError(ex))
                 {
-                    _logger.LogDebug("{Subject} already exists in Team {TeamId}.", subject, teamId);
                     return;
                 }
                 catch (Exception ex) when (IsPropagationError(ex) && attempt < maxAttempts)
                 {
-                    _logger.LogWarning(
-                        "{Subject} could not be attached to Team {TeamId} yet because the Graph resource is not ready. Retrying in 3s ({Attempt}/{MaxAttempts}).",
-                        subject,
-                        teamId,
-                        attempt,
-                        maxAttempts);
-
                     await Task.Delay(3000, cancellationToken);
                 }
                 catch (Exception ex)
@@ -255,8 +265,6 @@ WHERE TE.IdSeccionSmart = {0}
                     return;
                 }
             }
-
-            _logger.LogWarning("Failed to attach {Subject} to Team/Class resource {TeamId} after retries.", subject, teamId);
         }
 
         private async Task RemoveReferenceIfExistsAsync(Func<Task> action, string resourceId, string subject)
@@ -267,7 +275,6 @@ WHERE TE.IdSeccionSmart = {0}
             }
             catch (Exception ex) when (IsMissingReferenceError(ex))
             {
-                _logger.LogDebug("{Subject} is already absent from resource {ResourceId}.", subject, resourceId);
             }
             catch (Exception ex)
             {
@@ -278,30 +285,26 @@ WHERE TE.IdSeccionSmart = {0}
         private static bool IsAlreadyExistsError(Exception ex)
         {
             return ex.Message.Contains("already exist", StringComparison.OrdinalIgnoreCase) ||
-                   ex.Message.Contains("already exists", StringComparison.OrdinalIgnoreCase) ||
-                   ex.Message.Contains("added object references already exist", StringComparison.OrdinalIgnoreCase);
+                   ex.Message.Contains("already exists", StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool IsPropagationError(Exception ex)
         {
             return ex.Message.Contains("does not exist", StringComparison.OrdinalIgnoreCase) ||
                    ex.Message.Contains("404", StringComparison.OrdinalIgnoreCase) ||
-                   ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase) ||
-                   ex.Message.Contains("not present", StringComparison.OrdinalIgnoreCase) ||
-                   ex.Message.Contains("resource not found", StringComparison.OrdinalIgnoreCase);
+                   ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool IsMissingReferenceError(Exception ex)
         {
             return ex.Message.Contains("does not exist", StringComparison.OrdinalIgnoreCase) ||
                    ex.Message.Contains("404", StringComparison.OrdinalIgnoreCase) ||
-                   ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase) ||
-                   ex.Message.Contains("resource not found", StringComparison.OrdinalIgnoreCase);
+                   ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase);
         }
 
         private async Task MarkGroupAsInconsistentAsync(string groupId, CancellationToken cancellationToken)
         {
-            var affected = await _context.TeamsEquipos
+            await _context.TeamsEquipos
                 .Where(team => team.IdTeamsGroup == groupId && team.EstadoTeam == "A")
                 .ExecuteUpdateAsync(
                     setters => setters
@@ -309,13 +312,6 @@ WHERE TE.IdSeccionSmart = {0}
                         .SetProperty(team => team.FechaModificacion, DateTime.UtcNow)
                         .SetProperty(team => team.UsuarioModificacion, 1),
                     cancellationToken);
-
-            if (affected > 0)
-            {
-                _logger.LogWarning(
-                    "Graph group {GroupId} does not exist. Matching TeamsEquipos rows were marked inactive before syncing facilitators.",
-                    groupId);
-            }
         }
     }
 }

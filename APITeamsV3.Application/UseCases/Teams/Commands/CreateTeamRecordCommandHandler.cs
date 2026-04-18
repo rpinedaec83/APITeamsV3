@@ -11,10 +11,12 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
     public class CreateTeamRecordCommandHandler : IRequestHandler<CreateTeamRecordCommand, Unit>
     {
         private readonly ISmartDbContext _context;
+        private readonly ITeamsLogOperativoRepository _logRepository;
 
-        public CreateTeamRecordCommandHandler(ISmartDbContext context)
+        public CreateTeamRecordCommandHandler(ISmartDbContext context, ITeamsLogOperativoRepository logRepository)
         {
             _context = context;
+            _logRepository = logRepository;
         }
 
         public async Task<Unit> Handle(CreateTeamRecordCommand request, CancellationToken cancellationToken)
@@ -38,6 +40,16 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
 
             _context.TeamsEquipos.Add(newTeam);
             await _context.SaveChangesAsync(cancellationToken);
+
+            await _logRepository.LogAsync(new TeamsLogOperativo
+            {
+                Tipo = "Info",
+                EntidadAfectada = "Team",
+                Referencia = request.IdTeamsGroup,
+                Mensaje = $"[Manual/Command] Team {request.IdTeamsGroup} registered in DB for Section {request.IdSeccionSmart}",
+                Fecha = DateTime.UtcNow,
+                Severidad = "Low"
+            });
 
             return Unit.Value;
         }

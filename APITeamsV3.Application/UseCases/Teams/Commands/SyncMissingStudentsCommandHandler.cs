@@ -27,6 +27,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
         private readonly ICentralDbContext _centralContext;
         private readonly ITenantProvider _tenantProvider;
         private readonly IGraphUserLookupService _userLookupService;
+        private readonly ICurrentUserService _currentUserService;
 
         public SyncMissingStudentsCommandHandler(
             ISmartDbContext context,
@@ -35,7 +36,8 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
             ITeamsLogOperativoRepository logRepository,
             ICentralDbContext centralContext,
             ITenantProvider tenantProvider,
-            IGraphUserLookupService userLookupService)
+            IGraphUserLookupService userLookupService,
+            ICurrentUserService currentUserService)
         {
             _context = context;
             _graphFactory = graphFactory;
@@ -44,6 +46,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
             _centralContext = centralContext;
             _tenantProvider = tenantProvider;
             _userLookupService = userLookupService;
+            _currentUserService = currentUserService;
         }
 
         public async Task<List<MissingStudentDto>> Handle(SyncMissingStudentsCommand request, CancellationToken cancellationToken)
@@ -60,7 +63,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed querying missing students for section {SectionId}.", request.IdSeccion);
-                await LogErrorAsync("StudentSync", request.IdSeccion.ToString(), $"Error query missing students: {ex.Message}");
+                await LogOperativoAsync("Error", "StudentSync", request.IdSeccion.ToString(), $"Error al consultar alumnos faltantes: {ex.Message}. Acción: Verifique la conectividad con la base de datos académica.", request.JobId);
                 throw;
             }
 
@@ -102,9 +105,9 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
 
                     if (user == null || string.IsNullOrEmpty(user.Id))
                     {
-                        var warnMsg = $"Student {student.EmailAlumno} ({student.CodigoAlumno}) not found in Azure AD (tried fallback: {effectiveEmail}). Skipping Member addition.";
+                        var warnMsg = $"Información: El alumno con correo {student.EmailAlumno} no existe en Azure AD. Acción: Verifique que la cuenta del alumno esté creada y activa en Office 365.";
                         _logger.LogWarning(warnMsg);
-                        await LogErrorAsync("Student", student.CodigoAlumno, warnMsg);
+                        await LogOperativoAsync("Warning", "AzureAD", student.CodigoAlumno, warnMsg, request.JobId);
                         continue;
                     }
 
@@ -117,6 +120,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                         () => GroupReferenceWriter.AddMemberAsync(graphClient, student.IdTeamsGroup, groupUserRef, cancellationToken),
                         student.IdTeamsGroup,
                         $"group member {student.EmailAlumno}",
+                        request.JobId,
                         cancellationToken);
 
                     if (!addedToGroup)
@@ -138,7 +142,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                         existingLocal.Nombres = student.NombresAlumno;
                         existingLocal.Apellidos = student.ApellidosAlumno;
                         existingLocal.FechaModificacion = DateTime.UtcNow;
-                        existingLocal.UsuarioModificacion = 1;
+                        existingLocal.UsuarioModificacion = _currentUserService.UserIdInt ?? 1;
                     }
                     else
                     {
@@ -153,7 +157,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                                 Tipo = "A",
                                 Estado = "A",
                                 FechaCreacion = DateTime.UtcNow,
-                                UsuarioCreacion = 1
+                                UsuarioCreacion = _currentUserService.UserIdInt ?? 1
                             },
                             cancellationToken);
                     }
@@ -163,7 +167,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Failed to sync student {StudentEmail} for section {SectionId}.", student.EmailAlumno, request.IdSeccion);
-                    await LogErrorAsync("Student", student.CodigoAlumno, $"Sync failed: {ex.Message}");
+                    await LogOperativoAsync("Error", "Student", student.CodigoAlumno, $"Error al sincronizar alumno {student.EmailAlumno}: {ex.Message}. Acción: Verifique si el usuario tiene restricciones en Teams.", request.JobId);
                 }
             }
 
@@ -173,6 +177,13 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                 {
                     await _context.SaveChangesAsync(cancellationToken);
                     _logger.LogInformation("Successfully synchronized {Count} missing students for section {SectionId}.", syncedCount, request.IdSeccion);
+                    
+                    await LogOperativoAsync(
+                        "Success", 
+                        "Student", 
+                        request.IdSeccion.ToString(), 
+                        $"Sincronización de alumnos completada: {syncedCount} alumnos agregados exitosamente al equipo.", 
+                        request.JobId);
                 }
                 catch (Exception dbEx)
                 {
@@ -336,7 +347,7 @@ WHERE AC.IdSeccion = {{0}}
             return columns;
         }
 
-        private async Task<bool> AddReferenceWithRetryAsync(Func<Task> action, string resourceId, string subject, CancellationToken cancellationToken)
+        private async Task<bool> AddReferenceWithRetryAsync(Func<Task> action, string resourceId, string subject, string? jobId, CancellationToken cancellationToken)
         {
             const int maxAttempts = 5;
 
@@ -371,12 +382,12 @@ WHERE AC.IdSeccion = {{0}}
                     }
 
                     _logger.LogWarning(ex, "Failed to add {Subject} on resource {ResourceId}.", subject, resourceId);
-                    await LogErrorAsync("Student", resourceId, $"Failed to add {subject}: {ex.Message}");
+                    await LogOperativoAsync("Error", "Student", resourceId, $"Failed to add {subject}: {ex.Message}", jobId);
                     return false;
                 }
             }
 
-            await LogErrorAsync("Student", resourceId, $"Failed to add {subject} after retries.");
+            await LogOperativoAsync("Error", "Student", resourceId, $"Failed to add {subject} after retries.", jobId);
             return false;
         }
 
@@ -402,18 +413,20 @@ WHERE AC.IdSeccion = {{0}}
                    message.Contains("eventual consistency", StringComparison.OrdinalIgnoreCase);
         }
 
-        private async Task LogErrorAsync(string target, string reference, string msg)
+        private async Task LogOperativoAsync(string type, string target, string reference, string msg, string? jobId, string context = "")
         {
             try
             {
                 await _logRepository.LogAsync(new TeamsLogOperativo
                 {
-                    Tipo = "Error",
+                    Tipo = type,
                     EntidadAfectada = target,
                     Referencia = reference,
                     Mensaje = msg,
-                    Fecha = DateTime.UtcNow,
-                    Severidad = "High"
+                    ContextoTecnico = context ?? string.Empty,
+                    JobId = jobId,
+                    Severidad = type == "Error" ? "High" : "Low",
+                    Fecha = DateTime.UtcNow
                 });
             }
             catch
@@ -451,7 +464,7 @@ WHERE AC.IdSeccion = {{0}}
                     setters => setters
                         .SetProperty(team => team.EstadoTeam, "I")
                         .SetProperty(team => team.FechaModificacion, DateTime.UtcNow)
-                        .SetProperty(team => team.UsuarioModificacion, 1),
+                        .SetProperty(team => team.UsuarioModificacion, _currentUserService.UserIdInt ?? 1),
                     cancellationToken);
 
             if (affected > 0)

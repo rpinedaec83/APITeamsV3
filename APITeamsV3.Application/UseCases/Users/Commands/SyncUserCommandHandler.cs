@@ -9,10 +9,12 @@ namespace APITeamsV3.Application.UseCases.Users.Commands
     public class SyncUserCommandHandler : IRequestHandler<SyncUserCommand, Unit>
     {
         private readonly ISmartDbContext _context;
+        private readonly ICurrentUserService _currentUserService;
 
-        public SyncUserCommandHandler(ISmartDbContext context)
+        public SyncUserCommandHandler(ISmartDbContext context, ICurrentUserService currentUserService)
         {
             _context = context;
+            _currentUserService = currentUserService;
         }
 
         public async Task<Unit> Handle(SyncUserCommand request, CancellationToken cancellationToken)
@@ -37,7 +39,7 @@ namespace APITeamsV3.Application.UseCases.Users.Commands
                         Apellidos = {3},
                         Email = {4},
                         Estado = 'A',
-                        UsuarioModificacion = 1,
+                        UsuarioModificacion = {6},
                         FechaModificacion = GETDATE()
                     WHERE CodigoAlumno = {1}
                       AND idTeams = {0}
@@ -63,7 +65,7 @@ namespace APITeamsV3.Application.UseCases.Users.Commands
                         {4},
                         {5},
                         'A',
-                        1,
+                        {6},
                         GETDATE()
                       )
                 END";
@@ -74,7 +76,8 @@ namespace APITeamsV3.Application.UseCases.Users.Commands
                 request.Nombres, 
                 request.Apellidos, 
                 request.Email, 
-                request.Tipo);
+                request.Tipo,
+                _currentUserService.UserIdInt ?? 1);
 
             return Unit.Value;
         }

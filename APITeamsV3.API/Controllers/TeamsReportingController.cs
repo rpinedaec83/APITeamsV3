@@ -162,6 +162,54 @@ namespace APITeamsV3.API.Controllers
             return Ok(currentTenantLogs);
         }
 
+        [HttpGet("logs-summary")]
+        public async Task<ActionResult<LogOperationalSummaryDto>> GetLogsSummary(
+            [FromQuery] string? tipo = null,
+            [FromQuery] string? severidad = null,
+            [FromQuery] string? entidad = null,
+            [FromQuery] string? referencia = null,
+            [FromQuery] string? jobId = null,
+            [FromQuery] string? search = null,
+            [FromQuery] DateTime? fechaDesde = null,
+            [FromQuery] string? scope = null,
+            [FromQuery] string? companyKey = null)
+        {
+            var isIt = User.IsInRole("IT");
+            var fetchAllCompanies = isIt && !string.Equals(scope, "current", StringComparison.OrdinalIgnoreCase);
+
+            var filter = new LogsFilter(
+                Tipo: tipo,
+                Severidad: severidad,
+                Entidad: entidad,
+                Referencia: referencia,
+                JobId: jobId,
+                Search: search,
+                FechaDesde: fechaDesde);
+
+            if (fetchAllCompanies)
+            {
+                var result = await GetSummaryAcrossCompaniesAsync(
+                    filter,
+                    companyKey,
+                    HttpContext.RequestAborted);
+
+                return Ok(result);
+            }
+
+            var currentTenantSummary = await _mediator.Send(new GetLogSummaryQuery
+            {
+                TipoFiltro = filter.Tipo,
+                SeveridadFiltro = filter.Severidad,
+                EntidadFiltro = filter.Entidad,
+                ReferenciaFiltro = filter.Referencia,
+                JobIdFiltro = filter.JobId,
+                SearchTerm = filter.Search,
+                FechaDesde = filter.FechaDesde
+            });
+
+            return Ok(currentTenantSummary);
+        }
+
         [HttpGet("report-schedules")]
         public async Task<ActionResult<List<ScheduleReportDto>>> GetScheduleReport()
         {
@@ -339,6 +387,143 @@ namespace APITeamsV3.API.Controllers
             }
 
             sql.AppendLine("ORDER BY [Fecha] DESC, [Id] DESC;");
+            command.CommandText = sql.ToString();
+            return command;
+        }
+
+        private async Task<LogOperationalSummaryDto> GetSummaryAcrossCompaniesAsync(
+            LogsFilter filter,
+            string? companyKeyFilter,
+            CancellationToken cancellationToken)
+        {
+            var companiesQuery = _centralDbContext.CompanyConfigs
+                .AsNoTracking()
+                .Where(c => c.IsActive && c.SmartConnectionString != null && c.SmartConnectionString != string.Empty);
+
+            if (!string.IsNullOrWhiteSpace(companyKeyFilter))
+            {
+                var normalizedCompanyKey = companyKeyFilter.Trim().ToLowerInvariant();
+                companiesQuery = companiesQuery.Where(c => c.CompanyKey.ToLower() == normalizedCompanyKey);
+            }
+
+            var companies = await companiesQuery
+                .Select(c => new { c.CompanyKey, c.SmartConnectionString })
+                .ToListAsync(cancellationToken);
+
+            var result = new LogOperationalSummaryDto();
+
+            foreach (var company in companies)
+            {
+                string decryptedConnection;
+                try
+                {
+                    decryptedConnection = _encryptionService.Decrypt(company.SmartConnectionString);
+                }
+                catch
+                {
+                    decryptedConnection = company.SmartConnectionString;
+                }
+
+                if (string.IsNullOrWhiteSpace(decryptedConnection)) continue;
+
+                try
+                {
+                    await using var connection = new SqlConnection(decryptedConnection);
+                    await connection.OpenAsync(cancellationToken);
+                    await using var command = BuildSummaryCommand(connection, filter);
+                    await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+                    while (await reader.ReadAsync(cancellationToken))
+                    {
+                        var entidad = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
+                        var tipo = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
+                        var count = reader.IsDBNull(2) ? 0 : reader.GetInt32(2);
+
+                        if (tipo == "Success")
+                        {
+                            if (entidad == "Student" || entidad == "StudentSync" || entidad == "Members")
+                                result.StudentsSuccess += count;
+                            else if (entidad == "Agenda")
+                                result.AgendasSuccess += count;
+                            else if (entidad == "Team")
+                                result.TeamsSuccess += count;
+                        }
+
+                        if (tipo == "Error") result.TotalErrors += count;
+                        if (tipo == "Warning") result.TotalWarnings += count;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "No se pudo consultar el resumen para la empresa {CompanyKey}.", company.CompanyKey);
+                }
+            }
+
+            return result;
+        }
+
+        private static SqlCommand BuildSummaryCommand(SqlConnection connection, LogsFilter filter)
+        {
+            var sql = new StringBuilder();
+            sql.AppendLine("SELECT [EntidadAfectada], [Tipo], COUNT(*)");
+            sql.AppendLine("FROM [TeamsLogOperativo] WITH (NOLOCK)");
+            sql.AppendLine("WHERE 1 = 1");
+
+            var command = connection.CreateCommand();
+            command.CommandType = CommandType.Text;
+
+            if (!string.IsNullOrWhiteSpace(filter.Tipo))
+            {
+                sql.AppendLine("AND [Tipo] = @Tipo");
+                command.Parameters.Add(new SqlParameter("@Tipo", SqlDbType.NVarChar, 50) { Value = filter.Tipo.Trim() });
+            }
+
+            if (!string.IsNullOrWhiteSpace(filter.Severidad))
+            {
+                sql.AppendLine("AND [Severidad] = @Severidad");
+                command.Parameters.Add(new SqlParameter("@Severidad", SqlDbType.NVarChar, 50) { Value = filter.Severidad.Trim() });
+            }
+
+            if (!string.IsNullOrWhiteSpace(filter.Entidad))
+            {
+                sql.AppendLine("AND [EntidadAfectada] = @Entidad");
+                command.Parameters.Add(new SqlParameter("@Entidad", SqlDbType.NVarChar, 200) { Value = filter.Entidad.Trim() });
+            }
+
+            if (!string.IsNullOrWhiteSpace(filter.Referencia))
+            {
+                sql.AppendLine("AND [Referencia] LIKE @Referencia");
+                command.Parameters.Add(new SqlParameter("@Referencia", SqlDbType.NVarChar, 400) { Value = $"%{filter.Referencia.Trim()}%" });
+            }
+
+            if (!string.IsNullOrWhiteSpace(filter.JobId))
+            {
+                sql.AppendLine("AND ISNULL([JobId], '') LIKE @JobId");
+                command.Parameters.Add(new SqlParameter("@JobId", SqlDbType.NVarChar, 400) { Value = $"%{filter.JobId.Trim()}%" });
+            }
+
+            if (filter.FechaDesde.HasValue)
+            {
+                sql.AppendLine("AND [Fecha] >= @FechaDesde");
+                command.Parameters.Add(new SqlParameter("@FechaDesde", SqlDbType.DateTime2) { Value = filter.FechaDesde.Value });
+            }
+
+            if (!string.IsNullOrWhiteSpace(filter.Search))
+            {
+                sql.AppendLine("AND (");
+                sql.AppendLine("    [Tipo] LIKE @Search");
+                sql.AppendLine("    OR [EntidadAfectada] LIKE @Search");
+                sql.AppendLine("    OR [Referencia] LIKE @Search");
+                sql.AppendLine("    OR [Mensaje] LIKE @Search");
+                sql.AppendLine("    OR [Severidad] LIKE @Search");
+                sql.AppendLine("    OR ISNULL([JobId], '') LIKE @Search");
+                sql.AppendLine("    OR ISNULL([ContextoTecnico], '') LIKE @Search");
+                sql.AppendLine(")");
+
+                command.Parameters.Add(new SqlParameter("@Search", SqlDbType.NVarChar, 4000) { Value = $"%{filter.Search.Trim()}%" });
+            }
+
+            sql.AppendLine("GROUP BY [EntidadAfectada], [Tipo]");
             command.CommandText = sql.ToString();
             return command;
         }

@@ -973,6 +973,23 @@ namespace APITeamsV3.Infrastructure.Services
             catch { /* Avoid recursive log failures */ }
         }
 
+        private async Task LogInfoAsync(string target, string reference, string msg)
+        {
+            try
+            {
+                await _logRepository.LogAsync(new TeamsLogOperativo
+                {
+                    Tipo = "Info",
+                    EntidadAfectada = target,
+                    Referencia = reference,
+                    Mensaje = msg,
+                    Fecha = DateTime.UtcNow,
+                    Severidad = "Low"
+                });
+            }
+            catch { /* Avoid recursive log failures */ }
+        }
+
         private async Task UpsertTeamRecordAsync(int idSeccion, string groupId, string name, string desc, string nick, OwnerSet owners)
         {
             var existingByGroup = await _smartContext.TeamsEquipos.FirstOrDefaultAsync(t => t.IdTeamsGroup == groupId);
@@ -985,6 +1002,8 @@ namespace APITeamsV3.Infrastructure.Services
                 activeBySection.EstadoTeam = "I";
                 activeBySection.IsActive = "I";
                 activeBySection.FechaModificacion = DateTime.UtcNow;
+
+                await LogInfoAsync("Team", activeBySection.IdTeamsGroup, $"[Lifecycle] Team {activeBySection.IdTeamsGroup} DEACTIVATED (Replaced by {groupId}) for Section {idSeccion}");
             }
 
             if (existingByGroup != null)
@@ -1000,6 +1019,8 @@ namespace APITeamsV3.Infrastructure.Services
                 existingByGroup.FechaModificacion = DateTime.UtcNow;
                 existingByGroup.IsActive = "A";
                 existingByGroup.EstadoTeam = "A";
+
+                await LogInfoAsync("Team", groupId, $"[Lifecycle] Team {groupId} UPDATED/REACTIVATED for Section {idSeccion}");
             }
             else
             {
@@ -1018,6 +1039,8 @@ namespace APITeamsV3.Infrastructure.Services
                     EstadoTeam = "A",
                     IsActive = "A"
                 });
+
+                await LogInfoAsync("Team", groupId, $"[Lifecycle] Team {groupId} CREATED for Section {idSeccion}");
             }
             await _smartContext.SaveChangesAsync();
         }

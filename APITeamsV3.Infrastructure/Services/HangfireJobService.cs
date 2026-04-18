@@ -172,13 +172,13 @@ namespace APITeamsV3.Infrastructure.Services
         {
             var key = GetCurrentCompanyKey();
             var client = await CreateClientAsync(key);
-            return client.Enqueue(() => SendSyncSectionTeam(idSeccion, key, null));
+            return client.Enqueue(() => SendSyncSectionTeam(idSeccion, key));
         }
 
         public async Task<string> EnqueuePilotRecordingTransfers(string companyKey)
         {
             var client = await CreateClientAsync(companyKey);
-            return client.Enqueue(() => RunPilotRecordingTransfers(companyKey, null));
+            return client.Enqueue(() => RunPilotRecordingTransfers(companyKey));
         }
 
         private async Task<IBackgroundJobClient> CreateClientAsync(string companyKey)
@@ -208,15 +208,19 @@ namespace APITeamsV3.Infrastructure.Services
             await _mediator.Send(new SyncSessionFacilitatorCommand(idSeccion));
         }
 
-    [JobDisplayName("Sincronizacion Operativa: Section {0} (Full: {1}) [{2}]")]
-    public async Task SendSyncRoster(int idSeccion, bool fullSync, string companyKey)
+    public Task SendSyncRoster(int idSeccion, bool fullSync, string companyKey)
+        => SendSyncRoster(idSeccion, fullSync, companyKey, null);
+
+    public async Task SendSyncRoster(int idSeccion, bool fullSync, string companyKey, PerformContext? performContext)
         {
             if (!await ShouldRunForSectionAsync(companyKey, idSeccion, "SyncRoster")) return;
 
+            var jobId = performContext?.BackgroundJob?.Id;
+
             if (fullSync)
             {
-                await _mediator.Send(new SyncSectionTeamCommand(idSeccion, companyKey, null));
-                await _mediator.Send(new SyncSectionAgendaCommand(idSeccion, companyKey, null));
+                await _mediator.Send(new SyncSectionTeamCommand(idSeccion, companyKey, jobId));
+                await _mediator.Send(new SyncSectionAgendaCommand(idSeccion, companyKey, jobId));
                 return;
             }
 
@@ -256,10 +260,14 @@ namespace APITeamsV3.Infrastructure.Services
             await _mediator.Send(new SyncRenamedTeamsCommand(idSeccion));
         }
 
+        public Task SendSyncSectionTeam(int idSeccion, string companyKey)
+            => SendSyncSectionTeam(idSeccion, companyKey, null);
+
         [JobDisplayName("Sync Section Team V3: Section {0} [{1}]")]
-        public async Task SendSyncSectionTeam(int idSeccion, string companyKey, string? jobId)
+        public async Task SendSyncSectionTeam(int idSeccion, string companyKey, PerformContext? performContext)
         {
             if (!await ShouldRunForSectionAsync(companyKey, idSeccion, "SyncSectionTeam")) return;
+            var jobId = performContext?.BackgroundJob?.Id;
             await _mediator.Send(new SyncSectionTeamCommand(idSeccion, companyKey, jobId));
         }
 
@@ -284,8 +292,11 @@ namespace APITeamsV3.Infrastructure.Services
             }
         }
 
+        public Task RunPilotRecordingTransfers(string companyKey)
+            => RunPilotRecordingTransfers(companyKey, null);
+
         [JobDisplayName("Transfer Pilot Recordings [{0}]")]
-        public async Task RunPilotRecordingTransfers(string companyKey, PerformContext? performContext = null)
+        public async Task RunPilotRecordingTransfers(string companyKey, PerformContext? performContext)
         {
             var hangfireJobId = performContext?.BackgroundJob?.Id;
             var config = await ResolveTenantAsync(companyKey, includePilotSections: true);

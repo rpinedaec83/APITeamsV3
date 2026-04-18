@@ -323,14 +323,15 @@ const CompanyConfigsPage: React.FC = () => {
                 <Table style={{ tableLayout: 'fixed', width: '100%' }}>
                     <TableHeader>
                         <TableRow>
-                            <TableHeaderCell style={{ width: '40px' }}>ID</TableHeaderCell>
-                            <TableHeaderCell style={{ width: '110px' }}>Clave</TableHeaderCell>
-                            <TableHeaderCell style={{ width: '120px' }}>Nombre</TableHeaderCell>
-                            <TableHeaderCell style={{ width: '180px' }}>Front Host</TableHeaderCell>
-                            <TableHeaderCell style={{ width: '200px' }}>API Host</TableHeaderCell>
-                            <TableHeaderCell style={{ width: '140px' }}>SPA Tenant</TableHeaderCell>
-                            <TableHeaderCell style={{ width: '70px' }}>Estado</TableHeaderCell>
-                            <TableHeaderCell style={{ width: '120px' }}>Acciones</TableHeaderCell>
+                            <TableHeaderCell style={{ width: '30px' }}>ID</TableHeaderCell>
+                            <TableHeaderCell style={{ width: '90px' }}>Clave</TableHeaderCell>
+                            <TableHeaderCell style={{ width: '130px' }}>Nombre</TableHeaderCell>
+                             <TableHeaderCell style={{ width: '150px' }}>Front Host</TableHeaderCell>
+                             <TableHeaderCell style={{ width: '110px' }}>Smart Server</TableHeaderCell>
+                             <TableHeaderCell style={{ width: '160px' }}>API Host</TableHeaderCell>
+                            <TableHeaderCell style={{ width: '110px' }}>SPA Tenant</TableHeaderCell>
+                            <TableHeaderCell style={{ width: '85px' }}>Estado</TableHeaderCell>
+                            <TableHeaderCell style={{ width: '100px' }}>Acciones</TableHeaderCell>
                         </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -341,8 +342,9 @@ const CompanyConfigsPage: React.FC = () => {
                                     <TableCell>{c.id}</TableCell>
                                     <TableCell style={cellStyle}>{c.companyKey}</TableCell>
                                     <TableCell style={cellStyle}><b>{c.displayName}</b></TableCell>
-                                    <TableCell style={cellStyle} title={c.frontHost}><span style={{ fontSize: '12px' }}>{c.frontHost}</span></TableCell>
-                                    <TableCell style={cellStyle} title={c.apiHost}><span style={{ fontSize: '12px' }}>{c.apiHost}</span></TableCell>
+                                     <TableCell style={cellStyle} title={c.frontHost}><span style={{ fontSize: '12px' }}>{c.frontHost}</span></TableCell>
+                                     <TableCell style={cellStyle} title={c.smartServer}><span style={{ fontSize: '12px', color: '#666' }}>{c.smartServer}</span></TableCell>
+                                     <TableCell style={cellStyle} title={c.apiHost}><span style={{ fontSize: '12px' }}>{c.apiHost}</span></TableCell>
                                     <TableCell style={cellStyle} title={c.spaTenantId}><span style={{ fontSize: '11px' }}>{c.spaTenantId}</span></TableCell>
                                     <TableCell>
                                         <span style={{
@@ -405,12 +407,26 @@ const CompanyConfigsPage: React.FC = () => {
                                     <Label>SPA Client ID (Frontend)</Label>
                                     <Input value={currentConfig.spaClientId || ''} onChange={(_, d) => setCurrentConfig({ ...currentConfig, spaClientId: d.value })} placeholder="Client ID for React App" />
                                 </div>
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                    <Label>SPA Tenant ID (Frontend)</Label>
-                                    <Input value={currentConfig.spaTenantId || ''} onChange={(_, d) => setCurrentConfig({ ...currentConfig, spaTenantId: d.value })} placeholder="Tenant ID for React App" />
+                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                     <Label>SPA Tenant ID (Frontend)</Label>
+                                     <Input value={currentConfig.spaTenantId || ''} onChange={(_, d) => setCurrentConfig({ ...currentConfig, spaTenantId: d.value })} placeholder="Tenant ID for React App" />
+                                 </div>
+                             </div>
+
+                             {isEditing && currentConfig.smartServer && (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', background: '#f0f0f0', padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}>
+                                    <Label weight="semibold">Servidor Smart Actual (IP/Host)</Label>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                        <BuildingRegular style={{ color: '#0078d4' }} />
+                                        <span style={{ fontFamily: 'monospace', fontSize: '13px', fontWeight: 600 }}>{currentConfig.smartServer}</span>
+                                    </div>
+                                    <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#666' }}>
+                                        Este es el servidor extraído del connection string actual.
+                                    </p>
                                 </div>
-                            </div>
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '16px' }}>
+                             )}
+
+                             <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '16px' }}>
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                                     <Label>Cadena de Conexión Smart</Label>
                                     <Input

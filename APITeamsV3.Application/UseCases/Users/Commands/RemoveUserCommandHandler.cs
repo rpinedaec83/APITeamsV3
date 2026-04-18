@@ -9,10 +9,12 @@ namespace APITeamsV3.Application.UseCases.Users.Commands
     public class RemoveUserCommandHandler : IRequestHandler<RemoveUserCommand, Unit>
     {
         private readonly ISmartDbContext _context;
+        private readonly ICurrentUserService _currentUserService;
 
-        public RemoveUserCommandHandler(ISmartDbContext context)
+        public RemoveUserCommandHandler(ISmartDbContext context, ICurrentUserService currentUserService)
         {
             _context = context;
+            _currentUserService = currentUserService;
         }
 
         public async Task<Unit> Handle(RemoveUserCommand request, CancellationToken cancellationToken)
@@ -21,12 +23,12 @@ namespace APITeamsV3.Application.UseCases.Users.Commands
             var sql = @"
                 UPDATE TeamsUsuarios
                 SET Estado = 'I',
-                  UsuarioModificacion = 1,
+                  UsuarioModificacion = {2},
                   FechaModificacion = GETDATE()
                 WHERE CodigoAlumno = {0}
                   AND idTeams = {1};";
 
-            await _context.Database.ExecuteSqlRawAsync(sql, request.CodigoAlumno, request.IdTeamsGroup);
+            await _context.Database.ExecuteSqlRawAsync(sql, request.CodigoAlumno, request.IdTeamsGroup, _currentUserService.UserIdInt ?? 1);
 
             return Unit.Value;
         }

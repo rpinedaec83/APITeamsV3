@@ -11,6 +11,8 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Net.Http;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -176,7 +178,7 @@ namespace APITeamsV3.Infrastructure.Services
                         continue;
                     }
 
-                    await CopyAsync(
+                    var monitorUrl = await CopyAsync(
                         graphClient,
                         sourceDriveId,
                         recording.Id,
@@ -192,6 +194,7 @@ namespace APITeamsV3.Infrastructure.Services
                         existingDestinationIds,
                         friendlyName,
                         recording.Size,
+                        monitorUrl,
                         cancellationToken);
 
                     if (copiedItem == null)
@@ -948,7 +951,7 @@ namespace APITeamsV3.Infrastructure.Services
             return created;
         }
 
-        private async Task CopyAsync(
+        private async Task<string?> CopyAsync(
             GraphServiceClient graphClient,
             string sourceDriveId,
             string sourceItemId,
@@ -971,10 +974,34 @@ namespace APITeamsV3.Infrastructure.Services
                 }
             };
 
+            // Use NativeResponseHandler to capture the HTTP 202 Location header,
+            // which contains the async copy job monitor URL.
+            var nativeResponseHandler = new NativeResponseHandler();
+
             await graphClient.Drives[sourceDriveId]
                 .Items[sourceItemId]
                 .Copy
-                .PostAsync(copyBody, cancellationToken: cancellationToken);
+                .PostAsync(copyBody, requestConfiguration =>
+                {
+                    requestConfiguration.Options.Add(new ResponseHandlerOption
+                    {
+                        ResponseHandler = nativeResponseHandler
+                    });
+                }, cancellationToken);
+
+            string? monitorUrl = null;
+            if (nativeResponseHandler.Value is HttpResponseMessage httpResponse)
+            {
+                monitorUrl = httpResponse.Headers.Location?.ToString();
+            }
+
+            _logger.LogInformation(
+                "Copy initiated for source item {SourceItemId} -> '{DestinationFileName}'. Monitor URL captured: {HasMonitorUrl}.",
+                sourceItemId,
+                destinationFileName,
+                monitorUrl != null ? "yes" : "no");
+
+            return monitorUrl;
         }
 
         private async Task<DriveItem?> WaitForCopiedItemAsync(
@@ -984,6 +1011,7 @@ namespace APITeamsV3.Infrastructure.Services
             HashSet<string> knownDestinationIds,
             string expectedName,
             long? sourceSize,
+            string? monitorUrl,
             CancellationToken cancellationToken)
         {
             var timeout = TimeSpan.FromSeconds(Math.Max(10, _options.CopyPollingTimeoutSeconds));
@@ -991,7 +1019,45 @@ namespace APITeamsV3.Infrastructure.Services
             var startedAt = DateTimeOffset.UtcNow;
             var maxAt = startedAt.Add(timeout);
 
-            while (DateTimeOffset.UtcNow <= maxAt)
+            // Phase 1: Poll the Graph async job monitor URL for real server-side confirmation.
+            // This avoids deleting the source before the copy is actually complete in SharePoint.
+            if (!string.IsNullOrWhiteSpace(monitorUrl))
+            {
+                var jobConfirmed = await PollCopyJobAsync(monitorUrl, timeout, interval, cancellationToken);
+
+                if (jobConfirmed == false)
+                {
+                    // Server-side copy definitively failed. Do not proceed.
+                    _logger.LogError(
+                        "Graph copy job FAILED (confirmed by monitor URL). Source will NOT be deleted. Monitor: {MonitorUrl}",
+                        monitorUrl);
+                    return null;
+                }
+
+                if (jobConfirmed == true)
+                {
+                    _logger.LogInformation(
+                        "Graph copy job COMPLETED (confirmed by monitor URL). Locating item in destination.");
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "Graph copy job monitor timed out without status confirmation. Falling back to listing search. Monitor: {MonitorUrl}",
+                        monitorUrl);
+                }
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "Phase 1 SKIPPED: monitor URL was not captured from Graph Copy response. " +
+                    "Copy confirmation will rely on listing-based detection only (less reliable).");
+            }
+
+            // Phase 2: Listing-based detection in destination folder.
+            // Use an independent timeout so Phase 1 polling does not consume all the budget.
+            var phase2MaxAt = DateTimeOffset.UtcNow.Add(timeout);
+
+            while (DateTimeOffset.UtcNow <= phase2MaxAt)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
@@ -1002,27 +1068,153 @@ namespace APITeamsV3.Infrastructure.Services
                     .Where(item => item.File != null)
                     .ToList();
 
+                _logger.LogDebug(
+                    "Phase 2 listing: {NewItemCount} new file(s) in destination. Expected: '{ExpectedName}', SourceSize: {SourceSize}.",
+                    newItems.Count, expectedName, sourceSize?.ToString() ?? "unknown");
+
+                // Primary: exact name match.
+                // IMPORTANT: verify size matches to reject SharePoint placeholders (Size=0 or null)
+                // that appear briefly while the async copy is still in progress.
                 var byExactName = newItems.FirstOrDefault(item =>
                     string.Equals(item.Name, expectedName, StringComparison.OrdinalIgnoreCase));
+
                 if (byExactName != null)
                 {
-                    return byExactName;
+                    if (!sourceSize.HasValue || byExactName.Size == sourceSize)
+                    {
+                        _logger.LogInformation(
+                            "Phase 2: matched item by exact name '{Name}', size {Size} bytes.",
+                            byExactName.Name, byExactName.Size);
+                        return byExactName;
+                    }
+
+                    // Size mismatch: likely a SharePoint upload placeholder, keep waiting.
+                    _logger.LogDebug(
+                        "Phase 2: found item '{Name}' by name but size mismatch (expected {SourceSize}, got {ActualSize}). " +
+                        "Likely a placeholder — waiting for full copy to land.",
+                        byExactName.Name, sourceSize, byExactName.Size);
                 }
 
-                var bySizeAndDate = newItems
-                    .Where(item => !sourceSize.HasValue || item.Size == sourceSize)
-                    .Where(item => (item.LastModifiedDateTime ?? item.CreatedDateTime) >= startedAt.AddMinutes(-1))
-                    .OrderByDescending(item => item.LastModifiedDateTime ?? item.CreatedDateTime)
-                    .FirstOrDefault();
-
-                if (bySizeAndDate != null)
+                // Fallback: match by size (conflict-renamed file, e.g. 'Name (1).mp4').
+                if (sourceSize.HasValue && sourceSize > 0)
                 {
-                    return bySizeAndDate;
+                    var bySize = newItems
+                        .Where(item => item.Size == sourceSize)
+                        .OrderByDescending(item => item.LastModifiedDateTime ?? item.CreatedDateTime)
+                        .FirstOrDefault();
+
+                    if (bySize != null)
+                    {
+                        _logger.LogInformation(
+                            "Phase 2: matched item by size ({Size} bytes). Expected name: '{ExpectedName}', actual: '{ActualName}'.",
+                            sourceSize, expectedName, bySize.Name);
+                        return bySize;
+                    }
                 }
 
                 await Task.Delay(interval, cancellationToken);
             }
 
+            _logger.LogError(
+                "Phase 2 timed out after {TimeoutSeconds}s. No confirmed item found in destination. " +
+                "Expected: '{ExpectedName}', SourceSize: {SourceSize}.",
+                timeout.TotalSeconds, expectedName, sourceSize?.ToString() ?? "unknown");
+
+            return null;
+        }
+
+        /// <summary>
+        /// Polls the Microsoft Graph async copy job monitor URL.
+        /// Returns <c>true</c> if the copy completed successfully,
+        /// <c>false</c> if it failed, or <c>null</c> if the timeout elapsed without a definitive status.
+        /// </summary>
+        private async Task<bool?> PollCopyJobAsync(
+            string monitorUrl,
+            TimeSpan timeout,
+            TimeSpan interval,
+            CancellationToken cancellationToken)
+        {
+            // The Graph copy monitor URL is pre-authenticated (no auth header required).
+            using var httpClient = new HttpClient();
+            httpClient.Timeout = timeout.Add(TimeSpan.FromSeconds(30));
+
+            var maxAt = DateTimeOffset.UtcNow.Add(timeout);
+
+            while (DateTimeOffset.UtcNow <= maxAt)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                try
+                {
+                    using var response = await httpClient.GetAsync(monitorUrl, cancellationToken);
+                    var content = await response.Content.ReadAsStringAsync(cancellationToken);
+
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        _logger.LogWarning(
+                            "Copy monitor returned HTTP {StatusCode}. Body: {Content}",
+                            (int)response.StatusCode,
+                            content.Length > 500 ? content[..500] : content);
+                        return false;
+                    }
+
+                    using var doc = JsonDocument.Parse(content);
+                    var root = doc.RootElement;
+
+                    // When the copy finishes, Graph may return the DriveItem directly (has "id" property).
+                    if (root.TryGetProperty("id", out _))
+                    {
+                        _logger.LogInformation(
+                            "Copy monitor returned the completed DriveItem directly.");
+                        return true;
+                    }
+
+                    if (root.TryGetProperty("status", out var statusProp))
+                    {
+                        var status = statusProp.GetString() ?? string.Empty;
+
+                        if (string.Equals(status, "completed", StringComparison.OrdinalIgnoreCase))
+                        {
+                            _logger.LogInformation("Copy monitor status: completed.");
+                            return true;
+                        }
+
+                        if (string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var errorDetail = root.TryGetProperty("error", out var errProp)
+                                ? errProp.ToString()
+                                : content;
+                            _logger.LogError(
+                                "Copy monitor status: failed. Detail: {Detail}", errorDetail);
+                            return false;
+                        }
+
+                        // inProgress or unknown status.
+                        var pct = root.TryGetProperty("percentageComplete", out var pctProp)
+                            ? pctProp.GetDouble()
+                            : (double?)null;
+
+                        _logger.LogDebug(
+                            "Copy in progress. Status: {Status}, Progress: {Pct}%.",
+                            status,
+                            pct.HasValue ? pct.Value.ToString("F1") : "N/A");
+                    }
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Error polling copy monitor URL.");
+                }
+
+                await Task.Delay(interval, cancellationToken);
+            }
+
+            _logger.LogWarning(
+                "Copy monitor polling timed out after {TimeoutSeconds}s without a definitive status.",
+                timeout.TotalSeconds);
             return null;
         }
 

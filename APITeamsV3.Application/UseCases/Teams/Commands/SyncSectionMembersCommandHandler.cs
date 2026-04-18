@@ -21,17 +21,20 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
         private readonly IGraphClientFactory _graphFactory;
         private readonly IMediator _mediator;
         private readonly ILogger<SyncSectionMembersCommandHandler> _logger;
+        private readonly ICurrentUserService _currentUserService;
 
         public SyncSectionMembersCommandHandler(
             ISmartDbContext context,
             IGraphClientFactory graphFactory,
             IMediator mediator,
-            ILogger<SyncSectionMembersCommandHandler> logger)
+            ILogger<SyncSectionMembersCommandHandler> logger,
+            ICurrentUserService currentUserService)
         {
             _context = context;
             _graphFactory = graphFactory;
             _mediator = mediator;
             _logger = logger;
+            _currentUserService = currentUserService;
         }
 
         public async Task<SyncSectionMembersResult> Handle(SyncSectionMembersCommand request, CancellationToken cancellationToken)
@@ -95,7 +98,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
 
             team.EstadoTeam = "I";
             team.FechaModificacion = DateTime.UtcNow;
-            team.UsuarioModificacion = 1;
+            team.UsuarioModificacion = _currentUserService.UserIdInt ?? 1;
 
             await _context.SaveChangesAsync(cancellationToken);
 
@@ -152,7 +155,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                         Tipo = "A",
                         Estado = "A",
                         FechaCreacion = DateTime.UtcNow,
-                        UsuarioCreacion = 1
+                        UsuarioCreacion = _currentUserService.UserIdInt ?? 1
                     };
 
                     await _context.TeamsUsuarios.AddAsync(existingMember, cancellationToken);
@@ -165,7 +168,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                 existingMember.Email = student.PreferredEmail;
                 existingMember.Estado = "A";
                 existingMember.FechaModificacion = DateTime.UtcNow;
-                existingMember.UsuarioModificacion = 1;
+                existingMember.UsuarioModificacion = _currentUserService.UserIdInt ?? 1;
             }
 
             var confirmedCodes = new HashSet<string>(
@@ -190,7 +193,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
 
                 localMember.Estado = "I";
                 localMember.FechaModificacion = DateTime.UtcNow;
-                localMember.UsuarioModificacion = 1;
+                localMember.UsuarioModificacion = _currentUserService.UserIdInt ?? 1;
             }
 
             await _context.SaveChangesAsync(cancellationToken);

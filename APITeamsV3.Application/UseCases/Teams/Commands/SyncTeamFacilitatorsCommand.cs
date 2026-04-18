@@ -6,10 +6,12 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
     public class SyncTeamFacilitatorsCommand : IRequest<List<TeamFacilitatorChangeDto>>
     {
         public int IdSeccion { get; set; }
+        public string? JobId { get; set; }
 
-        public SyncTeamFacilitatorsCommand(int idSeccion)
+        public SyncTeamFacilitatorsCommand(int idSeccion, string? jobId = null)
         {
             IdSeccion = idSeccion;
+            JobId = jobId;
         }
     }
 

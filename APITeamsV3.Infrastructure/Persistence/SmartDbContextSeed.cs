@@ -9,6 +9,7 @@ namespace APITeamsV3.Infrastructure.Persistence
     {
         public static async Task SeedAsync(SmartDbContext context)
         {
+            return; // Seed disabled
             if (!context.Set<Seccion>().Any())
             {
                 var seccion = new Seccion

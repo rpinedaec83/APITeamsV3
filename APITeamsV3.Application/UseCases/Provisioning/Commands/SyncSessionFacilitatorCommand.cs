@@ -2,13 +2,15 @@ using MediatR;
 
 namespace APITeamsV3.Application.UseCases.Provisioning.Commands
 {
-    public class SyncSessionFacilitatorCommand : IRequest<bool>
+    public class SyncSessionFacilitatorCommand : IRequest
     {
-        public int IdSeccion { get; set; }
+        public int IdSeccion { get; }
+        public string? JobId { get; }
 
-        public SyncSessionFacilitatorCommand(int idSeccion)
+        public SyncSessionFacilitatorCommand(int idSeccion, string? jobId = null)
         {
             IdSeccion = idSeccion;
+            JobId = jobId;
         }
     }
 }

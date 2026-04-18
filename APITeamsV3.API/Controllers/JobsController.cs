@@ -1120,6 +1120,53 @@ namespace APITeamsV3.API.Controllers
             var jobId = await _jobService.EnqueueSyncRenamedTeams(idSeccion);
             return Ok(new { JobId = jobId, Message = "Sync Renamed Teams Job Enqueued" });
         }
+
+        [HttpGet("stats")]
+        public async Task<ActionResult<HangfireStatsDto>> GetJobStats()
+        {
+            var tenant = _tenantProvider.GetCurrentTenant();
+            if (string.IsNullOrWhiteSpace(tenant.CompanyKey))
+            {
+                return BadRequest(new { Message = "No se pudo resolver el tenant actual." });
+            }
+
+            try
+            {
+                var storage = await _tenantHangfireRuntime.GetStorageAsync(tenant.CompanyKey, HttpContext.RequestAborted);
+                var monitoringApi = storage.GetMonitoringApi();
+                var statistics = monitoringApi.GetStatistics();
+
+                return Ok(new HangfireStatsDto
+                {
+                    Enqueued = statistics.Enqueued,
+                    Processing = statistics.Processing,
+                    Succeeded = statistics.Succeeded,
+                    Failed = statistics.Failed,
+                    Scheduled = statistics.Scheduled,
+                    Deleted = statistics.Deleted,
+                    Recurring = statistics.Recurring
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(503, new
+                {
+                    Message = $"No se pudieron consultar las estadísticas de Hangfire para el tenant '{tenant.CompanyKey}'.",
+                    Detail = ex.Message
+                });
+            }
+        }
+    }
+
+    public class HangfireStatsDto
+    {
+        public long Enqueued { get; set; }
+        public long Processing { get; set; }
+        public long Succeeded { get; set; }
+        public long Failed { get; set; }
+        public long Scheduled { get; set; }
+        public long Deleted { get; set; }
+        public long Recurring { get; set; }
     }
 
     public class UpdateJoinUrlRequest

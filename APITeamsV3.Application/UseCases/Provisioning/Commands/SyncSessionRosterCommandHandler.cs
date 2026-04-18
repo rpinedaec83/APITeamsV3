@@ -6,16 +6,18 @@ using System.Threading.Tasks;
 
 namespace APITeamsV3.Application.UseCases.Provisioning.Commands
 {
-    public class SyncSessionRosterCommandHandler : IRequestHandler<SyncSessionRosterCommand, bool>
+    public class SyncSessionRosterCommandHandler : IRequestHandler<SyncSessionRosterCommand>
     {
         private readonly ISmartDbContext _context;
+        private readonly ICurrentUserService _currentUserService;
 
-        public SyncSessionRosterCommandHandler(ISmartDbContext context)
+        public SyncSessionRosterCommandHandler(ISmartDbContext context, ICurrentUserService currentUserService)
         {
             _context = context;
+            _currentUserService = currentUserService;
         }
 
-        public async Task<bool> Handle(SyncSessionRosterCommand request, CancellationToken cancellationToken)
+        public async Task Handle(SyncSessionRosterCommand request, CancellationToken cancellationToken)
         {
             if (request.Mode == SessionRosterSyncType.FullSync)
             {
@@ -57,10 +59,10 @@ AND TARGET.Codigo = SOURCE.Codigo
 AND TARGET.NumeroReunion = SOURCE.NumeroReunion THEN
 UPDATE
 SET TARGET.Estado = 'I',
-  TARGET.UsuarioModificacion = 1,
+  TARGET.UsuarioModificacion = {1},
   TARGET.FechaModificacion = GETDATE();
                 ";
-                await _context.Database.ExecuteSqlRawAsync(option9Sql, request.IdSeccion);
+                await _context.Database.ExecuteSqlRawAsync(option9Sql, request.IdSeccion, _currentUserService.UserIdInt ?? 1);
 
                 // Option 10: Add new
                 var option10Sql = @"
@@ -113,7 +115,7 @@ dtNewEvents AS (
     TH.CodigoFacilitador,
     TH.CorreoFacilitador,
     Estado = 'A',
-    UsuarioCreacion = 1,
+    UsuarioCreacion = {2},
     FechaCreacion = GETDATE()
   FROM dtNewMembers NM WITH (NOLOCK)
     INNER JOIN TeamsHorarios TH WITH (NOLOCK) ON (
@@ -127,7 +129,7 @@ dtNewEvents AS (
       AND TU.CodigoAlumno = NM.CodigoAlumno
     )
   WHERE convert(VARCHAR, Fecha, 112) BETWEEN convert(VARCHAR, getdate(), 112)
-    AND convert(VARCHAR, @FechaMaximaAgendas, 112)
+    AND convert(VARCHAR, {1}, 112)
 )
 MERGE TeamsHorarios AS TARGET USING dtNewEvents AS SOURCE ON (
   TARGET.CodigoAlumno = SOURCE.CodigoAlumno
@@ -179,7 +181,7 @@ VALUES (
     SOURCE.FechaCreacion
   );
                 ";
-                await _context.Database.ExecuteSqlRawAsync(option10Sql, request.IdSeccion, request.FechaMaximaAgendas ?? System.DateTime.Now.AddDays(7));
+                await _context.Database.ExecuteSqlRawAsync(option10Sql, request.IdSeccion, request.FechaMaximaAgendas ?? System.DateTime.Now.AddDays(7), _currentUserService.UserIdInt ?? 1);
             }
             else if (request.Mode == SessionRosterSyncType.EventSync)
             {
@@ -239,7 +241,7 @@ SET TARGET.Estado = 'A',
   TARGET.Inicio = SOURCE.Inicio,
   TARGET.Fin = SOURCE.Fin,
   TARGET.JoinUrl = SOURCE.JoinUrl,
-  TARGET.UsuarioModificacion = 1,
+  TARGET.UsuarioModificacion = {12},
   TARGET.FechaModificacion = GETDATE()
   WHEN NOT MATCHED THEN
 INSERT (
@@ -277,7 +279,7 @@ VALUES (
     SOURCE.CorreoFacilitador,
     SOURCE.JoinUrl,
     'A',
-    1,
+    {12},
     GETDATE()
   );
                 ";
@@ -293,11 +295,12 @@ VALUES (
                     request.Fin ?? 0, 
                     request.CodigoFacilitador ?? string.Empty, 
                     request.CorreoFacilitador ?? string.Empty, 
-                    request.JoinUrl ?? string.Empty
+                    request.JoinUrl ?? string.Empty,
+                    _currentUserService.UserIdInt ?? 1
                 );
             }
 
-            return true;
+            return;
         }
     }
 }

@@ -8,6 +8,7 @@ namespace APITeamsV3.Infrastructure.Persistence
     {
         public static async Task SeedAsync(CentralDbContext context)
         {
+            return; // Seed disabled to prevent overwriting production settings
             if (!context.CompanyConfigs.Any())
             {
                 var companies = new List<CompanyConfig>
