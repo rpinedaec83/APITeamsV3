@@ -142,7 +142,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                         existingLocal.Nombres = student.NombresAlumno;
                         existingLocal.Apellidos = student.ApellidosAlumno;
                         existingLocal.FechaModificacion = DateTime.UtcNow;
-                        existingLocal.UsuarioModificacion = _currentUserService.UserIdInt ?? 1;
+                        existingLocal.UsuarioModificacion = _currentUserService.UserIdInt ?? 99;
                     }
                     else
                     {
@@ -157,7 +157,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                                 Tipo = "A",
                                 Estado = "A",
                                 FechaCreacion = DateTime.UtcNow,
-                                UsuarioCreacion = _currentUserService.UserIdInt ?? 1
+                                UsuarioCreacion = _currentUserService.UserIdInt ?? 99
                             },
                             cancellationToken);
                     }
@@ -464,7 +464,7 @@ WHERE AC.IdSeccion = {{0}}
                     setters => setters
                         .SetProperty(team => team.EstadoTeam, "I")
                         .SetProperty(team => team.FechaModificacion, DateTime.UtcNow)
-                        .SetProperty(team => team.UsuarioModificacion, _currentUserService.UserIdInt ?? 1),
+                        .SetProperty(team => team.UsuarioModificacion, _currentUserService.UserIdInt ?? 99),
                     cancellationToken);
 
             if (affected > 0)
@@ -476,3 +476,4 @@ WHERE AC.IdSeccion = {{0}}
         }
     }
 }
+

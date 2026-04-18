@@ -206,8 +206,8 @@ namespace APITeamsV3.Infrastructure.Persistence.Contexts
         }
         public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
         {
-            // Default to 1 (System) if no user context, otherwise use actual user ID (defaulting to 888888 if authenticated but not mapped)
-            int currentUserId = _currentUserService.UserIdInt ?? 1;
+            // Default to 99 (System) if no user context, otherwise use actual user ID (defaulting to 888888 if authenticated but not mapped)
+            int currentUserId = _currentUserService.UserIdInt ?? 99;
 
             foreach (var entry in ChangeTracker.Entries<APITeamsV3.Domain.Entities.TeamEntity>())
             {

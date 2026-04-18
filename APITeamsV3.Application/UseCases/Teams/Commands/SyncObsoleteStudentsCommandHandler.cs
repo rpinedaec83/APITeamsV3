@@ -147,7 +147,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     {
                         localMember.Estado = "I";
                         localMember.FechaModificacion = DateTime.UtcNow;
-                        localMember.UsuarioModificacion = _currentUserService.UserIdInt ?? 1;
+                        localMember.UsuarioModificacion = _currentUserService.UserIdInt ?? 99;
                         hasChanges = true;
                     }
                 }
@@ -339,7 +339,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     setters => setters
                         .SetProperty(team => team.EstadoTeam, "I")
                         .SetProperty(team => team.FechaModificacion, DateTime.UtcNow)
-                        .SetProperty(team => team.UsuarioModificacion, _currentUserService.UserIdInt ?? 1),
+                        .SetProperty(team => team.UsuarioModificacion, _currentUserService.UserIdInt ?? 99),
                     cancellationToken);
 
             if (affected > 0)
@@ -351,3 +351,4 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
         }
     }
 }
+

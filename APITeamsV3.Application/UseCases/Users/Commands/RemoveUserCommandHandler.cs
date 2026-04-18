@@ -28,9 +28,10 @@ namespace APITeamsV3.Application.UseCases.Users.Commands
                 WHERE CodigoAlumno = {0}
                   AND idTeams = {1};";
 
-            await _context.Database.ExecuteSqlRawAsync(sql, request.CodigoAlumno, request.IdTeamsGroup, _currentUserService.UserIdInt ?? 1);
+            await _context.Database.ExecuteSqlRawAsync(sql, request.CodigoAlumno, request.IdTeamsGroup, _currentUserService.UserIdInt ?? 99);
 
             return Unit.Value;
         }
     }
 }
+

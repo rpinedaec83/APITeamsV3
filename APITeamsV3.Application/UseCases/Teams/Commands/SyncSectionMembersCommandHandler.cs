@@ -98,7 +98,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
 
             team.EstadoTeam = "I";
             team.FechaModificacion = DateTime.UtcNow;
-            team.UsuarioModificacion = _currentUserService.UserIdInt ?? 1;
+            team.UsuarioModificacion = _currentUserService.UserIdInt ?? 99;
 
             await _context.SaveChangesAsync(cancellationToken);
 
@@ -155,7 +155,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                         Tipo = "A",
                         Estado = "A",
                         FechaCreacion = DateTime.UtcNow,
-                        UsuarioCreacion = _currentUserService.UserIdInt ?? 1
+                        UsuarioCreacion = _currentUserService.UserIdInt ?? 99
                     };
 
                     await _context.TeamsUsuarios.AddAsync(existingMember, cancellationToken);
@@ -168,7 +168,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                 existingMember.Email = student.PreferredEmail;
                 existingMember.Estado = "A";
                 existingMember.FechaModificacion = DateTime.UtcNow;
-                existingMember.UsuarioModificacion = _currentUserService.UserIdInt ?? 1;
+                existingMember.UsuarioModificacion = _currentUserService.UserIdInt ?? 99;
             }
 
             var confirmedCodes = new HashSet<string>(
@@ -193,7 +193,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
 
                 localMember.Estado = "I";
                 localMember.FechaModificacion = DateTime.UtcNow;
-                localMember.UsuarioModificacion = _currentUserService.UserIdInt ?? 1;
+                localMember.UsuarioModificacion = _currentUserService.UserIdInt ?? 99;
             }
 
             await _context.SaveChangesAsync(cancellationToken);
@@ -333,3 +333,4 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
         }
     }
 }
+

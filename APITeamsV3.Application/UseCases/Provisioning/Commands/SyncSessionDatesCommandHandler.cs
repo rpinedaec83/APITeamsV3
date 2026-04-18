@@ -80,9 +80,10 @@ SET TARGET.Fecha = SOURCE.Fecha,
   TARGET.FechaModificacion = GETDATE();
             ";
 
-            await _context.Database.ExecuteSqlRawAsync(sql, request.IdSeccion, _currentUserService.UserIdInt ?? 1);
+            await _context.Database.ExecuteSqlRawAsync(sql, request.IdSeccion, _currentUserService.UserIdInt ?? 99);
 
             return;
         }
     }
 }
+

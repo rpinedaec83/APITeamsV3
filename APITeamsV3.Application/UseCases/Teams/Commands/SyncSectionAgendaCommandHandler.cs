@@ -765,7 +765,7 @@ END;";
                             effectiveTeacherCode,
                             effectiveTeacherEmail ?? string.Empty,
                             meeting.JoinUrl,
-                            _currentUserService.UserIdInt ?? 1);
+                            _currentUserService.UserIdInt ?? 99);
 
                         if (affectedRows > 0)
                         {
@@ -867,7 +867,7 @@ SET Estado = 'I',
     FechaModificacion = GETDATE() 
 WHERE IdTeams = {0} AND IdEvento = {1} AND Estado = 'A'";
 
-            await _context.Database.ExecuteSqlRawAsync(sql, [teamId, eventId, _currentUserService.UserIdInt ?? 1], cancellationToken);
+            await _context.Database.ExecuteSqlRawAsync(sql, [teamId, eventId, _currentUserService.UserIdInt ?? 99], cancellationToken);
         }
 
         private static List<string> BuildTeacherEmails(
@@ -1036,3 +1036,4 @@ WHERE IdTeams = {0} AND IdEvento = {1} AND Estado = 'A'";
         }
     }
 }
+

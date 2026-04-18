@@ -60,7 +60,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                 {
                     team.EstadoTeam = "I";
                     team.FechaModificacion = DateTime.UtcNow;
-                    team.UsuarioModificacion = _currentUserService.UserIdInt ?? 1;
+                    team.UsuarioModificacion = _currentUserService.UserIdInt ?? 99;
                     await _teamRepo.UpdateAsync(team);
 
                     result.IsValid = false;
@@ -439,7 +439,7 @@ WHERE IdTeams = {0}
   AND IdCurso = {1}
   AND Estado = 'A';";
 
-            await _context.Database.ExecuteSqlRawAsync(deactivateSql, teamId, sectionId, _currentUserService.UserIdInt ?? 1);
+            await _context.Database.ExecuteSqlRawAsync(deactivateSql, teamId, sectionId, _currentUserService.UserIdInt ?? 99);
         }
 
         private async Task PersistTeamsHorariosAsync(
@@ -524,7 +524,7 @@ VALUES
                             effectiveTeacherCode,
                             effectiveTeacherEmail ?? string.Empty,
                             meeting.JoinUrl,
-                            _currentUserService.UserIdInt ?? 1);
+                            _currentUserService.UserIdInt ?? 99);
                     }
                 }
             }
@@ -734,3 +734,4 @@ WHERE IdSeccion = {0};";
         }
     }
 }
+

@@ -16,11 +16,13 @@ namespace APITeamsV3.Infrastructure.Services
     {
         private readonly IServiceProvider _serviceProvider;
         private readonly ILogger<DatabaseInitializerService> _logger;
+        private readonly ICurrentUserService _currentUserService;
 
-        public DatabaseInitializerService(IServiceProvider serviceProvider, ILogger<DatabaseInitializerService> logger)
+        public DatabaseInitializerService(IServiceProvider serviceProvider, ILogger<DatabaseInitializerService> logger, ICurrentUserService currentUserService)
         {
             _serviceProvider = serviceProvider;
             _logger = logger;
+            _currentUserService = currentUserService;
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -56,7 +58,7 @@ namespace APITeamsV3.Infrastructure.Services
                                 errorNumbersToAdd: null);
                         });
 
-                        using (var directSmartContext = new SmartDbContext(optionsBuilder.Options, null!))
+                        using (var directSmartContext = new SmartDbContext(optionsBuilder.Options, null!, _currentUserService))
                         {
                             var viewSql = GetViewSql();
                             // Use a timeout for the SQL command to avoid hanging the background service indefinitely

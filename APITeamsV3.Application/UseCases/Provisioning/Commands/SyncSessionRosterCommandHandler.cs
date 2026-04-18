@@ -62,7 +62,7 @@ SET TARGET.Estado = 'I',
   TARGET.UsuarioModificacion = {1},
   TARGET.FechaModificacion = GETDATE();
                 ";
-                await _context.Database.ExecuteSqlRawAsync(option9Sql, request.IdSeccion, _currentUserService.UserIdInt ?? 1);
+                await _context.Database.ExecuteSqlRawAsync(option9Sql, request.IdSeccion, _currentUserService.UserIdInt ?? 99);
 
                 // Option 10: Add new
                 var option10Sql = @"
@@ -181,7 +181,7 @@ VALUES (
     SOURCE.FechaCreacion
   );
                 ";
-                await _context.Database.ExecuteSqlRawAsync(option10Sql, request.IdSeccion, request.FechaMaximaAgendas ?? System.DateTime.Now.AddDays(7), _currentUserService.UserIdInt ?? 1);
+                await _context.Database.ExecuteSqlRawAsync(option10Sql, request.IdSeccion, request.FechaMaximaAgendas ?? System.DateTime.Now.AddDays(7), _currentUserService.UserIdInt ?? 99);
             }
             else if (request.Mode == SessionRosterSyncType.EventSync)
             {
@@ -296,7 +296,7 @@ VALUES (
                     request.CodigoFacilitador ?? string.Empty, 
                     request.CorreoFacilitador ?? string.Empty, 
                     request.JoinUrl ?? string.Empty,
-                    _currentUserService.UserIdInt ?? 1
+                    _currentUserService.UserIdInt ?? 99
                 );
             }
 
@@ -304,3 +304,4 @@ VALUES (
         }
     }
 }
+

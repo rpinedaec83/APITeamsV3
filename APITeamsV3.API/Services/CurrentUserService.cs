@@ -34,7 +34,8 @@ namespace APITeamsV3.API.Services
                 }
 
                 // Tareas de fondo / Hangfire usualmente no tienen HttpContext
-                return null;
+                // Usamos 99 como ID de sistema para APITeamsV3 (distinto del 1 de V2)
+                return 99;
             }
         }
     }

@@ -77,9 +77,10 @@ namespace APITeamsV3.Application.UseCases.Users.Commands
                 request.Apellidos, 
                 request.Email, 
                 request.Tipo,
-                _currentUserService.UserIdInt ?? 1);
+                _currentUserService.UserIdInt ?? 99);
 
             return Unit.Value;
         }
     }
 }
+
