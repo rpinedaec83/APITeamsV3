@@ -72,7 +72,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     result.ReactivatedLocally = true;
                     requiresUpdate = true;
                     summaryMessages.Add("El Team existe en Microsoft Graph y estaba inactivo en la base local; se reactivo correctamente.");
-                    await LogOperativoAsync("Info", "TeamState", team.IdTeamsGroup, "Team reactivado porque existe en Graph y estaba inactivo localmente.", request.JobId);
+                    await LogOperativoAsync("Info", "TeamState", team.IdTeamsGroup, "Team reactivado porque existe en Graph y estaba inactivo localmente.", request.JobId, request.ExecutedBy);
                 }
 
                 if (group.DisplayName != team.NombreTeam || group.Description != team.DescripcionTeam)
@@ -91,7 +91,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
 
                     if (result.MetadataAutoCorrected)
                     {
-                        await LogOperativoAsync("Info", "TeamMetadata", team.IdTeamsGroup, "Metadatos (Nombre/Descripcion) autocorregidos.", request.JobId);
+                        await LogOperativoAsync("Info", "TeamMetadata", team.IdTeamsGroup, "Metadatos (Nombre/Descripcion) autocorregidos.", request.JobId, request.ExecutedBy);
                     }
                 }
                 else
@@ -113,20 +113,20 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                 result.MarkedInactiveLocally = true;
                 result.Summary = "Se detecto una inconsistencia: el Team no existe en Microsoft Graph (404). Se marco como inactivo en la base local.";
 
-                await LogOperativoAsync("Error", "TeamInconsistency", team.IdTeamsGroup, "El Team no existe en Graph (404). Marcado como inactivo en BD local.", request.JobId);
+                await LogOperativoAsync("Error", "TeamInconsistency", team.IdTeamsGroup, "El Team no existe en Graph (404). Marcado como inactivo en BD local.", request.JobId, request.ExecutedBy);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error verifying team {TeamId}", team.IdTeamsGroup);
                 result.IsValid = false;
                 result.Summary = "Error tecnico consultando Microsoft Graph.";
-                await LogOperativoAsync("Error", "TeamVerification", team.IdTeamsGroup, ex.Message, request.JobId);
+                await LogOperativoAsync("Error", "TeamVerification", team.IdTeamsGroup, ex.Message, request.JobId, request.ExecutedBy);
             }
 
             return result;
         }
 
-        private async Task LogOperativoAsync(string type, string target, string reference, string msg, string? jobId)
+        private async Task LogOperativoAsync(string type, string target, string reference, string msg, string? jobId, string? executedBy = null)
         {
             try
             {
@@ -137,6 +137,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     Referencia = reference,
                     Mensaje = msg,
                     JobId = jobId,
+                    Usuario = executedBy,
                     Fecha = DateTime.UtcNow,
                     Severidad = type == "Error" ? "High" : "Low"
                 });

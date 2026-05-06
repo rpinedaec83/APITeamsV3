@@ -47,9 +47,11 @@ import { getApiErrorMessage } from '../utils/apiErrors';
 
 interface HangfireJobResult {
     jobId: string;
+    companyKey: string;
     state: string;
     method: string;
     idSeccion?: number | null;
+    sectionCode?: string | null;
     timestamp: string;
     arguments: string[];
     error?: string;
@@ -57,10 +59,12 @@ interface HangfireJobResult {
 
 interface HangfireRecurringJobResult {
     id: string;
+    companyKey: string;
     cron: string;
     queue: string;
     method: string;
     idSeccion?: number | null;
+    sectionCode?: string | null;
     createdAt?: string | null;
     lastExecution?: string | null;
     nextExecution?: string | null;
@@ -901,7 +905,7 @@ const JobsPage: React.FC = () => {
                     <Table>
                         <TableHeader>
                             <TableRow>
-                                <TableHeaderCell>Job</TableHeaderCell>
+                                <TableHeaderCell>Job / Empresa</TableHeaderCell>
                                 <TableHeaderCell>Metodo</TableHeaderCell>
                                 <TableHeaderCell>Seccion</TableHeaderCell>
                                 <TableHeaderCell>Agregado</TableHeaderCell>
@@ -915,7 +919,12 @@ const JobsPage: React.FC = () => {
                                 <TableRow key={entry.id}>
                                     <TableCell>
                                         <div style={{ fontWeight: 600 }}>{entry.id}</div>
-                                        <div style={{ marginTop: '4px' }}>
+                                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '4px' }}>
+                                            {entry.companyKey && (
+                                                <Badge size="small" appearance="filled" style={{ backgroundColor: tokens.colorBrandBackground2, color: tokens.colorBrandForeground2, fontWeight: 'bold' }}>
+                                                    {entry.companyKey}
+                                                </Badge>
+                                            )}
                                             <Badge appearance="outline" color={entry.removed ? 'danger' : 'brand'}>
                                                 {entry.removed ? 'Removed' : entry.queue || 'default'}
                                             </Badge>
@@ -928,7 +937,7 @@ const JobsPage: React.FC = () => {
                                         </Text>
                                     </TableCell>
                                     <TableCell>
-                                        <Badge appearance="outline">{entry.idSeccion ?? '-'}</Badge>
+                                        <Badge appearance="outline">{entry.sectionCode || entry.idSeccion || '-'}</Badge>
                                     </TableCell>
                                     <TableCell>{formatDateTime(entry.createdAt)}</TableCell>
                                     <TableCell>
@@ -982,8 +991,9 @@ const JobsPage: React.FC = () => {
                         <TableHeader>
                             <TableRow>
                                 <TableHeaderCell>Estado</TableHeaderCell>
-                                <TableHeaderCell>Metodo</TableHeaderCell>
+                                <TableHeaderCell>Metodo / Empresa</TableHeaderCell>
                                 <TableHeaderCell>Seccion</TableHeaderCell>
+                                <TableHeaderCell>Ejecutado por</TableHeaderCell>
                                 <TableHeaderCell>Job ID</TableHeaderCell>
                                 <TableHeaderCell>Mensaje</TableHeaderCell>
                                 <TableHeaderCell>Hora</TableHeaderCell>
@@ -996,19 +1006,66 @@ const JobsPage: React.FC = () => {
                                     <TableCell>{getStateIcon(entry.state)}</TableCell>
                                     <TableCell style={{ fontWeight: 600 }}>
                                         <div>{entry.method}</div>
-                                        <Badge appearance="outline" size="small" color={getStateBadgeColor(entry.state)}>
-                                            {entry.state}
-                                        </Badge>
+                                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '4px' }}>
+                                            {entry.companyKey && (
+                                                <Badge size="small" appearance="filled" style={{ backgroundColor: tokens.colorBrandBackground2, color: tokens.colorBrandForeground2, fontWeight: 'bold' }}>
+                                                    {entry.companyKey}
+                                                </Badge>
+                                            )}
+                                            <Badge appearance="outline" size="small" color={getStateBadgeColor(entry.state)}>
+                                                {entry.state}
+                                            </Badge>
+                                        </div>
                                     </TableCell>
                                     <TableCell>
-                                        <Badge appearance="outline">{entry.idSeccion ?? '-'}</Badge>
+                                        <Badge appearance="outline">{entry.sectionCode || entry.idSeccion || '-'}</Badge>
+                                    </TableCell>
+                                    <TableCell>
+                                        {(() => {
+                                            const args = entry.arguments || [];
+                                            const lastArg = args.length ? args[args.length - 1] : null;
+                                            
+                                            // Normalizar para comparación
+                                            const normalizedArg = lastArg ? lastArg.toString().replace(/"/g, '').trim().toLowerCase() : '';
+                                            const normalizedCompany = entry.companyKey ? entry.companyKey.toLowerCase() : '';
+                                            
+                                            // El argumento no es un usuario si:
+                                            // - Es nulo o vacío o "null"
+                                            // - Es igual al companyKey
+                                            // - Es un número (probablemente un ID de sección)
+                                            // - Solo hay 1 argumento y el método es de los que siempre llevan companyKey primero
+                                            const isSystem = !normalizedArg || 
+                                                           normalizedArg === 'null' || 
+                                                           normalizedArg === normalizedCompany || 
+                                                           !isNaN(Number(normalizedArg));
+                                            
+                                            const displayName = isSystem ? 'Sistema' : (lastArg?.toString().replace(/"/g, '') || 'Sistema');
+
+                                            return (
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                    <PersonRegular style={{ fontSize: '14px', color: tokens.colorNeutralForeground3 }} />
+                                                    <Text size={200} weight={!isSystem ? "semibold" : "regular"}>
+                                                        {displayName}
+                                                    </Text>
+                                                </div>
+                                            );
+                                        })()}
                                     </TableCell>
                                     <TableCell className={styles.mono}>
                                         {entry.jobId}
                                     </TableCell>
                                     <TableCell>
-                                        <Text size={200} style={{ color: entry.error ? tokens.colorPaletteRedForeground1 : undefined }}>
-                                            {entry.error || (entry.arguments?.length ? entry.arguments.join(' | ') : '-')}
+                                        <Text
+                                            size={200}
+                                            style={{
+                                                color: entry.error
+                                                    ? (entry.state.toLowerCase().includes('succeed')
+                                                        ? tokens.colorPaletteGreenForeground1
+                                                        : tokens.colorPaletteRedForeground1)
+                                                    : undefined
+                                            }}
+                                        >
+                                            {entry.error ? entry.error : (entry.arguments?.length ? `Parámetros: ${entry.arguments.join(', ')}` : '-')}
                                         </Text>
                                     </TableCell>
                                     <TableCell style={{ fontSize: '12px', color: tokens.colorNeutralForeground3 }}>

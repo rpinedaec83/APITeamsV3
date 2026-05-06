@@ -351,13 +351,13 @@ namespace APITeamsV3.Infrastructure.Services
                         onlineMeeting.Id,
                         new OnlineMeeting
                         {
-                            AllowedPresenters = OnlineMeetingPresenters.Everyone,
+                            AllowedPresenters = OnlineMeetingPresenters.RoleIsPresenter,
                             AllowRecording = true
                         },
                         cancellationToken);
 
                     _logger.LogInformation(
-                        "Set allowedPresenters=everyone and allowRecording=true for onlineMeeting {MeetingId} (no attendee role changes applied).",
+                        "Set allowedPresenters=roleIsPresenter and allowRecording=true for onlineMeeting {MeetingId} (no attendee role changes applied).",
                         onlineMeeting.Id);
                     return;
                 }
@@ -369,7 +369,7 @@ namespace APITeamsV3.Infrastructure.Services
                         onlineMeeting.Id,
                         new OnlineMeeting
                         {
-                            AllowedPresenters = OnlineMeetingPresenters.Everyone,
+                            AllowedPresenters = OnlineMeetingPresenters.RoleIsPresenter,
                             AllowRecording = true,
                             Participants = new MeetingParticipants
                             {
@@ -379,7 +379,7 @@ namespace APITeamsV3.Infrastructure.Services
                         cancellationToken);
 
                     _logger.LogInformation(
-                        "Promoted configured teachers as co-organizers and set allowedPresenters=everyone/allowRecording=true for onlineMeeting {MeetingId}.",
+                        "Promoted configured teachers as co-organizers and set allowedPresenters=roleIsPresenter/allowRecording=true for onlineMeeting {MeetingId}.",
                         onlineMeeting.Id);
                 }
                 catch (Exception ex)
@@ -405,7 +405,7 @@ namespace APITeamsV3.Infrastructure.Services
                         onlineMeeting.Id,
                         new OnlineMeeting
                         {
-                            AllowedPresenters = OnlineMeetingPresenters.Everyone,
+                            AllowedPresenters = OnlineMeetingPresenters.RoleIsPresenter,
                             AllowRecording = true,
                             Participants = new MeetingParticipants
                             {
@@ -415,7 +415,7 @@ namespace APITeamsV3.Infrastructure.Services
                         cancellationToken);
 
                     _logger.LogInformation(
-                        "Promoted configured teachers as presenters (co-organizer fallback) and set allowedPresenters=everyone/allowRecording=true for onlineMeeting {MeetingId}.",
+                        "Promoted configured teachers as presenters (co-organizer fallback) and set allowedPresenters=roleIsPresenter/allowRecording=true for onlineMeeting {MeetingId}.",
                         onlineMeeting.Id);
                 }
             }

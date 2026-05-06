@@ -61,6 +61,19 @@ builder.Services.Configure<Microsoft.AspNetCore.Authentication.JwtBearer.JwtBear
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto;
+    options.KnownNetworks.Clear();
+    options.KnownProxies.Clear();
+});
+
+builder.Services.Configure<CookiePolicyOptions>(options =>
+{
+    options.MinimumSameSitePolicy = SameSiteMode.None;
+    options.Secure = CookieSecurePolicy.Always;
+});
+
 builder.Services.AddSingleton<HangfireServiceScopeJobActivator>();
 builder.Services.AddHangfire(configuration => configuration
     .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
@@ -96,6 +109,14 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 var app = builder.Build();
+
+app.UseForwardedHeaders();
+app.UseCookiePolicy();
+
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHsts();
+}
 
 app.UseRouting();
 app.UseCors("AllowAll");

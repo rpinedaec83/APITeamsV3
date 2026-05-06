@@ -1384,11 +1384,18 @@ namespace APITeamsV3.Infrastructure.Services
 
         private static bool NameContainsSectionToken(string? fileName, string sectionToken)
         {
-            if (string.IsNullOrWhiteSpace(fileName))
+            if (string.IsNullOrWhiteSpace(fileName) || string.IsNullOrWhiteSpace(sectionToken))
             {
                 return false;
             }
 
+            // 1. Try direct match first (most reliable for codes with dots/hyphens)
+            if (fileName.Contains(sectionToken, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            // 2. Fallback to normalized match (strips dots/hyphens/spaces)
             var normalizedFileName = NormalizeToken(fileName);
             var normalizedSection = NormalizeToken(sectionToken);
             return !string.IsNullOrWhiteSpace(normalizedSection) &&

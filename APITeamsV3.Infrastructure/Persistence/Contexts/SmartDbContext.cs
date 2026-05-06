@@ -61,6 +61,7 @@ namespace APITeamsV3.Infrastructure.Persistence.Contexts
             {
                 entity.ToTable("TeamsLogOperativo");
                 entity.HasKey(e => e.Id);
+                entity.Property(e => e.Usuario).HasMaxLength(150);
             });
 
             // TeamsEquipos

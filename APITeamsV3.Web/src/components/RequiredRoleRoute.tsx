@@ -10,8 +10,20 @@ const RequiredRoleRoute: React.FC<RequiredRoleRouteProps> = ({ allowedRoles }) =
     const { accounts } = useMsal();
     const account = accounts[0];
     
-    const roles = (account?.idTokenClaims?.roles as string[]) || [];
-    const hasRequiredRole = allowedRoles.some(role => roles.includes(role));
+    const roles = React.useMemo(() => {
+        const claims = account?.idTokenClaims as any;
+        if (!claims) return [];
+        
+        // Look for roles in various possible claims: 'roles', 'role', 'groups'
+        const rawRoles = (claims.roles || claims.role || claims.groups || []) as string | string[];
+        const rolesArray = Array.isArray(rawRoles) ? rawRoles : [rawRoles];
+        
+        return rolesArray.map(r => r.toString().toUpperCase().trim());
+    }, [account]);
+
+    const hasRequiredRole = allowedRoles.some(authRole => 
+        roles.some(userRole => userRole.includes(authRole.toUpperCase()))
+    );
 
     if (!hasRequiredRole) {
         return <Navigate to="/" replace />;

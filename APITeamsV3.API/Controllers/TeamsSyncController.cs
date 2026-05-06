@@ -110,7 +110,7 @@ namespace APITeamsV3.API.Controllers
             var success = false;
             try
             {
-                var result = await _mediator.Send(new SyncSectionTeamCommand(idSeccion, companyKey));
+                var result = await _mediator.Send(new SyncSectionTeamCommand(idSeccion, companyKey, null, executedByName));
                 success = result.Failure == 0;
                 return Ok(result);
             }
@@ -135,7 +135,7 @@ namespace APITeamsV3.API.Controllers
             var success = false;
             try
             {
-                var result = await _mediator.Send(new SyncSectionMembersCommand(idSeccion));
+                var result = await _mediator.Send(new SyncSectionMembersCommand(idSeccion, executedByName));
                 success = result.Success;
                 if (!result.Success)
                     return BadRequest(result);
@@ -185,7 +185,7 @@ namespace APITeamsV3.API.Controllers
             var success = false;
             try
             {
-                var result = await _mediator.Send(new VerifyTeamStateCommand(idSeccion));
+                var result = await _mediator.Send(new VerifyTeamStateCommand(idSeccion, null, executedByName));
                 success = result.IsValid;
                 return Ok(result);
             }
@@ -210,7 +210,7 @@ namespace APITeamsV3.API.Controllers
             var success = false;
             try
             {
-                var result = await _mediator.Send(new RegenerateAgendaCommand(idSeccion, companyKey));
+                var result = await _mediator.Send(new RegenerateAgendaCommand(idSeccion, companyKey, null, executedByName));
                 success = result.IsValid;
                 return Ok(result);
             }
@@ -239,7 +239,7 @@ namespace APITeamsV3.API.Controllers
             var success = false;
             try
             {
-                var result = await _mediator.Send(new RecreateTeamCommand(idSeccion, companyKey));
+                var result = await _mediator.Send(new RecreateTeamCommand(idSeccion, companyKey, executedByName));
                 success = result.Success;
                 if (result.Success)
                     return Ok(result);

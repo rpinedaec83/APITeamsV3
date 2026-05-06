@@ -68,6 +68,24 @@ namespace APITeamsV3.Infrastructure.Persistence
                         changed = true;
                     }
                 }
+
+                // Ensure IDAT has its specific IDs
+                if (company.CompanyKey == "idat")
+                {
+                    if (company.SpaClientId != "0856381c-a0f4-4e74-b1c4-23d6710e5d53")
+                    {
+                        company.SpaClientId = "0856381c-a0f4-4e74-b1c4-23d6710e5d53";
+                        company.SpaTenantId = "f707e30e-c9df-4de0-893b-6456dc36f382";
+                        changed = true;
+                    }
+
+                    if (company.ApiClientId != "0856381c-a0f4-4e74-b1c4-23d6710e5d53")
+                    {
+                        company.ApiClientId = "0856381c-a0f4-4e74-b1c4-23d6710e5d53";
+                        company.ApiScopes = "api://0856381c-a0f4-4e74-b1c4-23d6710e5d53/access_as_user";
+                        changed = true;
+                    }
+                }
             }
 
             if (changed)

@@ -20,7 +20,8 @@ const notifyInteractiveAuthRequired = () => {
 };
 
 const createAuthTokenRequiredError = () => {
-    const error = new Error("Interactive authentication is required.");
+    const company = window.__APITEAMSV3_CONFIG__?.companyKey?.toUpperCase() || 'DESCONOCIDA';
+    const error = new Error(`Interactive authentication is required (Company/Tenant: ${company}).`);
     error.name = AUTH_TOKEN_REQUIRED_ERROR;
     return error;
 };
@@ -49,12 +50,13 @@ export const useApiClient = () => {
                     });
                     config.headers.Authorization = `Bearer ${response.accessToken}`;
                 } catch (error) {
-                    console.error("Token acquisition failed", error);
                     if (error instanceof InteractionRequiredAuthError) {
+                        console.warn("Token acquisition requires interaction (session may be expired):", error.errorCode);
                         notifyInteractiveAuthRequired();
                         throw createAuthTokenRequiredError();
                     }
 
+                    console.error("Token acquisition failed:", error);
                     throw error;
                 }
             }

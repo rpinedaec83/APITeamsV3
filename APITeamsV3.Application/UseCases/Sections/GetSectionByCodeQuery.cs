@@ -8,6 +8,7 @@ namespace APITeamsV3.Application.UseCases.Sections
     {
         public string Code { get; set; } = string.Empty;
         public string? Periodo { get; set; }
+        public bool SkipSharePoint { get; set; }
     }
 
     public class SectionDetailDto

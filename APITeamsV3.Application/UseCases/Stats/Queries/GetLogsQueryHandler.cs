@@ -67,6 +67,7 @@ namespace APITeamsV3.Application.UseCases.Stats.Queries
                     (l.Mensaje ?? string.Empty).Contains(search) ||
                     (l.Severidad ?? string.Empty).Contains(search) ||
                     (l.JobId ?? string.Empty).Contains(search) ||
+                    (l.Usuario ?? string.Empty).Contains(search) ||
                     (l.ContextoTecnico ?? string.Empty).Contains(search));
             }
 
@@ -86,6 +87,7 @@ namespace APITeamsV3.Application.UseCases.Stats.Queries
                 ContextoTecnico = l.ContextoTecnico,
                 Severidad = l.Severidad,
                 JobId = l.JobId ?? string.Empty,
+                Usuario = l.Usuario ?? string.Empty,
                 Fecha = l.Fecha
             }).ToListAsync(cancellationToken);
 

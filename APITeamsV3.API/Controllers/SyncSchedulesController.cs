@@ -52,10 +52,9 @@ namespace APITeamsV3.API.Controllers
             if (!string.IsNullOrWhiteSpace(companyKey))
             {
                 var storage = await _tenantHangfireRuntime.GetStorageAsync(companyKey!, HttpContext.RequestAborted);
-                using var connection = storage.GetConnection();
 
                 result.Executions = result.Executions
-                    .Select(execution => SyncScheduleExecutionEnricher.EnrichExecution(execution, connection))
+                    .Select(execution => SyncScheduleExecutionEnricher.EnrichExecution(execution, storage))
                     .ToList();
             }
 
@@ -103,10 +102,11 @@ namespace APITeamsV3.API.Controllers
 
     internal static class SyncScheduleExecutionEnricher
     {
-        public static SyncScheduleExecutionDto EnrichExecution(SyncScheduleExecutionDto execution, IStorageConnection connection)
+        public static SyncScheduleExecutionDto EnrichExecution(SyncScheduleExecutionDto execution, Hangfire.JobStorage storage)
         {
+            var monitoring = storage.GetMonitoringApi();
             var jobs = execution.JobIds
-                .Select(jobId => BuildJobDto(jobId, connection))
+                .Select(jobId => BuildJobDto(jobId, monitoring))
                 .ToList();
 
             var succeeded = jobs.Count(job => string.Equals(job.State, "Succeeded", StringComparison.OrdinalIgnoreCase));
@@ -124,36 +124,53 @@ namespace APITeamsV3.API.Controllers
             };
         }
 
-        private static SyncScheduleExecutionJobDto BuildJobDto(string jobId, IStorageConnection connection)
+        private static SyncScheduleExecutionJobDto BuildJobDto(string jobId, IMonitoringApi monitoring)
         {
-            var jobData = connection.GetJobData(jobId);
-            var stateData = connection.GetStateData(jobId);
-            var state = stateData?.Name ?? jobData?.State ?? "Unknown";
-            var method = jobData?.Job?.Method?.Name ?? "Unknown";
-            var args = jobData?.Job?.Args?.Select(a => a?.ToString() ?? string.Empty).ToArray() ?? Array.Empty<string>();
-            int? sectionId = null;
-
-            if (args.Length > 0 && int.TryParse(args[0], out var parsedSectionId))
+            var details = monitoring.JobDetails(jobId);
+            if (details == null)
             {
-                sectionId = parsedSectionId;
+                return new SyncScheduleExecutionJobDto(jobId, "Unknown", "Unknown", null, "Job data no longer available", string.Empty, null);
             }
 
-            var error = TryGetStateValue(stateData, "ExceptionMessage")
-                ?? TryGetStateValue(stateData, "FailedReason")
-                ?? stateData?.Reason
-                ?? string.Empty;
+            var state = details.History?.OrderByDescending(h => h.CreatedAt).Select(h => h.StateName).FirstOrDefault() ?? "Unknown";
+            var method = details.Job?.Method?.Name ?? "Unknown";
+            var args = details.Job?.Args?.Select(a => a?.ToString() ?? string.Empty).ToArray() ?? Array.Empty<string>();
+            int? sectionId = null;
 
-            var result = TryGetStateValue(stateData, "Result") ?? string.Empty;
-            var timestamp = jobData?.CreatedAt;
+            // Heurística para extraer SectionId según el método
+            if (args.Length > 0)
+            {
+                if (method.Contains("PilotRecordingTransfers", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Primer arg es companyKey, no hay sectionId directo en este job "padre"
+                }
+                else if (int.TryParse(args[0], out var parsedSectionId))
+                {
+                    // Para la mayoría de los jobs de sección, el primer arg es el IdSeccion
+                    sectionId = parsedSectionId;
+                }
+            }
+
+            var lastState = details.History?.OrderByDescending(h => h.CreatedAt).FirstOrDefault();
+            var error = string.Empty;
+            var result = string.Empty;
+
+            if (lastState != null && lastState.Data != null)
+            {
+                lastState.Data.TryGetValue("ExceptionMessage", out error);
+                if (string.IsNullOrEmpty(error)) lastState.Data.TryGetValue("FailedReason", out error);
+                
+                lastState.Data.TryGetValue("Result", out result);
+            }
 
             return new SyncScheduleExecutionJobDto(
                 jobId,
                 state,
                 method,
                 sectionId,
-                error,
-                result,
-                timestamp);
+                error ?? string.Empty,
+                result ?? string.Empty,
+                details.CreatedAt);
         }
 
         private static string BuildExecutionSummary(

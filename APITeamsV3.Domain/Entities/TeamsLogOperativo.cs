@@ -12,6 +12,7 @@ namespace APITeamsV3.Domain.Entities
         public string ContextoTecnico { get; set; } = string.Empty; // StackTrace or JSON payload
         public string Severidad { get; set; } = string.Empty; // "High", "Medium", "Low"
         public string? JobId { get; set; } // Referencia al Job de Hangfire
+        public string? Usuario { get; set; } // Nombre del usuario que ejecutó el proceso manual
         public DateTime Fecha { get; set; } = DateTime.UtcNow;
     }
 }

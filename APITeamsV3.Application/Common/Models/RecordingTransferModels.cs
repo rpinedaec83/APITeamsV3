@@ -6,6 +6,7 @@ namespace APITeamsV3.Application.Common.Models
     public class RecordingTransferRequest
     {
         public string? JobId { get; set; }
+        public string? ExecutedBy { get; set; }
         public string? OrganizerUserPrincipalName { get; set; }
         public string? OrganizerUserId { get; set; }
         public string TeamGroupId { get; set; } = string.Empty;

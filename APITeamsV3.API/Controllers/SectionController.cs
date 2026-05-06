@@ -33,9 +33,9 @@ namespace APITeamsV3.API.Controllers
         }
 
         [HttpGet("search")]
-        public async Task<IActionResult> Search([FromQuery] string code)
+        public async Task<IActionResult> Search([FromQuery] string code, [FromQuery] bool skipSharePoint = false)
         {
-            var result = await _mediator.Send(new APITeamsV3.Application.UseCases.Sections.GetSectionByCodeQuery { Code = code });
+            var result = await _mediator.Send(new APITeamsV3.Application.UseCases.Sections.GetSectionByCodeQuery { Code = code, SkipSharePoint = skipSharePoint });
             if (result == null) return NotFound();
             return Ok(result);
         }

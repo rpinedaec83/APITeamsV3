@@ -99,6 +99,7 @@ WHERE TABLE_SCHEMA = 'dbo'
       'Referencia',
       'Severidad',
       'JobId',
+      'Usuario',
       'Mensaje',
       'ContextoTecnico'
   );";
@@ -132,6 +133,7 @@ WHERE TABLE_SCHEMA = 'dbo'
             log.Referencia = TrimTo(log.Referencia, ResolveMaxLength(columnLengths, "Referencia", aggressive ? 50 : 100));
             log.Severidad = TrimTo(log.Severidad, ResolveMaxLength(columnLengths, "Severidad", aggressive ? 10 : 20));
             log.JobId = TrimTo(log.JobId, ResolveMaxLength(columnLengths, "JobId", aggressive ? 50 : 100));
+            log.Usuario = TrimTo(log.Usuario, ResolveMaxLength(columnLengths, "Usuario", aggressive ? 50 : 150));
             log.Mensaje = TrimTo(log.Mensaje, ResolveMaxLength(columnLengths, "Mensaje", defaultTextLimit));
             log.ContextoTecnico = TrimTo(log.ContextoTecnico, ResolveMaxLength(columnLengths, "ContextoTecnico", defaultTextLimit));
         }

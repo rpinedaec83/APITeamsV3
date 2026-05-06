@@ -99,7 +99,7 @@ namespace APITeamsV3.Application.UseCases.Sections
                 : latestSessionJoinUrl;
 
             string? linkSharePoint = null;
-            if (team != null && !string.IsNullOrWhiteSpace(team.IdTeamsGroup))
+            if (!request.SkipSharePoint && team != null && !string.IsNullOrWhiteSpace(team.IdTeamsGroup))
             {
                 try
                 {

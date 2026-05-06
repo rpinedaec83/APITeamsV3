@@ -66,6 +66,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
             };
 
             TeamEntity? team = null;
+            Seccion? section = null;
 
             try
             {
@@ -86,11 +87,11 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
 
                     result.IsValid = false;
                     result.Summary = "El Team local apunta a un grupo inexistente en Graph. Se marco como inactivo.";
-                    await LogOperativoAsync("Error", "Agenda", team.IdTeamsGroup, result.Summary, request.JobId);
+                    await LogOperativoAsync("Error", "Agenda", section?.Codigo ?? team.IdTeamsGroup, result.Summary, request.JobId, request.ExecutedBy);
                     return result;
                 }
 
-                var section = await _context.Set<Seccion>()
+                section = await _context.Set<Seccion>()
                     .AsNoTracking()
                     .FirstOrDefaultAsync(s => s.IdSeccion == request.IdSeccion, cancellationToken);
 
@@ -113,9 +114,10 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     await LogOperativoAsync(
                         "Warning",
                         "Agenda",
-                        request.IdSeccion.ToString(),
+                        section?.Codigo ?? request.IdSeccion.ToString(),
                         result.Summary,
-                        request.JobId);
+                        request.JobId,
+                        request.ExecutedBy);
                     return result;
                 }
 
@@ -195,9 +197,10 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     await LogOperativoAsync(
                         "Success",
                         "Agenda",
-                        team.IdTeamsGroup,
+                        section.Codigo,
                         $"Agenda creada automaticamente: {createdBlocks.Count} bloques.",
-                        request.JobId);
+                        request.JobId,
+                        request.ExecutedBy);
 
                     result.Summary = $"Agenda creada automaticamente: {createdBlocks.Count} bloques.";
                     return result;
@@ -286,9 +289,10 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                                 await LogOperativoAsync(
                                     "Warning",
                                     "Agenda",
-                                    team.IdTeamsGroup,
+                                    section.Codigo,
                                     $"Aviso: El bloque {FormatHour(scheduleBlock.Key.Inicio)}-{FormatHour(scheduleBlock.Key.Fin)} desapareció de Teams. Acción: El sistema lo está recreando automáticamente ahora.",
                                     request.JobId,
+                                    request.ExecutedBy,
                                     ex.Message);
 
                                 await InactivateTeamsHorarioByEventIdAsync(team.IdTeamsGroup, existingMeeting.EventId, cancellationToken);
@@ -362,9 +366,10 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                         await LogOperativoAsync(
                             "Warning",
                             "Agenda",
-                            team.IdTeamsGroup,
+                            section.Codigo,
                             $"No se pudo sincronizar el bloque {FormatHour(scheduleBlock.Key.Inicio)}-{FormatHour(scheduleBlock.Key.Fin)}.",
                             request.JobId,
+                            request.ExecutedBy,
                             ex.Message);
                     }
                 }
@@ -404,9 +409,10 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                 await LogOperativoAsync(
                     result.IsValid ? "Success" : "Warning",
                     "Agenda",
-                    team.IdTeamsGroup,
+                    section.Codigo,
                     result.Summary,
-                    request.JobId);
+                    request.JobId,
+                    request.ExecutedBy);
             }
             catch (Exception ex)
             {
@@ -418,9 +424,10 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     await LogOperativoAsync(
                         "Warning",
                         "Agenda",
-                        team?.IdTeamsGroup ?? request.IdSeccion.ToString(),
+                        section?.Codigo ?? team?.IdTeamsGroup ?? request.IdSeccion.ToString(),
                         result.Summary,
                         request.JobId,
+                        request.ExecutedBy,
                         ex.Message);
                     return result;
                 }
@@ -433,9 +440,10 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     await LogOperativoAsync(
                         "Error",
                         "Agenda",
-                        team?.IdTeamsGroup ?? request.IdSeccion.ToString(),
+                        section?.Codigo ?? team?.IdTeamsGroup ?? request.IdSeccion.ToString(),
                         result.Summary,
                         request.JobId,
+                        request.ExecutedBy,
                         ex.Message);
                     return result;
                 }
@@ -446,9 +454,10 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                 await LogOperativoAsync(
                     "Error",
                     "Agenda",
-                    team?.IdTeamsGroup ?? request.IdSeccion.ToString(),
+                    section?.Codigo ?? team?.IdTeamsGroup ?? request.IdSeccion.ToString(),
                     ex.Message,
                     request.JobId,
+                    request.ExecutedBy,
                     ex.StackTrace ?? string.Empty);
             }
 
@@ -685,7 +694,6 @@ IF NOT EXISTS
       AND IdHorario = {2}
       AND IdCurso = {3}
       AND NumeroReunion = {4}
-      AND CodigoAlumno = {9}
       AND Estado = 'A'
 )
 BEGIN
@@ -745,37 +753,25 @@ END;";
                         ? session.CorreoFacilitador.Trim()
                         : section.EmailFacilitador?.Trim();
 
-                    var participants = ResolveParticipants(students, effectiveTeacherCode, effectiveTeacherEmail);
+                    await _context.Database.ExecuteSqlRawAsync(
+                        insertSql,
+                        teamId,
+                        meeting.EventId,
+                        session.IdHorario,
+                        sectionId,
+                        session.Numero,
+                        session.CodigoSesion,
+                        session.Fecha,
+                        session.Inicio,
+                        session.Fin,
+                        "SECTION", // CodigoAlumno: Grabar solo bloque
+                        "N/A",     // CorreoAlumno: Grabar solo bloque
+                        effectiveTeacherCode,
+                        effectiveTeacherEmail ?? string.Empty,
+                        meeting.JoinUrl,
+                        _currentUserService.UserIdInt ?? 99);
 
-                    foreach (var participant in participants)
-                    {
-                        var affectedRows = await _context.Database.ExecuteSqlRawAsync(
-                            insertSql,
-                            teamId,
-                            meeting.EventId,
-                            session.IdHorario,
-                            sectionId,
-                            session.Numero,
-                            session.CodigoSesion,
-                            session.Fecha,
-                            session.Inicio,
-                            session.Fin,
-                            participant.CodigoAlumno,
-                            participant.CorreoAlumno,
-                            effectiveTeacherCode,
-                            effectiveTeacherEmail ?? string.Empty,
-                            meeting.JoinUrl,
-                            _currentUserService.UserIdInt ?? 99);
-
-                        if (affectedRows > 0)
-                        {
-                            insertedRows += affectedRows;
-                        }
-                        else
-                        {
-                            skippedDuplicates++;
-                        }
-                    }
+                    insertedRows++;
                 }
             }
 
@@ -837,7 +833,7 @@ END;";
             List<LinkMeetingBlock> meetings,
             CancellationToken cancellationToken)
         {
-            if (meetings.Count == 1 && !string.IsNullOrWhiteSpace(meetings[0].JoinUrl))
+            if (meetings.Count > 0 && !string.IsNullOrWhiteSpace(meetings[0].JoinUrl))
             {
                 const string updateSingleSql = @"
 UPDATE SeccionHorario
@@ -974,7 +970,7 @@ WHERE IdTeams = {0} AND IdEvento = {1} AND Estado = 'A'";
             return false;
         }
 
-        private async Task LogOperativoAsync(string type, string target, string reference, string msg, string? jobId, string context = "")
+        private async Task LogOperativoAsync(string type, string target, string reference, string msg, string? jobId, string? executedBy = null, string context = "")
         {
             try
             {
@@ -986,6 +982,7 @@ WHERE IdTeams = {0} AND IdEvento = {1} AND Estado = 'A'";
                     Mensaje = msg,
                     ContextoTecnico = context ?? string.Empty,
                     JobId = jobId,
+                    Usuario = executedBy,
                     Severidad = type == "Error" ? "High" : "Low",
                     Fecha = DateTime.UtcNow
                 });

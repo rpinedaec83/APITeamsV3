@@ -77,7 +77,24 @@ foreach ($db in $databases) {
 # Limpiar archivos actuales (excepto appsettings.json y bases de datos)
 if (Test-Path $iisApiPath) {
     Write-Host "  Limpiando archivos antiguos en $iisApiPath ..." -ForegroundColor Yellow
-    Get-ChildItem -Path $iisApiPath -File | Where-Object { $_.Name -ne "appsettings.json" -and $_.Extension -notmatch "^\.db(-shm|-wal)?$" } | Remove-Item -Force
+    
+    # Asegurar que ningun proceso w3wp residual este bloqueando archivos
+    Get-Process w3wp -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    
+    for ($i=1; $i -le 5; $i++) {
+        try {
+            Get-ChildItem -Path $iisApiPath -File | Where-Object { $_.Name -ne "appsettings.json" -and $_.Extension -notmatch "^\.db(-shm|-wal)?$" } | Remove-Item -Force -ErrorAction Stop
+            break
+        } catch {
+            if ($i -lt 5) {
+                Write-Host "  Intento $i fallo (archivo bloqueado). Reintentando en 2s..." -ForegroundColor Yellow
+                Start-Sleep -Seconds 2
+            } else {
+                Write-Host "  ERROR: No se pudieron limpiar los archivos tras 5 intentos. Deten el proceso que bloquea $iisApiPath manualmente." -ForegroundColor Red
+                throw $_
+            }
+        }
+    }
 }
 
 # Verificacion de seguridad: los .db NO deben estar en publish_output

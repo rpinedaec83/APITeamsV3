@@ -31,7 +31,7 @@ namespace APITeamsV3.Application.UseCases.Recordings.Commands
             {
                 var result = await _recordingsService.TransferAsync(request, cancellationToken);
 
-                await TryLogAsync(result, request.JobId);
+                await TryLogAsync(request, result);
                 return result;
             }
             catch (Exception ex)
@@ -41,30 +41,38 @@ namespace APITeamsV3.Application.UseCases.Recordings.Commands
             }
         }
 
-        private async Task TryLogAsync(RecordingTransferResult result, string? jobId)
+        private async Task TryLogAsync(TransferRecordingsCommand request, RecordingTransferResult result)
         {
             var hasEffectiveStorageExecution = result.FilesCopied > 0;
             var hasTransferErrors = result.FilesErrored > 0;
 
-            if (!hasEffectiveStorageExecution && !hasTransferErrors)
-            {
-                _logger.LogInformation(
-                    "RecordingTransfer log omitted because no recordings were stored. Found={FilesFound}, Copied={FilesCopied}, Skipped={FilesSkipped}.",
-                    result.FilesFound,
-                    result.FilesCopied,
-                    result.FilesSkipped);
-                return;
-            }
+            // We will always log the attempt to provide visibility in the dashboard, 
+            // even if 0 files were found or processed.
 
             try
             {
                 var logType = hasTransferErrors
                     ? (hasEffectiveStorageExecution ? "Warning" : "Error")
                     : "Success";
-                var reference = !string.IsNullOrWhiteSpace(result.TeamGroupId) ? result.TeamGroupId : "N/A";
-                var message = hasEffectiveStorageExecution
-                    ? $"Grabaciones almacenadas en Team: Encontrados={result.FilesFound}, Copiados={result.FilesCopied}, Omitidos={result.FilesSkipped}, Errores={result.FilesErrored}, EliminadosOrigen={result.SourceFilesDeleted}, ErrorEliminacionOrigen={result.SourceFilesDeleteErrors}."
-                    : $"Transferencia de grabaciones ejecutada con errores y sin archivos almacenados: Encontrados={result.FilesFound}, Copiados={result.FilesCopied}, Omitidos={result.FilesSkipped}, Errores={result.FilesErrored}, EliminadosOrigen={result.SourceFilesDeleted}, ErrorEliminacionOrigen={result.SourceFilesDeleteErrors}.";
+                
+                var reference = !string.IsNullOrWhiteSpace(request.SectionCode) 
+                    ? request.SectionCode 
+                    : (!string.IsNullOrWhiteSpace(result.TeamGroupId) ? result.TeamGroupId : "N/A");
+
+                string message;
+                if (hasEffectiveStorageExecution)
+                {
+                    message = $"Grabaciones almacenadas en Team: Encontrados={result.FilesFound}, Copiados={result.FilesCopied}, Omitidos={result.FilesSkipped}, Errores={result.FilesErrored}.";
+                }
+                else if (hasTransferErrors)
+                {
+                    message = $"Transferencia fallida o incompleta: Encontrados={result.FilesFound}, Errores={result.FilesErrored}. Revise el contexto tecnico.";
+                }
+                else
+                {
+                    var warningSummary = result.Warnings.Count > 0 ? $" | Aviso: {string.Join(" ", result.Warnings)}" : "";
+                    message = $"No se procesaron grabaciones (0 encontradas o elegibles).{warningSummary}";
+                }
 
                 await _logRepository.LogAsync(new TeamsLogOperativo
                 {
@@ -74,7 +82,8 @@ namespace APITeamsV3.Application.UseCases.Recordings.Commands
                     Mensaje = message,
                     ContextoTecnico = string.Join(" | ", result.Errors),
                     Severidad = hasTransferErrors ? "Medium" : "Low",
-                    JobId = jobId,
+                    JobId = request.JobId,
+                    Usuario = request.ExecutedBy,
                     Fecha = DateTime.UtcNow
                 });
             }
@@ -88,11 +97,11 @@ namespace APITeamsV3.Application.UseCases.Recordings.Commands
         {
             try
             {
-                var reference = !string.IsNullOrWhiteSpace(request.TeamGroupId)
-                    ? request.TeamGroupId
-                    : request.SectionId?.ToString() ?? "N/A";
+                var reference = !string.IsNullOrWhiteSpace(request.SectionCode)
+                    ? request.SectionCode
+                    : (!string.IsNullOrWhiteSpace(request.TeamGroupId) ? request.TeamGroupId : "N/A");
 
-                var sectionLabel = request.SectionId?.ToString() ?? request.SectionCode ?? request.Section ?? "N/A";
+                var sectionLabel = request.SectionCode ?? request.SectionId?.ToString() ?? request.Section ?? "N/A";
 
                 await _logRepository.LogAsync(new TeamsLogOperativo
                 {
@@ -103,6 +112,7 @@ namespace APITeamsV3.Application.UseCases.Recordings.Commands
                     ContextoTecnico = ex.ToString(),
                     Severidad = "High",
                     JobId = request.JobId,
+                    Usuario = request.ExecutedBy,
                     Fecha = DateTime.UtcNow
                 });
             }

@@ -9,6 +9,7 @@ BEGIN
         [ContextoTecnico] [nvarchar](max) NOT NULL,
         [Severidad] [nvarchar](20) NOT NULL,
         [JobId] [nvarchar](100) NULL,
+        [Usuario] [nvarchar](150) NULL,
         [Fecha] [datetime2](7) NOT NULL,
         CONSTRAINT [PK_TeamsLogOperativo] PRIMARY KEY CLUSTERED ([Id] ASC)
     )

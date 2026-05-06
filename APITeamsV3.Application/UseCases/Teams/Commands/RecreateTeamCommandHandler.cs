@@ -56,7 +56,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                         await graphClient.Groups[existingTeam.IdTeamsGroup].DeleteAsync(cancellationToken: cancellationToken);
                         _logger.LogInformation($"Deleted Graph group {existingTeam.IdTeamsGroup} for section {request.IdSeccion}");
                         await LogOperativoAsync("Info", "TeamRecreate", existingTeam.IdTeamsGroup, 
-                            "Equipo eliminado de Graph para recreación.");
+                            "Equipo eliminado de Graph para recreación.", request.ExecutedBy);
                     }
                     catch (Microsoft.Graph.Models.ODataErrors.ODataError ex) when (ex.ResponseStatusCode == 404)
                     {
@@ -72,7 +72,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     await _mediator.Send(new SoftDeleteTeamCommand(existingTeam.IdTeamsGroup), cancellationToken);
                     _logger.LogInformation($"Soft-deleted local records for {existingTeam.IdTeamsGroup}");
                     await LogOperativoAsync("Info", "TeamRecreate", existingTeam.IdTeamsGroup, 
-                        "Registros locales marcados como inactivos (EstadoTeam=I).");
+                        "Registros locales marcados como inactivos (EstadoTeam=I).", request.ExecutedBy);
                 }
 
                 // 4. Fetch the section data
@@ -98,7 +98,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     result.Success = false;
                     result.Summary = "Falló la creación del nuevo equipo en Graph.";
                     await LogOperativoAsync("Error", "TeamRecreate", request.IdSeccion.ToString(), 
-                        "Fallo aprovisionamiento en Graph durante recreación.");
+                        "Fallo aprovisionamiento en Graph durante recreación.", request.ExecutedBy);
                     return result;
                 }
 
@@ -107,7 +107,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                 await _provisioningService.EnsureMembershipOpenAsync(newGraphId);
 
                 await LogOperativoAsync("Success", "TeamRecreate", newGraphId, 
-                    $"Equipo recreado exitosamente. Antiguo eliminado, nuevo creado con ID {newGraphId}.");
+                    $"Equipo recreado exitosamente. Antiguo eliminado, nuevo creado con ID {newGraphId}.", request.ExecutedBy);
 
                 result.Success = true;
                 result.NewTeamId = newGraphId;
@@ -118,13 +118,13 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                 _logger.LogError(ex, $"Error recreating team for section {request.IdSeccion}");
                 result.Success = false;
                 result.Summary = $"Error al recrear equipo: {ex.Message}";
-                await LogOperativoAsync("Error", "TeamRecreate", request.IdSeccion.ToString(), ex.Message);
+                await LogOperativoAsync("Error", "TeamRecreate", request.IdSeccion.ToString(), ex.Message, request.ExecutedBy);
             }
 
             return result;
         }
 
-        private async Task LogOperativoAsync(string type, string target, string reference, string msg)
+        private async Task LogOperativoAsync(string type, string target, string reference, string msg, string? executedBy = null)
         {
             try
             {
@@ -134,6 +134,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     EntidadAfectada = target,
                     Referencia = reference,
                     Mensaje = msg,
+                    Usuario = executedBy,
                     Fecha = DateTime.UtcNow,
                     Severidad = type == "Error" ? "High" : "Low"
                 });

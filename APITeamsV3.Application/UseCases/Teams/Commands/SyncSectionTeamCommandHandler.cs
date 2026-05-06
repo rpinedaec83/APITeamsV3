@@ -21,6 +21,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
         private readonly ILogger<SyncSectionTeamCommandHandler> _logger;
         private readonly ITeamsLogOperativoRepository _logRepository;
         private readonly IGraphClientFactory _graphClientFactory;
+        private readonly INamingService _namingService;
 
         public SyncSectionTeamCommandHandler(
             ISmartDbContext context,
@@ -29,7 +30,8 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
             IMediator mediator,
             ILogger<SyncSectionTeamCommandHandler> logger,
             ITeamsLogOperativoRepository logRepository,
-            IGraphClientFactory graphClientFactory)
+            IGraphClientFactory graphClientFactory,
+            INamingService namingService)
         {
             _context = context;
             _provisioningService = provisioningService;
@@ -38,6 +40,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
             _logger = logger;
             _logRepository = logRepository;
             _graphClientFactory = graphClientFactory;
+            _namingService = namingService;
         }
 
         public async Task<SyncSectionTeamResult> Handle(SyncSectionTeamCommand request, CancellationToken cancellationToken)
@@ -47,21 +50,22 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
             try
             {
                 var existingTeam = await _context.TeamsEquipos
-                    .FirstOrDefaultAsync(t => t.IdSeccionSmart == request.IdSeccion, cancellationToken);
+                    .FirstOrDefaultAsync(t => t.IdSeccionSmart == request.IdSeccion && t.EstadoTeam == "A", cancellationToken);
+
+                // Fetch the section data (needed for both flow and nickname-based recovery)
+                var section = await _context.Set<Seccion>()
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(s => s.IdSeccion == request.IdSeccion, cancellationToken);
+
+                if (section == null)
+                {
+                    _logger.LogWarning($"Section {request.IdSeccion} not found in database. Aborting sync.");
+                    result.Failure++;
+                    return result;
+                }
 
                 if (existingTeam == null)
                 {
-                    // Fetch the section data for provisioning
-                    var section = await _context.Set<Seccion>()
-                        .AsNoTracking()
-                        .FirstOrDefaultAsync(s => s.IdSeccion == request.IdSeccion, cancellationToken);
-
-                    if (section == null)
-                    {
-                        _logger.LogWarning($"Section {request.IdSeccion} not found in database. Aborting provision.");
-                        result.Failure++;
-                        return result;
-                    }
 
                     // Flujo 1: Crear Team desde cero
                     _logger.LogInformation($"No existing team found for section {request.IdSeccion}. Provisioning new Microsoft 365 Group.");
@@ -98,19 +102,45 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     var graphClient = await _graphClientFactory.CreateClientAsync();
                     if (!await GraphGroupGuard.GroupExistsAsync(graphClient, existingTeam.IdTeamsGroup, cancellationToken))
                     {
-                        existingTeam.EstadoTeam = "I";
-                        existingTeam.FechaModificacion = DateTime.UtcNow;
-                        await _teamRepository.UpdateAsync(existingTeam);
+                        _logger.LogWarning("Linked Team {GroupId} not found in Graph. Attempting recovery by nickname for section {SectionId}...", existingTeam.IdTeamsGroup, request.IdSeccion);
+                        
+                        var nickname = _namingService.GetMailNickname(section);
+                        var recoveredId = await _provisioningService.RecoverGroupIdByNicknameAsync(nickname);
 
-                        await LogOperativoAsync(
-                            "Warning",
-                            "Team",
-                            existingTeam.IdTeamsGroup,
-                            "Advertencia: El equipo vinculado ya no existe en Microsoft 365 (borrado externo). Acción: El sistema ha marcado el registro local como inactivo y creará un nuevo equipo automáticamente.",
-                            request.JobId);
+                        if (!string.IsNullOrEmpty(recoveredId))
+                        {
+                            _logger.LogInformation("Recovery successful. Relinking section {SectionId} to Group {NewGroupId} (was {OldGroupId}).", request.IdSeccion, recoveredId, existingTeam.IdTeamsGroup);
+                            
+                            var oldId = existingTeam.IdTeamsGroup;
+                            existingTeam.IdTeamsGroup = recoveredId;
+                            existingTeam.FechaModificacion = DateTime.UtcNow;
+                            await _teamRepository.UpdateAsync(existingTeam);
 
-                        result.Ignored++;
-                        return result;
+                            await LogOperativoAsync(
+                                "Success",
+                                "Team",
+                                recoveredId,
+                                $"Reconciliación exitosa: El equipo fue recuperado por nickname ({nickname}). El ID anterior {oldId} fue reemplazado.",
+                                request.JobId);
+                            
+                            // Continue with the update flow using the new ID
+                        }
+                        else
+                        {
+                            existingTeam.EstadoTeam = "I";
+                            existingTeam.FechaModificacion = DateTime.UtcNow;
+                            await _teamRepository.UpdateAsync(existingTeam);
+
+                            await LogOperativoAsync(
+                                "Warning",
+                                "Team",
+                                existingTeam.IdTeamsGroup,
+                                "Advertencia: El equipo vinculado ya no existe en Microsoft 365 (borrado externo). Acción: El sistema ha marcado el registro local como inactivo y creará un nuevo equipo automáticamente.",
+                                request.JobId);
+
+                            result.Ignored++;
+                            return result;
+                        }
                     }
                     
                     // Call the granular commands to synchronize changes
@@ -124,21 +154,21 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     // 3. Sync Students
                     await _mediator.Send(new SyncMissingStudentsCommand(request.IdSeccion, request.JobId), cancellationToken);
                     
-                    await LogOperativoAsync("Success", "Team", existingTeam.IdTeamsGroup, "Equipo actualizado exitosamente (Nombres, Owners, Miembros).", request.JobId);
+                    await LogOperativoAsync("Success", "Team", existingTeam.IdTeamsGroup, "Equipo actualizado exitosamente (Nombres, Owners, Miembros).", request.JobId, request.ExecutedBy);
                     result.Success++;
                 }
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, $"Error synchronizing section {request.IdSeccion}");
-                await LogOperativoAsync("Error", "Seccion", request.IdSeccion.ToString(), ex.Message, request.JobId, ex.StackTrace ?? string.Empty);
+                await LogOperativoAsync("Error", "Seccion", request.IdSeccion.ToString(), ex.Message, request.JobId, request.ExecutedBy, ex.StackTrace ?? string.Empty);
                 result.Failure++;
             }
 
             return result;
         }
 
-        private async Task LogOperativoAsync(string type, string target, string reference, string msg, string? jobId, string context = "")
+        private async Task LogOperativoAsync(string type, string target, string reference, string msg, string? jobId, string? executedBy = null, string context = "")
         {
             try
             {
@@ -150,6 +180,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     Mensaje = msg,
                     ContextoTecnico = context ?? string.Empty,
                     JobId = jobId,
+                    Usuario = executedBy,
                     Severidad = type == "Error" ? "High" : "Low",
                     Fecha = DateTime.UtcNow
                 });

@@ -105,80 +105,80 @@ namespace APITeamsV3.Infrastructure.Services
         }
 
         // Capture tenant key at request time, but enqueue against the tenant's own Hangfire storage.
-        public async Task<string> EnqueueGenerateSchedule(int idSeccion)
+        public async Task<string> EnqueueGenerateSchedule(int idSeccion, string? executedBy = null)
         {
             var key = GetCurrentCompanyKey();
             var client = await CreateClientAsync(key);
-            return client.Enqueue(() => SendGenerateSchedule(idSeccion, key));
+            return client.Enqueue(() => SendGenerateSchedule(idSeccion, key, executedBy));
         }
 
-        public async Task<string> EnqueueSyncDates(int idSeccion)
+        public async Task<string> EnqueueSyncDates(int idSeccion, string? executedBy = null)
         {
             var key = GetCurrentCompanyKey();
             var client = await CreateClientAsync(key);
-            return client.Enqueue(() => SendSyncDates(idSeccion, key));
+            return client.Enqueue(() => SendSyncDates(idSeccion, key, executedBy));
         }
 
-        public async Task<string> EnqueueSyncFacilitator(int idSeccion)
+        public async Task<string> EnqueueSyncFacilitator(int idSeccion, string? executedBy = null)
         {
             var key = GetCurrentCompanyKey();
             var client = await CreateClientAsync(key);
-            return client.Enqueue(() => SendSyncFacilitator(idSeccion, key));
+            return client.Enqueue(() => SendSyncFacilitator(idSeccion, key, executedBy));
         }
 
-        public async Task<string> EnqueueSyncRoster(int idSeccion, bool fullSync)
+        public async Task<string> EnqueueSyncRoster(int idSeccion, bool fullSync, string? executedBy = null)
         {
             var key = GetCurrentCompanyKey();
             var client = await CreateClientAsync(key);
-            return client.Enqueue(() => SendSyncRoster(idSeccion, fullSync, key));
+            return client.Enqueue(() => SendSyncRoster(idSeccion, fullSync, key, executedBy, null));
         }
 
-        public async Task<string> EnqueueUpdateJoinUrl(int idSeccion, string joinUrl, string idEvento)
+        public async Task<string> EnqueueUpdateJoinUrl(int idSeccion, string joinUrl, string idEvento, string? executedBy = null)
         {
             var key = GetCurrentCompanyKey();
             var client = await CreateClientAsync(key);
-            return client.Enqueue(() => SendUpdateJoinUrl(idSeccion, joinUrl, idEvento, key));
+            return client.Enqueue(() => SendUpdateJoinUrl(idSeccion, joinUrl, idEvento, key, executedBy));
         }
 
-        public async Task<string> EnqueueSyncMissingStudents(int idSeccion)
+        public async Task<string> EnqueueSyncMissingStudents(int idSeccion, string? executedBy = null)
         {
             var key = GetCurrentCompanyKey();
             var client = await CreateClientAsync(key);
-            return client.Enqueue(() => SendSyncMissingStudents(idSeccion, key));
+            return client.Enqueue(() => SendSyncMissingStudents(idSeccion, key, executedBy));
         }
 
-        public async Task<string> EnqueueSyncObsoleteStudents(int idSeccion)
+        public async Task<string> EnqueueSyncObsoleteStudents(int idSeccion, string? executedBy = null)
         {
             var key = GetCurrentCompanyKey();
             var client = await CreateClientAsync(key);
-            return client.Enqueue(() => SendSyncObsoleteStudents(idSeccion, key));
+            return client.Enqueue(() => SendSyncObsoleteStudents(idSeccion, key, executedBy));
         }
 
-        public async Task<string> EnqueueSyncRenamedTeams(int idSeccion)
+        public async Task<string> EnqueueSyncRenamedTeams(int idSeccion, string? executedBy = null)
         {
             var key = GetCurrentCompanyKey();
             var client = await CreateClientAsync(key);
-            return client.Enqueue(() => SendSyncRenamedTeams(idSeccion, key));
+            return client.Enqueue(() => SendSyncRenamedTeams(idSeccion, key, executedBy));
         }
 
-        public async Task<string> EnqueueFullSectionSync(int idSeccion)
+        public async Task<string> EnqueueFullSectionSync(int idSeccion, string? executedBy = null)
         {
             var key = GetCurrentCompanyKey();
             var client = await CreateClientAsync(key);
-            return client.Enqueue(() => SendSyncRoster(idSeccion, true, key));
+            return client.Enqueue(() => SendSyncRoster(idSeccion, true, key, executedBy, null));
         }
 
-        public async Task<string> EnqueueSyncSectionTeam(int idSeccion)
+        public async Task<string> EnqueueSyncSectionTeam(int idSeccion, string? executedBy = null)
         {
             var key = GetCurrentCompanyKey();
             var client = await CreateClientAsync(key);
-            return client.Enqueue(() => SendSyncSectionTeam(idSeccion, key));
+            return client.Enqueue(() => SendSyncSectionTeam(idSeccion, key, executedBy, null));
         }
 
-        public async Task<string> EnqueuePilotRecordingTransfers(string companyKey)
+        public async Task<string> EnqueuePilotRecordingTransfers(string companyKey, string? executedBy = null)
         {
             var client = await CreateClientAsync(companyKey);
-            return client.Enqueue(() => RunPilotRecordingTransfers(companyKey));
+            return client.Enqueue(() => RunPilotRecordingTransfers(companyKey, executedBy, null));
         }
 
         private async Task<IBackgroundJobClient> CreateClientAsync(string companyKey)
@@ -188,30 +188,30 @@ namespace APITeamsV3.Infrastructure.Services
         }
 
         [JobDisplayName("Generate Schedule: Section {0} [{1}]")]
-        public async Task SendGenerateSchedule(int idSeccion, string companyKey)
+        public async Task SendGenerateSchedule(int idSeccion, string companyKey, string? executedBy = null)
         {
             if (!await ShouldRunForSectionAsync(companyKey, idSeccion, "GenerateSchedule")) return;
             await _mediator.Send(new GenerateSectionScheduleCommand(idSeccion));
         }
 
         [JobDisplayName("Sync Dates: Section {0} [{1}]")]
-        public async Task SendSyncDates(int idSeccion, string companyKey)
+        public async Task SendSyncDates(int idSeccion, string companyKey, string? executedBy = null)
         {
             if (!await ShouldRunForSectionAsync(companyKey, idSeccion, "SyncDates")) return;
             await _mediator.Send(new SyncSessionDatesCommand(idSeccion));
         }
 
         [JobDisplayName("Sync Facilitator: Section {0} [{1}]")]
-        public async Task SendSyncFacilitator(int idSeccion, string companyKey)
+        public async Task SendSyncFacilitator(int idSeccion, string companyKey, string? executedBy = null)
         {
             if (!await ShouldRunForSectionAsync(companyKey, idSeccion, "SyncFacilitator")) return;
             await _mediator.Send(new SyncSessionFacilitatorCommand(idSeccion));
         }
 
-    public Task SendSyncRoster(int idSeccion, bool fullSync, string companyKey)
-        => SendSyncRoster(idSeccion, fullSync, companyKey, null);
-
-    public async Task SendSyncRoster(int idSeccion, bool fullSync, string companyKey, PerformContext? performContext)
+    public Task SendSyncRoster(int idSeccion, bool fullSync, string companyKey, string? executedBy = null)
+        => SendSyncRoster(idSeccion, fullSync, companyKey, executedBy, null);
+    
+    public async Task SendSyncRoster(int idSeccion, bool fullSync, string companyKey, string? executedBy, PerformContext? performContext)
         {
             if (!await ShouldRunForSectionAsync(companyKey, idSeccion, "SyncRoster")) return;
 
@@ -219,8 +219,8 @@ namespace APITeamsV3.Infrastructure.Services
 
             if (fullSync)
             {
-                await _mediator.Send(new SyncSectionTeamCommand(idSeccion, companyKey, jobId));
-                await _mediator.Send(new SyncSectionAgendaCommand(idSeccion, companyKey, jobId));
+                await _mediator.Send(new SyncSectionTeamCommand(idSeccion, companyKey, jobId, executedBy));
+                await _mediator.Send(new SyncSectionAgendaCommand(idSeccion, companyKey, jobId, executedBy));
                 return;
             }
 
@@ -233,50 +233,50 @@ namespace APITeamsV3.Infrastructure.Services
         }
 
         [JobDisplayName("Update Join URL: Section {0} [{3}]")]
-        public async Task SendUpdateJoinUrl(int idSeccion, string joinUrl, string idEvento, string companyKey)
+        public async Task SendUpdateJoinUrl(int idSeccion, string joinUrl, string idEvento, string companyKey, string? executedBy = null)
         {
             if (!await ShouldRunForSectionAsync(companyKey, idSeccion, "UpdateJoinUrl")) return;
             await _mediator.Send(new UpdateSectionJoinUrlCommand(idSeccion, joinUrl, idEvento));
         }
 
         [JobDisplayName("Sync Missing Students: Section {0} [{1}]")]
-        public async Task SendSyncMissingStudents(int idSeccion, string companyKey)
+        public async Task SendSyncMissingStudents(int idSeccion, string companyKey, string? executedBy = null)
         {
             if (!await ShouldRunForSectionAsync(companyKey, idSeccion, "SyncMissingStudents")) return;
             await _mediator.Send(new SyncMissingStudentsCommand(idSeccion));
         }
 
         [JobDisplayName("Sync Obsolete Students: Section {0} [{1}]")]
-        public async Task SendSyncObsoleteStudents(int idSeccion, string companyKey)
+        public async Task SendSyncObsoleteStudents(int idSeccion, string companyKey, string? executedBy = null)
         {
             if (!await ShouldRunForSectionAsync(companyKey, idSeccion, "SyncObsoleteStudents")) return;
             await _mediator.Send(new SyncObsoleteStudentsCommand(idSeccion));
         }
 
         [JobDisplayName("Sync Renamed Teams: Section {0} [{1}]")]
-        public async Task SendSyncRenamedTeams(int idSeccion, string companyKey)
+        public async Task SendSyncRenamedTeams(int idSeccion, string companyKey, string? executedBy = null)
         {
             if (!await ShouldRunForSectionAsync(companyKey, idSeccion, "SyncRenamedTeams")) return;
             await _mediator.Send(new SyncRenamedTeamsCommand(idSeccion));
         }
 
-        public Task SendSyncSectionTeam(int idSeccion, string companyKey)
-            => SendSyncSectionTeam(idSeccion, companyKey, null);
+        public Task SendSyncSectionTeam(int idSeccion, string companyKey, string? executedBy = null)
+            => SendSyncSectionTeam(idSeccion, companyKey, executedBy, null);
 
         [JobDisplayName("Sync Section Team V3: Section {0} [{1}]")]
-        public async Task SendSyncSectionTeam(int idSeccion, string companyKey, PerformContext? performContext)
+        public async Task SendSyncSectionTeam(int idSeccion, string companyKey, string? executedBy, PerformContext? performContext)
         {
             if (!await ShouldRunForSectionAsync(companyKey, idSeccion, "SyncSectionTeam")) return;
             var jobId = performContext?.BackgroundJob?.Id;
-            await _mediator.Send(new SyncSectionTeamCommand(idSeccion, companyKey, jobId));
+            await _mediator.Send(new SyncSectionTeamCommand(idSeccion, companyKey, jobId, executedBy));
         }
 
         [JobDisplayName("Regenerate Agenda: Section {0} [{1}]")]
-        public async Task SendRegenerateAgenda(int idSeccion, string companyKey, string? jobId)
+        public async Task SendRegenerateAgenda(int idSeccion, string companyKey, string? jobId, string? executedBy = null)
         {
             if (!await ShouldRunForSectionAsync(companyKey, idSeccion, "RegenerateAgenda")) return;
 
-            var result = await _mediator.Send(new RegenerateAgendaCommand(idSeccion, companyKey, jobId));
+            var result = await _mediator.Send(new RegenerateAgendaCommand(idSeccion, companyKey, jobId, executedBy));
             if (!result.IsValid)
             {
                 _logger.LogWarning(
@@ -292,11 +292,11 @@ namespace APITeamsV3.Infrastructure.Services
             }
         }
 
-        public Task RunPilotRecordingTransfers(string companyKey)
-            => RunPilotRecordingTransfers(companyKey, null);
+        public Task RunPilotRecordingTransfers(string companyKey, string? executedBy = null)
+            => RunPilotRecordingTransfers(companyKey, executedBy, null);
 
         [JobDisplayName("Transfer Pilot Recordings [{0}]")]
-        public async Task RunPilotRecordingTransfers(string companyKey, PerformContext? performContext)
+        public async Task RunPilotRecordingTransfers(string companyKey, string? executedBy, PerformContext? performContext)
         {
             var hangfireJobId = performContext?.BackgroundJob?.Id;
             var config = await ResolveTenantAsync(companyKey, includePilotSections: true);
@@ -379,6 +379,7 @@ namespace APITeamsV3.Infrastructure.Services
                     var result = await _mediator.Send(new TransferRecordingsCommand
                     {
                         JobId = hangfireJobId,
+                        ExecutedBy = executedBy,
                         OrganizerUserPrincipalName = string.IsNullOrWhiteSpace(team.Propietario2) ? null : team.Propietario2,
                         TeamGroupId = team.IdTeamsGroup,
                         CourseName = section?.CursoNombre,

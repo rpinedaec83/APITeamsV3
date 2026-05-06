@@ -7,11 +7,13 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
     {
         public int IdSeccion { get; set; }
         public string? JobId { get; set; }
+        public string? ExecutedBy { get; set; }
 
-        public VerifyTeamStateCommand(int idSeccion, string? jobId = null)
+        public VerifyTeamStateCommand(int idSeccion, string? jobId = null, string? executedBy = null)
         {
             IdSeccion = idSeccion;
             JobId = jobId;
+            ExecutedBy = executedBy;
         }
     }
 

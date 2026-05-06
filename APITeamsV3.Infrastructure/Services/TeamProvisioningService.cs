@@ -180,6 +180,26 @@ namespace APITeamsV3.Infrastructure.Services
             return groupId;
         }
 
+        public async Task<string?> RecoverGroupIdByNicknameAsync(string mailNickname)
+        {
+            if (string.IsNullOrWhiteSpace(mailNickname)) return null;
+
+            var graphClient = await _graphFactory.CreateClientAsync();
+            
+            // Try to find a reusable Education Class first (preferred for this app context)
+            var classId = await FindReusableClassIdAsync(graphClient, mailNickname);
+            if (!string.IsNullOrWhiteSpace(classId))
+            {
+                // Resolve the backing GroupId from the class
+                return await EducationClassResolver.ResolveGroupIdFromClassIdAsync(graphClient, classId, mailNickname);
+            }
+
+            // Fallback: search for a standard Group by MailNickname directly
+            var escapedNickname = EscapeODataLiteral(mailNickname);
+            var groups = await graphClient.Groups.GetAsync(q => q.QueryParameters.Filter = $"mailNickname eq '{escapedNickname}'");
+            return groups?.Value?.FirstOrDefault()?.Id;
+        }
+
         public async Task UpdateTeamAsync(Seccion seccion, bool updateMembers = true, bool updateOwners = true, bool updateAgendas = false)
         {
             var existingTeam = await _smartContext.TeamsEquipos

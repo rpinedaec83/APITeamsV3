@@ -44,6 +44,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
         {
             var result = new DiagnosticResultDto { IsValid = true, Summary = "Agenda regenerada." };
             TeamEntity? team = null;
+            Seccion? sectionInfo = null;
 
             try
             {
@@ -65,11 +66,11 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
 
                     result.IsValid = false;
                     result.Summary = "El Team local apunta a un grupo inexistente en Graph. Se marco como inactivo.";
-                    await LogOperativoAsync("Error", "Agenda", team.IdTeamsGroup, result.Summary, request.JobId);
+                    await LogOperativoAsync("Error", "Agenda", sectionInfo?.Codigo ?? team.IdTeamsGroup, result.Summary, request.JobId, request.ExecutedBy);
                     return result;
                 }
 
-                var sectionInfo = await _context.Set<Seccion>()
+                sectionInfo = await _context.Set<Seccion>()
                     .AsNoTracking()
                     .FirstOrDefaultAsync(s => s.IdSeccion == request.IdSeccion, cancellationToken);
 
@@ -83,7 +84,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                 var channelId = await _agendaService.GetPrimaryChannelIdAsync(team.IdTeamsGroup, cancellationToken);
                 if (string.IsNullOrWhiteSpace(channelId))
                 {
-                    await LogOperativoAsync("Error", "Agenda", team.IdTeamsGroup, "No se pudo resolver el canal principal del Team.", request.JobId);
+                    await LogOperativoAsync("Error", "Agenda", sectionInfo.Codigo, "No se pudo resolver el canal principal del Team.", request.JobId, request.ExecutedBy);
                     result.IsValid = false;
                     result.Summary = "No se pudo resolver el canal principal del Team.";
                     return result;
@@ -100,7 +101,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                 var futureSessions = await GetFutureSessionsAsync(request.IdSeccion, courseStartDate, courseEndDate, cancellationToken);
                 if (futureSessions.Count == 0)
                 {
-                    await LogOperativoAsync("Warning", "Agenda", request.IdSeccion.ToString(), "No hay sesiones programadas dentro del rango del curso para generar agendas.", request.JobId);
+                    await LogOperativoAsync("Warning", "Agenda", sectionInfo.Codigo, "No hay sesiones programadas dentro del rango del curso para generar agendas.", request.JobId, request.ExecutedBy);
                     result.IsValid = false;
                     result.Summary = "No hay sesiones programadas dentro del rango del curso para generar agendas.";
                     return result;
@@ -173,9 +174,10 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                         await LogOperativoAsync(
                             "Info",
                             "Agenda",
-                            request.IdSeccion.ToString(),
+                            sectionInfo.Codigo,
                             $"Bloque {FormatHour(scheduleBlock.Key.Inicio)}-{FormatHour(scheduleBlock.Key.Fin)} sin ocurrencias pendientes dentro del rango del curso.",
-                            request.JobId);
+                            request.JobId,
+                            request.ExecutedBy);
                         continue;
                     }
 
@@ -224,9 +226,10 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                         await LogOperativoAsync(
                             "Info",
                             "Agenda",
-                            meeting.EventId,
-                            $"Agenda recurrente creada para bloque {blockLabel} con {blockSessions.Count} sesiones.",
-                            request.JobId);
+                            sectionInfo.Codigo,
+                            $"Nuevo bloque de agenda creado: {blockLabel}.",
+                            request.JobId,
+                            request.ExecutedBy);
                     }
                     catch (Exception ex)
                     {
@@ -235,9 +238,10 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                         await LogOperativoAsync(
                             "Warning",
                             "Agenda",
-                            request.IdSeccion.ToString(),
+                            sectionInfo.Codigo,
                             $"Fallo creando bloque {blockLabel}.",
                             request.JobId,
+                            request.ExecutedBy,
                             ex.Message);
                     }
                 }
@@ -248,11 +252,11 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     result.Summary = failedBlocks.Count > 0
                         ? $"Agenda regenerada: 0 exitosas, {failedBlocks.Count} fallidas. Bloques fallidos: {string.Join(", ", failedBlocks.Distinct(StringComparer.OrdinalIgnoreCase))}."
                         : "No hay ocurrencias pendientes dentro del rango del curso para generar agendas.";
-                    await LogOperativoAsync("Warning", "Agenda", request.IdSeccion.ToString(), result.Summary, request.JobId);
+                    await LogOperativoAsync("Warning", "Agenda", sectionInfo.Codigo, result.Summary, request.JobId, request.ExecutedBy);
                     return result;
                 }
 
-                await DeleteAndDeactivatePreviousAgendasAsync(team.IdTeamsGroup, request.IdSeccion, request.JobId, cancellationToken);
+                await DeleteAndDeactivatePreviousAgendasAsync(team.IdTeamsGroup, request.IdSeccion, request.JobId, request.ExecutedBy, sectionInfo.Codigo, cancellationToken);
 
                 await PersistTeamsHorariosAsync(
                     team.IdTeamsGroup,
@@ -275,8 +279,8 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                 result.Summary = $"Agenda regenerada: {createdMeetings.Count} exitosas, {failedCount} fallidas.{failedDetails}";
 
                 _logger.LogInformation(
-                    "RegenerateAgendaResult SectionId={SectionId} TeamId={TeamId} AgendasRegeneradas={SucceededCount} AgendasFallidas={FailedCount} FailedBlocks={FailedBlocks} SesionesEvaluadas={SessionsCount} TeamsHorariosRows={RowsCount}",
-                    request.IdSeccion,
+                    "RegenerateAgendaResult SectionCode={SectionCode} TeamId={TeamId} AgendasRegeneradas={SucceededCount} AgendasFallidas={FailedCount} FailedBlocks={FailedBlocks} SesionesEvaluadas={SessionsCount} TeamsHorariosRows={RowsCount}",
+                    sectionInfo.Codigo,
                     team.IdTeamsGroup,
                     createdMeetings.Count,
                     failedCount,
@@ -289,7 +293,8 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     "Agenda",
                     team.IdTeamsGroup,
                     $"{result.Summary} Sesiones evaluadas: {futureSessions.Count}. Filas TeamsHorarios: {totalRows}.",
-                    request.JobId);
+                    request.JobId,
+                    request.ExecutedBy);
             }
             catch (Exception ex)
             {
@@ -301,9 +306,10 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     await LogOperativoAsync(
                         "Warning",
                         "Agenda",
-                        team?.IdTeamsGroup ?? request.IdSeccion.ToString(),
+                        sectionInfo?.Codigo ?? team?.IdTeamsGroup ?? request.IdSeccion.ToString(),
                         result.Summary,
                         request.JobId,
+                        request.ExecutedBy,
                         ex.Message);
                     return result;
                 }
@@ -316,9 +322,10 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     await LogOperativoAsync(
                         "Error",
                         "Agenda",
-                        team?.IdTeamsGroup ?? request.IdSeccion.ToString(),
+                        sectionInfo?.Codigo ?? team?.IdTeamsGroup ?? request.IdSeccion.ToString(),
                         result.Summary,
                         request.JobId,
+                        request.ExecutedBy,
                         ex.Message);
                     return result;
                 }
@@ -331,9 +338,10 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     await LogOperativoAsync(
                         "Error",
                         "Agenda",
-                        team?.IdTeamsGroup ?? request.IdSeccion.ToString(),
+                        sectionInfo?.Codigo ?? team?.IdTeamsGroup ?? request.IdSeccion.ToString(),
                         result.Summary,
                         request.JobId,
+                        request.ExecutedBy,
                         ex.Message);
                     return result;
                 }
@@ -341,7 +349,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                 _logger.LogError(ex, "Error regenerating agenda for section {SectionId}", request.IdSeccion);
                 result.IsValid = false;
                 result.Summary = "Error tecnico al regenerar agenda.";
-                await LogOperativoAsync("Error", "Agenda", request.IdSeccion.ToString(), ex.Message, request.JobId, ex.StackTrace ?? string.Empty);
+                await LogOperativoAsync("Error", "Agenda", sectionInfo?.Codigo ?? team?.IdTeamsGroup ?? request.IdSeccion.ToString(), ex.Message, request.JobId, request.ExecutedBy, ex.StackTrace ?? string.Empty);
             }
 
             return result;
@@ -396,37 +404,25 @@ WHERE TU.IdTeams = {0}
                 .ToList();
         }
 
-        private async Task DeleteAndDeactivatePreviousAgendasAsync(string teamId, int sectionId, string? jobId, CancellationToken cancellationToken)
+        private async Task DeleteAndDeactivatePreviousAgendasAsync(string teamId, int sectionId, string? jobId, string? executedBy, string sectionCode, CancellationToken cancellationToken)
         {
-            const string getEventsSql = @"
-SELECT DISTINCT
-       TH.IdEvento
-FROM TeamsHorarios TH WITH (NOLOCK)
-WHERE TH.IdTeams = {0}
-  AND TH.IdCurso = {1}
-  AND TH.Estado = 'A'
-  AND ISNULL(TH.IdEvento, '') <> '';";
+            const string selectSql = @"
+SELECT DISTINCT IdEvento FROM TeamsHorarios WITH (NOLOCK)
+WHERE IdTeams = {0} AND IdCurso = {1} AND Estado = 'A' AND ISNULL(IdEvento, '') <> ''";
 
-            var previousEvents = await _context.Database
-                .SqlQueryRaw<EventIdRow>(getEventsSql, teamId, sectionId)
-                .ToListAsync(cancellationToken);
+            var events = await _context.Database.SqlQueryRaw<EventIdRow>(selectSql, teamId, sectionId).ToListAsync(cancellationToken);
 
-            foreach (var eventRow in previousEvents)
+            foreach (var eventRow in events)
             {
-                if (string.IsNullOrWhiteSpace(eventRow.IdEvento))
-                {
-                    continue;
-                }
-
                 try
                 {
                     await _agendaService.DeleteMeetingAsync(teamId, eventRow.IdEvento);
-                    await LogOperativoAsync("Info", "Agenda", eventRow.IdEvento, "Reunion anterior eliminada en Graph.", jobId);
+                    await LogOperativoAsync("Info", "Agenda", sectionCode, $"Reunion anterior eliminada en Graph (Evento: {eventRow.IdEvento}).", jobId, executedBy);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Failed to delete previous Graph meeting {EventId}", eventRow.IdEvento);
-                    await LogOperativoAsync("Warning", "Agenda", eventRow.IdEvento, "No se pudo eliminar reunion previa en Graph. Se desactiva en BD.", jobId, ex.Message);
+                    _logger.LogWarning(ex, "Failed to delete meeting {EventId} in Graph.", eventRow.IdEvento);
+                    await LogOperativoAsync("Warning", "Agenda", sectionCode, $"No se pudo eliminar reunion previa en Graph (Evento: {eventRow.IdEvento}). Se desactiva en BD.", jobId, executedBy, ex.Message);
                 }
             }
 
@@ -504,28 +500,23 @@ VALUES
                         ? session.CorreoFacilitador.Trim()
                         : section.EmailFacilitador?.Trim();
 
-                    var participants = ResolveParticipants(students, effectiveTeacherCode, effectiveTeacherEmail);
-
-                    foreach (var participant in participants)
-                    {
-                        await _context.Database.ExecuteSqlRawAsync(
-                            insertSql,
-                            teamId,
-                            meeting.EventId,
-                            session.IdHorario,
-                            sectionId,
-                            session.Numero,
-                            session.CodigoSesion,
-                            session.Fecha,
-                            session.Inicio,
-                            session.Fin,
-                            participant.CodigoAlumno,
-                            participant.CorreoAlumno,
-                            effectiveTeacherCode,
-                            effectiveTeacherEmail ?? string.Empty,
-                            meeting.JoinUrl,
-                            _currentUserService.UserIdInt ?? 99);
-                    }
+                    await _context.Database.ExecuteSqlRawAsync(
+                        insertSql,
+                        teamId,
+                        meeting.EventId,
+                        session.IdHorario,
+                        sectionId,
+                        session.Numero,
+                        session.CodigoSesion,
+                        session.Fecha,
+                        session.Inicio,
+                        session.Fin,
+                        "SECTION", // CodigoAlumno: Grabar solo bloque
+                        "N/A",     // CorreoAlumno: Grabar solo bloque
+                        effectiveTeacherCode,
+                        effectiveTeacherEmail ?? string.Empty,
+                        meeting.JoinUrl,
+                        _currentUserService.UserIdInt ?? 99);
                 }
             }
         }
@@ -553,7 +544,7 @@ VALUES
 
         private async Task UpdateSeccionHorarioLinkAsync(int sectionId, List<CreatedMeetingBlock> meetings, CancellationToken cancellationToken)
         {
-            if (meetings.Count == 1 && !string.IsNullOrWhiteSpace(meetings[0].JoinUrl))
+            if (meetings.Count > 0 && !string.IsNullOrWhiteSpace(meetings[0].JoinUrl))
             {
                 const string updateSingleSql = @"
 UPDATE SeccionHorario
@@ -681,7 +672,7 @@ WHERE IdSeccion = {0};";
                    message.Contains("invalid_grant");
         }
 
-        private async Task LogOperativoAsync(string type, string target, string reference, string msg, string? jobId, string context = "")
+        private async Task LogOperativoAsync(string type, string target, string reference, string msg, string? jobId, string? executedBy = null, string context = "")
         {
             try
             {
@@ -693,6 +684,7 @@ WHERE IdSeccion = {0};";
                     Mensaje = msg,
                     ContextoTecnico = context ?? string.Empty,
                     JobId = jobId,
+                    Usuario = executedBy,
                     Severidad = type == "Error" ? "High" : "Low",
                     Fecha = DateTime.UtcNow
                 });

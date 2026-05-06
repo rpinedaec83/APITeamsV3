@@ -76,6 +76,10 @@ if ($state -ne "Stopped") {
     Stop-WebAppPool -Name $appPool
     Start-Sleep -Seconds 3
 }
+
+# Asegurar que ningun proceso w3wp residual este bloqueando archivos
+Get-Process w3wp -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
 Write-Host "  Pool '$appPool' detenido." -ForegroundColor Green
 
 # Copiar dist al directorio de IIS

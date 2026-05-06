@@ -62,6 +62,7 @@ interface TeamsLogOperativo {
     mensaje: string;
     severidad: string;
     jobId: string;
+    usuario: string;
     fecha: string;
     contextoTecnico?: string;
 }
@@ -474,7 +475,22 @@ const LogsPage: React.FC = () => {
                     <Card key={`${log.id}-${log.fecha}`} className={styles.logCard} style={{ borderLeftColor: getTipoColor(log.tipo) }}>
                         <CardHeader
                             image={getTipoIcon(log.tipo)}
-                            header={<Text weight="bold">{log.entidadAfectada} - {log.referencia}</Text>}
+                            header={
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                    {log.companyKey && (
+                                        <Text size={200} weight="bold" style={{ color: tokens.colorBrandForeground1, textTransform: 'uppercase', letterSpacing: '0.02em', marginBottom: '2px' }}>
+                                            {log.companyKey}
+                                        </Text>
+                                    )}
+                                    <Text weight="bold">{log.entidadAfectada} - {log.referencia}</Text>
+                                    {log.usuario && (
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '2px' }}>
+                                            <PersonRegular fontSize={12} style={{ color: tokens.colorNeutralForeground3 }} />
+                                            <Text size={100} style={{ color: tokens.colorNeutralForeground3 }}>{log.usuario}</Text>
+                                        </div>
+                                    )}
+                                </div>
+                            }
                             description={<Caption1>{formatTenantDateTime(log.fecha, tenantTimeZone)}</Caption1>}
                             action={
                                 <Badge appearance="outline" color={log.severidad === 'High' ? 'danger' : 'informative'}>
@@ -534,9 +550,10 @@ const LogsPage: React.FC = () => {
                 <Table>
                     <TableHeader>
                         <TableRow>
-                            <TableHeaderCell>Fecha / Job</TableHeaderCell>
+                            <TableHeaderCell>Fecha / Job / Empresa</TableHeaderCell>
                             <TableHeaderCell>Tipo</TableHeaderCell>
                             <TableHeaderCell>Referencia</TableHeaderCell>
+                            <TableHeaderCell>Usuario</TableHeaderCell>
                             <TableHeaderCell>Mensaje / Contexto</TableHeaderCell>
                             <TableHeaderCell>Acciones</TableHeaderCell>
                         </TableRow>
@@ -546,7 +563,14 @@ const LogsPage: React.FC = () => {
                             <TableRow key={`${log.id}-${log.fecha}-tech`}>
                                 <TableCell>
                                     <div style={{ fontWeight: 600 }}>{formatTenantDateTime(log.fecha, tenantTimeZone)}</div>
-                                    <div style={{ fontFamily: 'monospace', fontSize: '11px', color: tokens.colorNeutralForeground3 }}>{log.jobId || 'N/A'}</div>
+                                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '2px' }}>
+                                        {log.companyKey && (
+                                            <Badge size="small" appearance="filled" style={{ backgroundColor: tokens.colorBrandBackground2, color: tokens.colorBrandForeground2, fontWeight: 'bold' }}>
+                                                {log.companyKey}
+                                            </Badge>
+                                        )}
+                                        <div style={{ fontFamily: 'monospace', fontSize: '11px', color: tokens.colorNeutralForeground3 }}>{log.jobId || 'N/A'}</div>
+                                    </div>
                                 </TableCell>
                                 <TableCell>
                                     <Badge appearance="filled" color={
@@ -560,6 +584,9 @@ const LogsPage: React.FC = () => {
                                 <TableCell>
                                     <div>{log.entidadAfectada}</div>
                                     <code style={{ fontSize: '10px' }}>{log.referencia}</code>
+                                </TableCell>
+                                <TableCell>
+                                    <Text size={200}>{log.usuario || 'Sistema'}</Text>
                                 </TableCell>
                                 <TableCell>
                                     <TextBlock data={log.mensaje} />
@@ -584,6 +611,7 @@ const LogsPage: React.FC = () => {
                                                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                                                         <div><Text block weight="semibold" size={200}>Referencia:</Text><Text block size={200}>{log.referencia}</Text></div>
                                                         <div><Text block weight="semibold" size={200}>JobId:</Text><Text block size={200}>{log.jobId || 'N/A'}</Text></div>
+                                                        <div><Text block weight="semibold" size={200}>Ejecutado por:</Text><Text block size={200}>{log.usuario || 'Sistema'}</Text></div>
                                                     </div>
                                                 </div>
                                                 <DialogActions>

@@ -377,13 +377,24 @@ const OperationsPage: React.FC = () => {
         setError('');
         setSeccionData(null);
         try {
-            const response = await apiClient.get(`/sections/search?code=${seccionCodigo}`);
+            const response = await apiClient.get(`/sections/search?code=${seccionCodigo}${isGestor ? '&skipSharePoint=true' : ''}`);
             setSeccionData(response.data);
             if (!response.data.esTeams) {
-                setError(response.data.ineligibilityReason || 'Esta sección no es elegible para aprovisionamiento de Teams.');
+                await showWarning(
+                    response.data.ineligibilityReason || 'Esta sección no cumple con los criterios para aprovisionamiento de Teams.',
+                    'Sección no elegible'
+                );
+                setError(''); // Clear banner error if handled by SweetAlert
             }
         } catch (err: any) {
-            setError(err.message || 'Error al buscar sección');
+            if (err.response?.status === 404) {
+                await showWarning(
+                    `El código ${seccionCodigo} no existe en la base de datos de Académico o no ha sido procesado aún.`,
+                    'Código no encontrado'
+                );
+            } else {
+                setError(err.message || 'Error al buscar sección');
+            }
         } finally {
             setLoading(false);
         }
@@ -397,17 +408,29 @@ const OperationsPage: React.FC = () => {
         try {
             const response = await apiClient.get(`/students/search?code=${alumnoCodigo}`);
             setAlumnoData(response.data);
-        } catch (err: unknown) {
-            const errorMessage = err instanceof Error ? err.message : 'Error desconocido al buscar alumno';
-            setError(errorMessage);
+        } catch (err: any) {
+            if (err.response?.status === 404) {
+                await showWarning(`No se encontró información para el código de alumno: ${alumnoCodigo}`, 'Alumno no encontrado');
+            } else {
+                const errorMessage = err.message || 'Error desconocido al buscar alumno';
+                setError(errorMessage);
+            }
         } finally {
             setLoading(false);
         }
     };
 
     const getCompanyKey = () => window.location.hostname.includes('zegel') ? 'zegel' : 'idat';
-    const roles = (accounts[0]?.idTokenClaims?.roles as string[]) || [];
+    const roles = useMemo(() => {
+        const claims = accounts[0]?.idTokenClaims as any;
+        if (!claims) return [];
+        const rawRoles = (claims.roles || claims.role || claims.groups || []) as string | string[];
+        const rolesArray = Array.isArray(rawRoles) ? rawRoles : [rawRoles];
+        return rolesArray.map(r => r.toString().toUpperCase().trim());
+    }, [accounts]);
+
     const canUseAdminItTeamActions = roles.includes('ADMIN') || roles.includes('IT');
+    const isGestor = roles.some(r => r.includes('GESTION') || r.includes('GESTOR'));
 
     const ensureCanUseAdminItTeamActions = async () => {
         if (canUseAdminItTeamActions) {
@@ -838,6 +861,7 @@ const OperationsPage: React.FC = () => {
                                     value={seccionData.linkGrabacion}
                                     sharePointUrl={seccionData.linkSharePoint}
                                     onCopy={handleCopyLinkGrabacion}
+                                    hideSharePoint={isGestor}
                                 />
                             </div>
                         )}
@@ -1148,8 +1172,9 @@ const CopyDetailItem: React.FC<{
     label: string;
     value?: string | null;
     sharePointUrl?: string | null;
-    onCopy: (value?: string | null, source?: 'class' | 'sharepoint') => void
-}> = ({ label, value, sharePointUrl, onCopy }) => {
+    onCopy: (value?: string | null, source?: 'class' | 'sharepoint') => void;
+    hideSharePoint?: boolean;
+}> = ({ label, value, sharePointUrl, onCopy, hideSharePoint }) => {
     const styles = useStyles();
     if (!value || value === 'N/A') return null;
 
@@ -1165,15 +1190,17 @@ const CopyDetailItem: React.FC<{
                 >
                     Copiar link
                 </Button>
-                <Button
-                    appearance="secondary"
-                    icon={<ArrowUploadRegular />}
-                    onClick={() => void onCopy(sharePointUrl, 'sharepoint')}
-                    disabled={!sharePointUrl}
-                    style={{ width: 'fit-content' }}
-                >
-                    Ir a SharePoint
-                </Button>
+                {!hideSharePoint && (
+                    <Button
+                        appearance="secondary"
+                        icon={<ArrowUploadRegular />}
+                        onClick={() => void onCopy(sharePointUrl, 'sharepoint')}
+                        disabled={!sharePointUrl}
+                        style={{ width: 'fit-content' }}
+                    >
+                        Ir a SharePoint
+                    </Button>
+                )}
             </div>
         </div>
     );

@@ -63,7 +63,8 @@ namespace APITeamsV3.Infrastructure.MultiTenancy
 
                 bool isIt = roleClaims.Contains("IT");
                 bool isAdmin = roleClaims.Contains("ADMIN");
-                bool isPrivileged = isIt || isAdmin;
+                bool isAll = roleClaims.Contains("ALL");
+                bool isPrivileged = isIt || isAdmin || isAll;
 
                 // Check Global Maintenance
                 if (isGlobalMaintenance && !isPrivileged)
@@ -103,6 +104,16 @@ namespace APITeamsV3.Infrastructure.MultiTenancy
                     }
                 }
                 // GESTION role follows the host-based resolution naturally
+
+                // Global authorization check: block users without any recognized role
+                var authorizedRoles = new[] { "ADMIN", "IT", "GESTION", "ALL" };
+                if (!roleClaims.Any(r => authorizedRoles.Contains(r)))
+                {
+                    _logger.LogWarning($"User {email} authenticated but has no authorized roles for this application.");
+                    context.Response.StatusCode = 403;
+                    await context.Response.WriteAsync("Forbidden: Your account does not have sufficient roles to access this application.");
+                    return;
+                }
             }
             else if (isGlobalMaintenance || (config != null && config.IsMaintenanceMode))
             {

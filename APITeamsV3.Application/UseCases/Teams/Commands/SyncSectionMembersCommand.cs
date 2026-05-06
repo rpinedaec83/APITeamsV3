@@ -2,7 +2,7 @@ using MediatR;
 
 namespace APITeamsV3.Application.UseCases.Teams.Commands
 {
-    public record SyncSectionMembersCommand(int IdSeccion) : IRequest<SyncSectionMembersResult>;
+    public record SyncSectionMembersCommand(int IdSeccion, string? ExecutedBy = null) : IRequest<SyncSectionMembersResult>;
 
     public class SyncSectionMembersResult
     {

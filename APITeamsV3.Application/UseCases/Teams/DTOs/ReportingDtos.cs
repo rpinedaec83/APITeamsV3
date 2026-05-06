@@ -127,6 +127,7 @@ namespace APITeamsV3.Application.UseCases.Teams.DTOs
         public string ContextoTecnico { get; set; } = string.Empty;
         public string Severidad { get; set; } = string.Empty;
         public string JobId { get; set; } = string.Empty;
+        public string Usuario { get; set; } = string.Empty;
         public DateTime Fecha { get; set; }
     }
 

@@ -172,8 +172,14 @@ const MainLayout: React.FC = () => {
     const companyKey = useCompanyKey();
     const logoSrc = brandLogos[companyKey?.toLowerCase()];
 
-    const idTokenClaims = account?.idTokenClaims as { roles?: string[] } | undefined;
-    const roles = idTokenClaims?.roles ?? [];
+    const roles = React.useMemo(() => {
+        const claims = account?.idTokenClaims as any;
+        if (!claims) return [];
+        const rawRoles = (claims.roles || claims.role || claims.groups || []) as string | string[];
+        const rolesArray = Array.isArray(rawRoles) ? rawRoles : [rawRoles];
+        return rolesArray.map(r => r.toString().toUpperCase().trim());
+    }, [account]);
+
     const canViewHangfireHealth = roles.includes('IT') || roles.includes('ADMIN');
 
     const [hangfireHealth, setHangfireHealth] = useState<HangfireStorageHealth[]>([]);

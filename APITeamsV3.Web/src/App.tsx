@@ -31,7 +31,18 @@ interface AppProps {
 function AuthenticatedApp() {
   const { instance, accounts, inProgress } = useMsal();
   const account = accounts[0];
-  const roles = (account?.idTokenClaims?.roles as string[]) || [];
+  const roles = React.useMemo(() => {
+    const claims = account?.idTokenClaims as any;
+    if (!claims) return [];
+    
+    // Look for roles in various possible claims: 'roles', 'role', 'groups'
+    const rawRoles = (claims.roles || claims.role || claims.groups || []) as string | string[];
+    const rolesArray = Array.isArray(rawRoles) ? rawRoles : [rawRoles];
+    const normalizedRoles = rolesArray.map(r => r.toString().toUpperCase().trim());
+    
+    console.log("[Auth-Debug] Roles detectados en el token:", normalizedRoles);
+    return normalizedRoles;
+  }, [account]);
   const loginRedirectPendingRef = useRef(false);
   const [maintenanceMessage, setMaintenanceMessage] = React.useState<string | null>(null);
 
@@ -44,22 +55,31 @@ function AuthenticatedApp() {
   useEffect(() => {
     const handleInteractiveAuthRequired = () => {
       if (window.self !== window.top) {
+        console.warn("Auth interaction required event ignored: not in top-level window.");
         return;
       }
 
       if (inProgress !== InteractionStatus.None || loginRedirectPendingRef.current) {
+        console.log(`Auth interaction skipped: status=${inProgress}, pending=${loginRedirectPendingRef.current}`);
         return;
       }
 
+      console.warn(`Starting interactive authentication for account: ${account?.username || 'unknown'}`);
       loginRedirectPendingRef.current = true;
-      instance.loginRedirect(getLoginRequest()).catch((error) => {
+      
+      const request = {
+        ...getLoginRequest(),
+        account: account || undefined
+      };
+
+      instance.acquireTokenRedirect(request).catch((error) => {
         loginRedirectPendingRef.current = false;
         if (error instanceof BrowserAuthError && error.errorCode === "interaction_in_progress") {
           console.warn("Login skipped: interaction already in progress.");
           return;
         }
 
-        console.error("Login redirect failed:", error);
+        console.error("Interactive token acquisition failed:", error);
       });
     };
 
@@ -81,8 +101,13 @@ function AuthenticatedApp() {
     };
   }, []);
 
-  // If user has no roles, show the restricted access page (no sidebar)
-  if (roles.length === 0) {
+  const AUTHORIZED_ROLES = ['ADMIN', 'IT', 'GESTION', 'ALL', 'GESTOR'];
+  const hasAuthorizedRole = roles.length > 0 && AUTHORIZED_ROLES.some(authRole => 
+    roles.some(userRole => userRole.includes(authRole))
+  );
+
+  // If user has no authorized roles, show the restricted access page (no sidebar)
+  if (!hasAuthorizedRole) {
     return (
       <Router>
         <Routes>
@@ -100,8 +125,11 @@ function AuthenticatedApp() {
     <Router>
       <Routes>
         <Route element={<MainLayout />}>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/operations" element={<OperationsPage />} />
+          {/* Main Dashboard - Protected by any of the authorized roles */}
+          <Route element={<RequiredRoleRoute allowedRoles={AUTHORIZED_ROLES} />}>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/operations" element={<OperationsPage />} />
+          </Route>
 
           {/* Admin and IT Protected Routes */}
           <Route element={<RequiredRoleRoute allowedRoles={['ADMIN', 'IT']} />}>

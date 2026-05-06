@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using System.Text.Json;
+using System.Security.Claims;
 
 namespace APITeamsV3.API.Controllers
 {
@@ -66,6 +67,32 @@ namespace APITeamsV3.API.Controllers
                 await using var connection = new SqlConnection(sqlConnectionString);
                 await connection.OpenAsync(HttpContext.RequestAborted);
                 var snapshots = await QueryRecentHangfireJobsAsync(connection, pageSize, HttpContext.RequestAborted);
+                
+                // Enriquecer con el código de sección
+                var sectionIds = snapshots.Where(s => s.IdSeccion.HasValue).Select(s => s.IdSeccion!.Value).Distinct().ToList();
+                if (sectionIds.Any())
+                {
+                    var sectionCodes = await _smartDbContext.SeccionTable
+                        .Where(s => sectionIds.Contains(s.IdSeccion))
+                        .Select(s => new { s.IdSeccion, s.Codigo })
+                        .ToDictionaryAsync(s => s.IdSeccion, s => s.Codigo, HttpContext.RequestAborted);
+
+                    foreach (var snapshot in snapshots)
+                    {
+                        snapshot.CompanyKey = tenant.CompanyKey;
+                        if (snapshot.IdSeccion.HasValue && sectionCodes.TryGetValue(snapshot.IdSeccion.Value, out var code))
+                        {
+                            snapshot.SectionCode = code;
+                        }
+                    }
+                }
+                else
+                {
+                    foreach (var snapshot in snapshots)
+                    {
+                        snapshot.CompanyKey = tenant.CompanyKey;
+                    }
+                }
 
                 return Ok(snapshots);
             }
@@ -147,9 +174,11 @@ namespace APITeamsV3.API.Controllers
                 return Ok(new HangfireJobSnapshotDto
                 {
                     JobId = reader["JobId"]?.ToString() ?? jobId,
+                    CompanyKey = tenant.CompanyKey,
                     State = reader["StateName"]?.ToString() ?? "Unknown",
                     Method = ParseHangfireMethod(reader["InvocationData"]?.ToString()),
                     IdSeccion = idSeccion,
+                    SectionCode = idSeccion.HasValue ? await _smartDbContext.SeccionTable.Where(s => s.IdSeccion == idSeccion.Value).Select(s => s.Codigo).FirstOrDefaultAsync(HttpContext.RequestAborted) : null,
                     Arguments = args,
                     Error = ParseHangfireError(reader["Reason"] as string, reader["Data"] as string),
                     Timestamp = reader["TimestampUtc"] is DateTime dt ? dt : DateTime.UtcNow
@@ -172,6 +201,7 @@ namespace APITeamsV3.API.Controllers
         [HttpPost("{jobId}/requeue")]
         public async Task<ActionResult<object>> RequeueJob(string jobId)
         {
+            var executedBy = GetManualExecutorName();
             var tenant = _tenantProvider.GetCurrentTenant();
             if (string.IsNullOrWhiteSpace(tenant.CompanyKey))
             {
@@ -238,7 +268,7 @@ namespace APITeamsV3.API.Controllers
                 return Ok(new
                 {
                     JobId = jobId,
-                    Message = $"Job {jobId} re-encolado correctamente."
+                    Message = $"Job {jobId} re-encolado correctamente por {executedBy}."
                 });
             }
             catch (FormatException)
@@ -367,6 +397,7 @@ namespace APITeamsV3.API.Controllers
                     WITH RecurringHashes AS (
                         SELECT
                             s.Value AS RecurringJobId,
+                            s.Score AS SetScore,
                             MAX(CASE WHEN h.Field = 'Cron' THEN h.Value END) AS Cron,
                             MAX(CASE WHEN h.Field = 'Queue' THEN h.Value END) AS Queue,
                             MAX(CASE WHEN h.Field = 'Job' THEN h.Value END) AS JobPayload,
@@ -382,7 +413,7 @@ namespace APITeamsV3.API.Controllers
                         INNER JOIN [HangFire].[Hash] AS h
                             ON h.[Key] = CONCAT('recurring-job:', s.Value)
                         WHERE s.[Key] = 'recurring-jobs'
-                        GROUP BY s.Value
+                        GROUP BY s.Value, s.Score
                     )
                     SELECT
                         rh.RecurringJobId,
@@ -397,11 +428,16 @@ namespace APITeamsV3.API.Controllers
                         rh.LastJobState,
                         rh.ErrorText,
                         rh.Removed,
+                        rh.SetScore,
+                        js.RealLastJobState,
+                        js.RealLastExecution,
                         js.Reason AS LastJobReason,
                         js.Data AS LastJobStateData
                     FROM RecurringHashes AS rh
                     OUTER APPLY (
                         SELECT TOP (1)
+                            st.Name AS RealLastJobState,
+                            st.CreatedAt AS RealLastExecution,
                             st.Reason,
                             st.Data
                         FROM [HangFire].[Job] AS j
@@ -426,20 +462,36 @@ namespace APITeamsV3.API.Controllers
                     }
 
                     var error = reader["ErrorText"]?.ToString() ?? string.Empty;
+                    var lastExecutionFromHash = ParseHangfireDateTime(reader["LastExecution"]?.ToString());
+                    var realLastExecution = reader["RealLastExecution"] is DateTime dtExecution ? dtExecution : (DateTime?)null;
+                    
+                    var lastJobStateFromHash = reader["LastJobState"]?.ToString() ?? string.Empty;
+                    var realLastJobState = reader["RealLastJobState"]?.ToString() ?? string.Empty;
+                    var effectiveState = !string.IsNullOrWhiteSpace(realLastJobState) ? realLastJobState : lastJobStateFromHash;
+
+                    var nextExecutionFromHash = ParseHangfireDateTime(reader["NextExecution"]?.ToString());
+                    var scoreValue = reader["SetScore"] != DBNull.Value ? Convert.ToDouble(reader["SetScore"]) : 0;
+                    var nextExecutionFromScore = scoreValue > 0 
+                        ? (scoreValue > 2000000000 ? DateTimeOffset.FromUnixTimeMilliseconds((long)scoreValue).DateTime : DateTimeOffset.FromUnixTimeSeconds((long)scoreValue).DateTime)
+                        : (DateTime?)null;
+
                     recurringJobs.Add(new HangfireRecurringJobSnapshotDto
                     {
                         Id = reader["RecurringJobId"]?.ToString() ?? string.Empty,
+                        CompanyKey = tenant.CompanyKey,
                         Cron = reader["Cron"]?.ToString() ?? string.Empty,
                         Queue = reader["Queue"]?.ToString() ?? "default",
                         Method = ParseHangfireMethod(jobPayload),
                         IdSeccion = idSeccion,
+                        SectionCode = idSeccion.HasValue ? await _smartDbContext.SeccionTable.Where(s => s.IdSeccion == idSeccion.Value).Select(s => s.Codigo).FirstOrDefaultAsync(HttpContext.RequestAborted) : null,
                         CreatedAt = ParseHangfireDateTime(reader["CreatedAt"]?.ToString()),
-                        LastExecution = ParseHangfireDateTime(reader["LastExecution"]?.ToString()),
-                        NextExecution = ParseHangfireDateTime(reader["NextExecution"]?.ToString()),
+                        LastExecution = realLastExecution ?? lastExecutionFromHash,
+                        NextExecution = nextExecutionFromScore ?? nextExecutionFromHash,
                         LastJobId = reader["LastJobId"]?.ToString() ?? string.Empty,
-                        LastJobState = reader["LastJobState"]?.ToString() ?? string.Empty,
+                        LastJobState = effectiveState,
                         LastResult = string.IsNullOrWhiteSpace(error)
-                            ? ParseHangfireError(reader["LastJobReason"] as string, reader["LastJobStateData"] as string) ?? string.Empty
+                            ? ParseHangfireError(reader["LastJobReason"] as string, reader["LastJobStateData"] as string) 
+                              ?? (effectiveState == "Succeeded" ? "Ejecucion completada correctamente." : string.Empty)
                             : error,
                         TimeZoneId = reader["TimeZoneId"]?.ToString() ?? string.Empty,
                         Error = error,
@@ -468,11 +520,12 @@ namespace APITeamsV3.API.Controllers
                 return BadRequest(new { Message = "No se pudo resolver el tenant actual." });
             }
 
-            var jobId = await _jobService.EnqueuePilotRecordingTransfers(tenant.CompanyKey);
+            var executedBy = GetManualExecutorName();
+            var jobId = await _jobService.EnqueuePilotRecordingTransfers(tenant.CompanyKey, executedBy);
             return Ok(new
             {
                 JobId = jobId,
-                Message = $"Recording transfer piloto encolado para tenant {tenant.CompanyKey}."
+                Message = $"Recording transfer piloto encolado para tenant {tenant.CompanyKey} por {executedBy}."
             });
         }
 
@@ -822,14 +875,23 @@ namespace APITeamsV3.API.Controllers
                     idSeccion = parsedSection;
                 }
 
+                var method = ParseHangfireMethod(invocationData);
+                var error = ParseHangfireError(reason, stateData);
+                if (string.IsNullOrWhiteSpace(error) && state == "Succeeded")
+                {
+                    error = method == "RunPilotRecordingTransfers" 
+                        ? $"Transferencia piloto completada para {args.FirstOrDefault() ?? "el tenant"}." 
+                        : "Ejecucion completada correctamente.";
+                }
+
                 snapshots.Add(new HangfireJobSnapshotDto
                 {
                     JobId = jobId,
                     State = state,
-                    Method = ParseHangfireMethod(invocationData),
+                    Method = method,
                     IdSeccion = idSeccion,
                     Arguments = args,
-                    Error = ParseHangfireError(reason, stateData),
+                    Error = error,
                     Timestamp = timestamp
                 });
             }
@@ -889,6 +951,7 @@ namespace APITeamsV3.API.Controllers
                         JsonValueKind.Null => string.Empty,
                         _ => element.ToString()
                     })
+                    .Where(s => !string.IsNullOrWhiteSpace(s))
                     .ToArray();
             }
             catch
@@ -1040,6 +1103,31 @@ namespace APITeamsV3.API.Controllers
                 return parsed;
             }
 
+            if (long.TryParse(value, out var ticks))
+            {
+                try
+                {
+                    // Case 1: Standard Unix milliseconds (e.g. 1713435120000)
+                    if (ticks > 1000000000000L && ticks < 3000000000000L)
+                    {
+                        return DateTimeOffset.FromUnixTimeMilliseconds(ticks).DateTime;
+                    }
+                    // Case 2: Standard Unix seconds (e.g. 1713435120)
+                    if (ticks > 1000000000L && ticks < 3000000000L)
+                    {
+                        return DateTimeOffset.FromUnixTimeSeconds(ticks).DateTime;
+                    }
+                    // Case 3: .NET Ticks (very large number)
+                    if (ticks > 600000000000000000L)
+                    {
+                        return new DateTime(ticks, DateTimeKind.Utc);
+                    }
+                }
+                catch
+                {
+                }
+            }
+
             return null;
         }
 
@@ -1068,57 +1156,65 @@ namespace APITeamsV3.API.Controllers
         [HttpPost("generate-schedule/{idSeccion}")]
         public async Task<ActionResult<string>> GenerateSchedule(int idSeccion)
         {
-            var jobId = await _jobService.EnqueueGenerateSchedule(idSeccion);
-            return Ok(new { JobId = jobId, Message = "Generate Schedule Job Enqueued" });
+            var executedBy = GetManualExecutorName();
+            var jobId = await _jobService.EnqueueGenerateSchedule(idSeccion, executedBy);
+            return Ok(new { JobId = jobId, Message = $"Generate Schedule Job Enqueued by {executedBy}" });
         }
 
         [HttpPost("sync-roster/{idSeccion}")]
         public async Task<ActionResult<string>> SyncRoster(int idSeccion, [FromQuery] bool fullSync = true)
         {
-            var jobId = await _jobService.EnqueueSyncRoster(idSeccion, fullSync);
-        return Ok(new { JobId = jobId, Message = "Sincronizacion Operativa Completa encolada" });
+            var executedBy = GetManualExecutorName();
+            var jobId = await _jobService.EnqueueSyncRoster(idSeccion, fullSync, executedBy);
+            return Ok(new { JobId = jobId, Message = $"Sincronizacion Operativa Completa encolada por {executedBy}" });
         }
 
         [HttpPost("sync-dates/{idSeccion}")]
         public async Task<ActionResult<string>> SyncDates(int idSeccion)
         {
-            var jobId = await _jobService.EnqueueSyncDates(idSeccion);
-            return Ok(new { JobId = jobId, Message = "Sync Dates Job Enqueued" });
+            var executedBy = GetManualExecutorName();
+            var jobId = await _jobService.EnqueueSyncDates(idSeccion, executedBy);
+            return Ok(new { JobId = jobId, Message = $"Sync Dates Job Enqueued by {executedBy}" });
         }
 
         [HttpPost("sync-facilitator/{idSeccion}")]
         public async Task<ActionResult<string>> SyncFacilitator(int idSeccion)
         {
-            var jobId = await _jobService.EnqueueSyncFacilitator(idSeccion);
-            return Ok(new { JobId = jobId, Message = "Sync Facilitator Job Enqueued" });
+            var executedBy = GetManualExecutorName();
+            var jobId = await _jobService.EnqueueSyncFacilitator(idSeccion, executedBy);
+            return Ok(new { JobId = jobId, Message = $"Sync Facilitator Job Enqueued by {executedBy}" });
         }
 
         [HttpPost("update-join-url")]
         public async Task<ActionResult<string>> UpdateJoinUrl([FromBody] UpdateJoinUrlRequest request)
         {
-            var jobId = await _jobService.EnqueueUpdateJoinUrl(request.IdSeccion, request.JoinUrl, request.IdEvento);
-            return Ok(new { JobId = jobId, Message = "Update Join URL Job Enqueued" });
+            var executedBy = GetManualExecutorName();
+            var jobId = await _jobService.EnqueueUpdateJoinUrl(request.IdSeccion, request.JoinUrl, request.IdEvento, executedBy);
+            return Ok(new { JobId = jobId, Message = $"Update Join URL Job Enqueued by {executedBy}" });
         }
 
         [HttpPost("sync-missing-students/{idSeccion}")]
         public async Task<ActionResult<string>> SyncMissingStudents(int idSeccion)
         {
-            var jobId = await _jobService.EnqueueSyncMissingStudents(idSeccion);
-            return Ok(new { JobId = jobId, Message = "Sync Missing Students Job Enqueued" });
+            var executedBy = GetManualExecutorName();
+            var jobId = await _jobService.EnqueueSyncMissingStudents(idSeccion, executedBy);
+            return Ok(new { JobId = jobId, Message = $"Sync Missing Students Job Enqueued by {executedBy}" });
         }
 
         [HttpPost("sync-obsolete-students/{idSeccion}")]
         public async Task<ActionResult<string>> SyncObsoleteStudents(int idSeccion)
         {
-            var jobId = await _jobService.EnqueueSyncObsoleteStudents(idSeccion);
-            return Ok(new { JobId = jobId, Message = "Sync Obsolete Students Job Enqueued" });
+            var executedBy = GetManualExecutorName();
+            var jobId = await _jobService.EnqueueSyncObsoleteStudents(idSeccion, executedBy);
+            return Ok(new { JobId = jobId, Message = $"Sync Obsolete Students Job Enqueued by {executedBy}" });
         }
 
         [HttpPost("sync-renamed-teams/{idSeccion}")]
         public async Task<ActionResult<string>> SyncRenamedTeams(int idSeccion)
         {
-            var jobId = await _jobService.EnqueueSyncRenamedTeams(idSeccion);
-            return Ok(new { JobId = jobId, Message = "Sync Renamed Teams Job Enqueued" });
+            var executedBy = GetManualExecutorName();
+            var jobId = await _jobService.EnqueueSyncRenamedTeams(idSeccion, executedBy);
+            return Ok(new { JobId = jobId, Message = $"Sync Renamed Teams Job Enqueued by {executedBy}" });
         }
 
         [HttpGet("stats")]
@@ -1156,6 +1252,22 @@ namespace APITeamsV3.API.Controllers
                 });
             }
         }
+        private string GetManualExecutorName()
+        {
+            var claims = User?.Claims;
+            if (claims == null)
+            {
+                return "desconocido";
+            }
+
+            return claims.FirstOrDefault(c => c.Type == "name")?.Value
+                   ?? claims.FirstOrDefault(c => c.Type == ClaimTypes.Name)?.Value
+                   ?? claims.FirstOrDefault(c => c.Type == "preferred_username")?.Value
+                   ?? claims.FirstOrDefault(c => c.Type == "upn")?.Value
+                   ?? claims.FirstOrDefault(c => c.Type == ClaimTypes.Email)?.Value
+                   ?? claims.FirstOrDefault(c => c.Type == "unique_name")?.Value
+                   ?? "desconocido";
+        }
     }
 
     public class HangfireStatsDto
@@ -1179,21 +1291,25 @@ namespace APITeamsV3.API.Controllers
     public class HangfireJobSnapshotDto
     {
         public string JobId { get; set; } = string.Empty;
+        public string CompanyKey { get; set; } = string.Empty;
         public string State { get; set; } = string.Empty;
         public string Method { get; set; } = string.Empty;
         public int? IdSeccion { get; set; }
+        public string? SectionCode { get; set; }
         public DateTime Timestamp { get; set; }
         public string[] Arguments { get; set; } = Array.Empty<string>();
         public string? Error { get; set; }
     }
-
+    
     public class HangfireRecurringJobSnapshotDto
     {
         public string Id { get; set; } = string.Empty;
+        public string CompanyKey { get; set; } = string.Empty;
         public string Cron { get; set; } = string.Empty;
         public string Queue { get; set; } = string.Empty;
         public string Method { get; set; } = string.Empty;
         public int? IdSeccion { get; set; }
+        public string? SectionCode { get; set; }
         public DateTime? CreatedAt { get; set; }
         public DateTime? LastExecution { get; set; }
         public DateTime? NextExecution { get; set; }
