@@ -357,6 +357,7 @@ const JobsPage: React.FC = () => {
     const [purgingCompanyData, setPurgingCompanyData] = useState(false);
     const [jobIdLookup, setJobIdLookup] = useState('');
     const [requeueingJobId, setRequeueingJobId] = useState<string | null>(null);
+    const [cancellingJobId, setCancellingJobId] = useState<string | null>(null);
     const [history, setHistory] = useState<HangfireJobResult[]>([]);
     const [recurringJobs, setRecurringJobs] = useState<HangfireRecurringJobResult[]>([]);
     const [selectedTab, setSelectedTab] = useState<TabValue>('all');
@@ -518,6 +519,28 @@ const JobsPage: React.FC = () => {
             showWarning(errorMessage);
         } finally {
             setRequeueingJobId(null);
+        }
+    };
+
+    const canCancelJob = (state: string) => {
+        const normalizedState = state.toLowerCase();
+        return normalizedState.includes('process') || normalizedState.includes('enqueu');
+    };
+
+    const handleCancelJob = async (jobId: string) => {
+        const result = await showConfirm('¿Estás seguro de detener este job?');
+        if (!result.isConfirmed) return;
+
+        setCancellingJobId(jobId);
+        try {
+            await apiClient.delete(`/jobs/${encodeURIComponent(jobId)}`);
+            await loadRecentJobs(true);
+            showSuccess('Job detenido/eliminado exitosamente.');
+        } catch (err: unknown) {
+            const errorMessage = getApiErrorMessage(err, 'No se pudo detener el job.');
+            showWarning(errorMessage);
+        } finally {
+            setCancellingJobId(null);
         }
     };
 
@@ -931,7 +954,7 @@ const JobsPage: React.FC = () => {
                                         </div>
                                     </TableCell>
                                     <TableCell>
-                                        <div>{entry.method}</div>
+                                        <div style={{ wordBreak: 'break-all', whiteSpace: 'normal', maxWidth: '200px' }}>{entry.method}</div>
                                         <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
                                             {entry.cron}
                                         </Text>
@@ -1005,8 +1028,8 @@ const JobsPage: React.FC = () => {
                                 <TableRow key={entry.jobId}>
                                     <TableCell>{getStateIcon(entry.state)}</TableCell>
                                     <TableCell style={{ fontWeight: 600 }}>
-                                        <div>{entry.method}</div>
-                                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '4px' }}>
+                                        <div style={{ wordBreak: 'break-all', whiteSpace: 'normal', maxWidth: '200px' }}>{entry.method}</div>
+                                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '4px', flexWrap: 'wrap' }}>
                                             {entry.companyKey && (
                                                 <Badge size="small" appearance="filled" style={{ backgroundColor: tokens.colorBrandBackground2, color: tokens.colorBrandForeground2, fontWeight: 'bold' }}>
                                                     {entry.companyKey}
@@ -1072,22 +1095,37 @@ const JobsPage: React.FC = () => {
                                         {formatDateTime(entry.timestamp)}
                                     </TableCell>
                                     <TableCell>
-                                        {canRequeueJob(entry.state) ? (
-                                            <Button
-                                                appearance="secondary"
-                                                size="small"
-                                                icon={requeueingJobId === entry.jobId ? <Spinner size="tiny" /> : <ArrowSyncRegular />}
-                                                onClick={() => { void handleRequeueJob(entry.jobId); }}
-                                                disabled={requeueingJobId !== null}
-                                            >
-                                                {requeueingJobId === entry.jobId ? 'Re-encolando...' : 'Requeue'}
-                                            </Button>
-                                        ) : (
-                                            <Badge appearance="outline" size="small" color="subtle">
-                                                <DismissCircleRegular />
-                                                No aplica
-                                            </Badge>
-                                        )}
+                                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                                            {canRequeueJob(entry.state) && (
+                                                <Button
+                                                    appearance="secondary"
+                                                    size="small"
+                                                    icon={requeueingJobId === entry.jobId ? <Spinner size="tiny" /> : <ArrowSyncRegular />}
+                                                    onClick={() => { void handleRequeueJob(entry.jobId); }}
+                                                    disabled={requeueingJobId !== null || cancellingJobId !== null}
+                                                >
+                                                    {requeueingJobId === entry.jobId ? 'Re-encolando...' : 'Requeue'}
+                                                </Button>
+                                            )}
+                                            {canCancelJob(entry.state) && (
+                                                <Button
+                                                    appearance="transparent"
+                                                    size="small"
+                                                    style={{ color: tokens.colorPaletteRedForeground1, border: `1px solid ${tokens.colorPaletteRedBorder1}` }}
+                                                    icon={cancellingJobId === entry.jobId ? <Spinner size="tiny" /> : <DismissCircleRegular />}
+                                                    onClick={() => { void handleCancelJob(entry.jobId); }}
+                                                    disabled={cancellingJobId !== null || requeueingJobId !== null}
+                                                >
+                                                    {cancellingJobId === entry.jobId ? 'Deteniendo...' : 'Detener'}
+                                                </Button>
+                                            )}
+                                            {!canRequeueJob(entry.state) && !canCancelJob(entry.state) && (
+                                                <Badge appearance="outline" size="small" color="subtle">
+                                                    <DismissCircleRegular />
+                                                    No aplica
+                                                </Badge>
+                                            )}
+                                        </div>
                                     </TableCell>
                                 </TableRow>
                             ))}

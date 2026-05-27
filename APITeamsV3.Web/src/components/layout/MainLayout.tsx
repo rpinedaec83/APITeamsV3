@@ -16,6 +16,7 @@ import {
     CalendarClockRegular,
     DocumentSearchRegular,
     ArrowSyncRegular,
+    BeakerRegular,
 } from '@fluentui/react-icons';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useMsal } from "@azure/msal-react";
@@ -193,6 +194,7 @@ const MainLayout: React.FC = () => {
         { label: 'Horarios de Sinc.', icon: <CalendarClockRegular />, path: '/schedules', allowedRoles: ['ADMIN', 'IT'] },
         { label: 'Logs Operativos', icon: <DocumentSearchRegular />, path: '/logs', allowedRoles: ['ADMIN', 'IT', 'GESTION'] },
         { label: 'Reportes Avanzados', icon: <GridDotsRegular />, path: '/reports', allowedRoles: ['ADMIN', 'IT', 'GESTION'] },
+        { label: 'Gestión de Pilotos', icon: <BeakerRegular />, path: '/admin/pilot-management', allowedRoles: ['ADMIN', 'IT'] },
         { label: 'Configuraciones', icon: <SettingsRegular />, path: '/admin/company-configs', allowedRoles: ['ADMIN', 'IT'] },
     ];
 

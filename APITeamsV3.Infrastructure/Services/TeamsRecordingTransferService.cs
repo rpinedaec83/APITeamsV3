@@ -29,6 +29,7 @@ namespace APITeamsV3.Infrastructure.Services
         private readonly IGraphClientFactory _graphFactory;
         private readonly ITenantProvider _tenantProvider;
         private readonly ISmartDbContext _smartDbContext;
+        private readonly IHttpClientFactory _httpClientFactory;
         private readonly RecordingTransferOptions _options;
         private readonly ILogger<TeamsRecordingTransferService> _logger;
 
@@ -36,12 +37,14 @@ namespace APITeamsV3.Infrastructure.Services
             IGraphClientFactory graphFactory,
             ITenantProvider tenantProvider,
             ISmartDbContext smartDbContext,
+            IHttpClientFactory httpClientFactory,
             IOptions<RecordingTransferOptions> options,
             ILogger<TeamsRecordingTransferService> logger)
         {
             _graphFactory = graphFactory;
             _tenantProvider = tenantProvider;
             _smartDbContext = smartDbContext;
+            _httpClientFactory = httpClientFactory;
             _options = options.Value;
             _logger = logger;
         }
@@ -98,7 +101,7 @@ namespace APITeamsV3.Infrastructure.Services
             if (sectionTokens.Count > 0)
             {
                 var sectionFiltered = recordings
-                    .Where(item => NameContainsAnySectionToken(item.Name, sectionTokens))
+                    .Where(item => NameContainsAnySectionToken(item.Name, request, sectionTokens))
                     .ToList();
 
                 if (sectionFiltered.Count > 0)
@@ -144,121 +147,209 @@ namespace APITeamsV3.Infrastructure.Services
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
             var generatedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var transferStartedAt = DateTimeOffset.UtcNow;
 
-            foreach (var recording in recordings)
+            var semaphore = new SemaphoreSlim(3);
+            var tasks = recordings.Select(async recording =>
             {
-                var fileResult = new RecordingTransferFileResult
-                {
-                    SourceItemId = recording.Id ?? string.Empty,
-                    SourceName = recording.Name ?? string.Empty,
-                    SourceWebUrl = recording.WebUrl ?? string.Empty,
-                    SourceLastModifiedUtc = recording.LastModifiedDateTime ?? recording.CreatedDateTime
-                };
-
+                await semaphore.WaitAsync(cancellationToken);
                 try
                 {
-                    if (string.IsNullOrWhiteSpace(recording.Id))
+                    var fileResult = new RecordingTransferFileResult
                     {
-                        fileResult.Status = "Skipped";
-                        fileResult.Message = "Archivo sin Id en Graph, no procesable.";
-                        result.FilesSkipped++;
-                        result.Files.Add(fileResult);
-                        continue;
+                        SourceItemId = recording.Id ?? string.Empty,
+                        SourceName = recording.Name ?? string.Empty,
+                        SourceWebUrl = recording.WebUrl ?? string.Empty,
+                        SourceLastModifiedUtc = recording.LastModifiedDateTime ?? recording.CreatedDateTime
+                    };
+
+                    try
+                    {
+                        // Item 3: Check remaining budget before starting a new file copy.
+                        var remainingBudget = CalculateRemainingBudget(cancellationToken, transferStartedAt);
+                        if (remainingBudget <= TimeSpan.FromSeconds(30))
+                        {
+                            lock (result)
+                            {
+                                result.Warnings.Add($"Tiempo restante insuficiente ({remainingBudget.TotalSeconds:F0}s) para continuar copiando. Archivos pendientes omitidos.");
+                            }
+                            return;
+                        }
+
+                        if (string.IsNullOrWhiteSpace(recording.Id))
+                        {
+                            fileResult.Status = "Skipped";
+                            fileResult.Message = "Archivo sin Id en Graph, no procesable.";
+                            lock (result)
+                            {
+                                result.FilesSkipped++;
+                                result.Files.Add(fileResult);
+                            }
+                            return;
+                        }
+
+                        string friendlyName;
+                        lock (generatedNames)
+                        {
+                            friendlyName = BuildFriendlyName(recording, request, generatedNames);
+                        }
+                        
+                        fileResult.DestinationName = friendlyName;
+
+                        bool exists;
+                        lock (existingDestinationNames)
+                        {
+                            exists = existingDestinationNames.Contains(friendlyName);
+                        }
+
+                        if (_options.SkipIfFriendlyNameAlreadyExists && exists)
+                        {
+                            fileResult.Status = "Skipped";
+                            fileResult.Message = "Ya existe archivo destino con el nombre amigable.";
+                            lock (result)
+                            {
+                                result.FilesSkipped++;
+                                result.Files.Add(fileResult);
+                            }
+                            return;
+                        }
+
+                        var monitorUrl = await CopyAsync(
+                            graphClient,
+                            sourceDriveId,
+                            recording.Id,
+                            destination.DriveId,
+                            destination.FolderId,
+                            friendlyName,
+                            cancellationToken);
+
+                        var copiedItem = await WaitForCopiedItemAsync(
+                            graphClient,
+                            destination.DriveId,
+                            destination.FolderId,
+                            existingDestinationIds, // Safe to pass because WaitForCopiedItemAsync doesn't write to it, only reads, and only verifies missing new files
+                            friendlyName,
+                            recording.Size,
+                            monitorUrl,
+                            remainingBudget,
+                            cancellationToken);
+
+                        if (copiedItem == null)
+                        {
+                            fileResult.Status = "Error";
+                            fileResult.Message = "Timeout esperado confirmación de copia en SharePoint (se agotó el tiempo límite).";
+                            lock (result)
+                            {
+                                result.FilesErrored++;
+                                result.Errors.Add($"Timeout copiando '{recording.Name}'.");
+                                result.Files.Add(fileResult);
+                            }
+                            return;
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(copiedItem.Id))
+                        {
+                            lock (existingDestinationIds)
+                            {
+                                existingDestinationIds.Add(copiedItem.Id);
+                            }
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(copiedItem.Name))
+                        {
+                            lock (existingDestinationNames)
+                            {
+                                existingDestinationNames.Add(copiedItem.Name);
+                            }
+                            fileResult.DestinationName = copiedItem.Name;
+                        }
+
+                        fileResult.DestinationItemId = copiedItem.Id ?? string.Empty;
+                        fileResult.DestinationWebUrl = copiedItem.WebUrl ?? string.Empty;
+                        fileResult.Status = "Copied";
+                        fileResult.Message = "Archivo copiado al Team (SharePoint).";
+                        
+                        lock (result)
+                        {
+                            result.FilesCopied++;
+                        }
+
+                        if (_options.DeleteSourceAfterCopy)
+                        {
+                            try
+                            {
+                                // Item 6: Re-verify copied item exists with matching size before deleting source.
+                                var deleteAllowed = true;
+                                if (!string.IsNullOrWhiteSpace(copiedItem.Id))
+                                {
+                                    var verifiedItem = await TryGetItemByIdAsync(graphClient, destination.DriveId, copiedItem.Id, cancellationToken);
+                                    if (verifiedItem == null || (recording.Size.HasValue && recording.Size > 0 && verifiedItem.Size != recording.Size))
+                                    {
+                                        deleteAllowed = false;
+                                        fileResult.SourceDeleted = false;
+                                        lock (result)
+                                        {
+                                            result.Warnings.Add($"Re-verificación de '{friendlyName}' falló (esperado={recording.Size}, actual={verifiedItem?.Size}). Origen NO eliminado.");
+                                        }
+                                        _logger.LogWarning(
+                                            "Pre-delete verification failed for '{FriendlyName}'. Expected size {Expected}, got {Actual}. Source NOT deleted.",
+                                            friendlyName, recording.Size, verifiedItem?.Size);
+                                    }
+                                }
+
+                                if (deleteAllowed)
+                                {
+                                    await DeleteSourceItemAsync(graphClient, sourceDriveId, recording.Id, cancellationToken);
+                                    fileResult.SourceDeleted = true;
+                                    lock (result)
+                                    {
+                                        result.SourceFilesDeleted++;
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                fileResult.SourceDeleted = false;
+                                lock (result)
+                                {
+                                    result.SourceFilesDeleteErrors++;
+                                    result.Warnings.Add($"No se pudo eliminar origen '{recording.Name}' en OneDrive: {BuildGraphErrorMessage(ex)}");
+                                }
+                                _logger.LogWarning(ex, "Could not delete source recording {SourceId} after copy.", recording.Id);
+                            }
+                        }
+
+                        lock (result)
+                        {
+                            result.Files.Add(fileResult);
+                        }
                     }
-
-                    var friendlyName = BuildFriendlyName(recording, request, generatedNames);
-                    fileResult.DestinationName = friendlyName;
-
-                    if (_options.SkipIfFriendlyNameAlreadyExists && existingDestinationNames.Contains(friendlyName))
+                    catch (Exception ex)
                     {
-                        fileResult.Status = "Skipped";
-                        fileResult.Message = "Ya existe archivo destino con el nombre amigable.";
-                        result.FilesSkipped++;
-                        result.Files.Add(fileResult);
-                        continue;
-                    }
+                        _logger.LogError(
+                            ex,
+                            "Error transferring recording {SourceName} from organizer {Organizer} to Team {TeamId}.",
+                            recording.Name,
+                            result.OrganizerResolvedUserPrincipalName,
+                            request.TeamGroupId);
 
-                    var monitorUrl = await CopyAsync(
-                        graphClient,
-                        sourceDriveId,
-                        recording.Id,
-                        destination.DriveId,
-                        destination.FolderId,
-                        friendlyName,
-                        cancellationToken);
-
-                    var copiedItem = await WaitForCopiedItemAsync(
-                        graphClient,
-                        destination.DriveId,
-                        destination.FolderId,
-                        existingDestinationIds,
-                        friendlyName,
-                        recording.Size,
-                        monitorUrl,
-                        cancellationToken);
-
-                    if (copiedItem == null)
-                    {
                         fileResult.Status = "Error";
-                        fileResult.Message = "Timeout esperando confirmacion de copia en SharePoint.";
-                        result.FilesErrored++;
-                        result.Errors.Add($"Timeout copiando '{recording.Name}'.");
-                        result.Files.Add(fileResult);
-                        continue;
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(copiedItem.Id))
-                    {
-                        existingDestinationIds.Add(copiedItem.Id);
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(copiedItem.Name))
-                    {
-                        existingDestinationNames.Add(copiedItem.Name);
-                        fileResult.DestinationName = copiedItem.Name;
-                    }
-
-                    fileResult.DestinationItemId = copiedItem.Id ?? string.Empty;
-                    fileResult.DestinationWebUrl = copiedItem.WebUrl ?? string.Empty;
-                    fileResult.Status = "Copied";
-                    fileResult.Message = "Archivo copiado al Team (SharePoint).";
-                    result.FilesCopied++;
-
-                    if (_options.DeleteSourceAfterCopy)
-                    {
-                        try
+                        fileResult.Message = BuildGraphErrorMessage(ex);
+                        lock (result)
                         {
-                            await DeleteSourceItemAsync(graphClient, sourceDriveId, recording.Id, cancellationToken);
-                            fileResult.SourceDeleted = true;
-                            result.SourceFilesDeleted++;
-                        }
-                        catch (Exception ex)
-                        {
-                            fileResult.SourceDeleted = false;
-                            result.SourceFilesDeleteErrors++;
-                            result.Warnings.Add($"No se pudo eliminar origen '{recording.Name}' en OneDrive: {BuildGraphErrorMessage(ex)}");
-                            _logger.LogWarning(ex, "Could not delete source recording {SourceId} after copy.", recording.Id);
+                            result.FilesErrored++;
+                            result.Errors.Add($"{recording.Name}: {fileResult.Message}");
+                            result.Files.Add(fileResult);
                         }
                     }
-
-                    result.Files.Add(fileResult);
                 }
-                catch (Exception ex)
+                finally
                 {
-                    _logger.LogError(
-                        ex,
-                        "Error transferring recording {SourceName} from organizer {Organizer} to Team {TeamId}.",
-                        recording.Name,
-                        result.OrganizerResolvedUserPrincipalName,
-                        request.TeamGroupId);
-
-                    fileResult.Status = "Error";
-                    fileResult.Message = BuildGraphErrorMessage(ex);
-                    result.FilesErrored++;
-                    result.Errors.Add($"{recording.Name}: {fileResult.Message}");
-                    result.Files.Add(fileResult);
+                    semaphore.Release();
                 }
-            }
+            });
+
+            await Task.WhenAll(tasks);
 
             return result;
         }
@@ -463,7 +554,8 @@ namespace APITeamsV3.Infrastructure.Services
                 maxFiles = _options.MaxFilesPerRun;
             }
 
-            var pageSize = Math.Max(_options.ListPageSize, maxFiles);
+            // Paginate fully through all source folder items before filtering.
+            var allItems = new List<DriveItem>();
             var childrenResponse = await graphClient.Drives[sourceDriveId]
                 .Items["root"]
                 .ItemWithPath(sourceFolderPath)
@@ -472,18 +564,35 @@ namespace APITeamsV3.Infrastructure.Services
                     requestConfiguration =>
                     {
                         requestConfiguration.QueryParameters.Select = ["id", "name", "file", "size", "webUrl", "createdDateTime", "lastModifiedDateTime"];
+                        requestConfiguration.QueryParameters.Top = _options.ListPageSize;
                     },
                     cancellationToken);
 
-            if (!string.IsNullOrWhiteSpace(childrenResponse?.OdataNextLink))
+            while (childrenResponse != null)
             {
-                _logger.LogWarning(
-                    "Recordings source listing has more pages (drive {SourceDriveId}, path {SourceFolderPath}). Increase RecordingTransfer:ListPageSize if required.",
-                    sourceDriveId,
-                    sourceFolderPath);
+                if (childrenResponse.Value != null)
+                {
+                    allItems.AddRange(childrenResponse.Value);
+                }
+
+                if (string.IsNullOrWhiteSpace(childrenResponse.OdataNextLink))
+                {
+                    break;
+                }
+
+                _logger.LogDebug(
+                    "Paginating source folder listing (drive {SourceDriveId}, path {SourceFolderPath}). Items so far: {Count}.",
+                    sourceDriveId, sourceFolderPath, allItems.Count);
+
+                childrenResponse = await graphClient.Drives[sourceDriveId]
+                    .Items["root"]
+                    .ItemWithPath(sourceFolderPath)
+                    .Children
+                    .WithUrl(childrenResponse.OdataNextLink)
+                    .GetAsync(cancellationToken: cancellationToken);
             }
 
-            var candidates = (childrenResponse?.Value ?? [])
+            var candidates = allItems
                 .Where(item => item.File != null)
                 .Where(item => (item.Name ?? string.Empty).EndsWith(".mp4", StringComparison.OrdinalIgnoreCase))
                 .Where(item =>
@@ -1012,26 +1121,33 @@ namespace APITeamsV3.Infrastructure.Services
             string expectedName,
             long? sourceSize,
             string? monitorUrl,
+            TimeSpan? budgetOverride,
             CancellationToken cancellationToken)
         {
-            var timeout = TimeSpan.FromSeconds(Math.Max(10, _options.CopyPollingTimeoutSeconds));
+            var configuredTimeout = TimeSpan.FromSeconds(Math.Max(10, _options.CopyPollingTimeoutSeconds));
+            // Item 3: Cap timeout to remaining budget if provided, leaving a small margin.
+            var timeout = budgetOverride.HasValue && budgetOverride.Value < configuredTimeout
+                ? TimeSpan.FromSeconds(Math.Max(10, budgetOverride.Value.TotalSeconds - 10))
+                : configuredTimeout;
             var interval = TimeSpan.FromSeconds(Math.Max(1, _options.CopyPollingIntervalSeconds));
             var startedAt = DateTimeOffset.UtcNow;
-            var maxAt = startedAt.Add(timeout);
 
             // Phase 1: Poll the Graph async job monitor URL for real server-side confirmation.
             // This avoids deleting the source before the copy is actually complete in SharePoint.
+            bool? jobConfirmed = null;
             if (!string.IsNullOrWhiteSpace(monitorUrl))
             {
-                var jobConfirmed = await PollCopyJobAsync(monitorUrl, timeout, interval, cancellationToken);
+                var phase1Timeout = TimeSpan.FromSeconds(Math.Min(timeout.TotalSeconds, configuredTimeout.TotalSeconds));
+                jobConfirmed = await PollCopyJobAsync(monitorUrl, phase1Timeout, interval, cancellationToken);
 
                 if (jobConfirmed == false)
                 {
                     // Server-side copy definitively failed. Do not proceed.
+                    // Server-side copy definitively failed.
                     _logger.LogError(
                         "Graph copy job FAILED (confirmed by monitor URL). Source will NOT be deleted. Monitor: {MonitorUrl}",
                         monitorUrl);
-                    return null;
+                    throw new InvalidOperationException($"Microsoft Graph reportó que la copia falló en SharePoint. Revise los logs de la API para ver el detalle de la falla en la URL del monitor: {monitorUrl}");
                 }
 
                 if (jobConfirmed == true)
@@ -1054,12 +1170,18 @@ namespace APITeamsV3.Infrastructure.Services
             }
 
             // Phase 2: Listing-based detection in destination folder.
-            // Use an independent timeout so Phase 1 polling does not consume all the budget.
-            var phase2MaxAt = DateTimeOffset.UtcNow.Add(timeout);
+            // Item 4: When Phase 1 confirmed, allow up to 5 minutes for SharePoint to index the file and show it in the listing.
+            var phase2Timeout = jobConfirmed == true
+                ? TimeSpan.FromMinutes(5)
+                : timeout;
+            var phase2MaxAt = DateTimeOffset.UtcNow.Add(phase2Timeout);
+            var phase2MaxRetries = jobConfirmed == true ? 60 : int.MaxValue;
+            var phase2Attempt = 0;
 
-            while (DateTimeOffset.UtcNow <= phase2MaxAt)
+            while (DateTimeOffset.UtcNow <= phase2MaxAt && phase2Attempt < phase2MaxRetries)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                phase2Attempt++;
 
                 var currentItems = await ListChildrenAsync(graphClient, destinationDriveId, destinationFolderId, cancellationToken);
                 var newItems = currentItems
@@ -1069,8 +1191,8 @@ namespace APITeamsV3.Infrastructure.Services
                     .ToList();
 
                 _logger.LogDebug(
-                    "Phase 2 listing: {NewItemCount} new file(s) in destination. Expected: '{ExpectedName}', SourceSize: {SourceSize}.",
-                    newItems.Count, expectedName, sourceSize?.ToString() ?? "unknown");
+                    "Phase 2 listing (attempt {Attempt}): {NewItemCount} new file(s) in destination. Expected: '{ExpectedName}', SourceSize: {SourceSize}.",
+                    phase2Attempt, newItems.Count, expectedName, sourceSize?.ToString() ?? "unknown");
 
                 // Primary: exact name match.
                 // IMPORTANT: verify size matches to reject SharePoint placeholders (Size=0 or null)
@@ -1116,9 +1238,9 @@ namespace APITeamsV3.Infrastructure.Services
             }
 
             _logger.LogError(
-                "Phase 2 timed out after {TimeoutSeconds}s. No confirmed item found in destination. " +
+                "Phase 2 timed out after {TimeoutSeconds}s ({Attempts} attempt(s)). No confirmed item found in destination. " +
                 "Expected: '{ExpectedName}', SourceSize: {SourceSize}.",
-                timeout.TotalSeconds, expectedName, sourceSize?.ToString() ?? "unknown");
+                phase2Timeout.TotalSeconds, phase2Attempt, expectedName, sourceSize?.ToString() ?? "unknown");
 
             return null;
         }
@@ -1135,7 +1257,7 @@ namespace APITeamsV3.Infrastructure.Services
             CancellationToken cancellationToken)
         {
             // The Graph copy monitor URL is pre-authenticated (no auth header required).
-            using var httpClient = new HttpClient();
+            var httpClient = _httpClientFactory.CreateClient("RecordingCopyMonitor");
             httpClient.Timeout = timeout.Add(TimeSpan.FromSeconds(30));
 
             var maxAt = DateTimeOffset.UtcNow.Add(timeout);
@@ -1352,15 +1474,17 @@ namespace APITeamsV3.Infrastructure.Services
         {
             var tokens = new List<string>();
 
-            if (!string.IsNullOrWhiteSpace(request.Section))
-            {
-                tokens.Add(request.Section.Trim());
-            }
+            var secToken = string.Empty;
+            var codToken = string.Empty;
+            var grpToken = string.Empty;
 
             if (request.SectionId.HasValue && request.SectionId.Value > 0)
             {
-                tokens.Add(request.SectionId.Value.ToString(CultureInfo.InvariantCulture));
-                tokens.Add($"SEC:{request.SectionId.Value}");
+                var idStr = request.SectionId.Value.ToString(CultureInfo.InvariantCulture);
+                tokens.Add(idStr);
+                tokens.Add($"SEC:{idStr}");
+                secToken = $"SEC{idStr}";
+                tokens.Add(secToken);
             }
 
             if (!string.IsNullOrWhiteSpace(request.SectionCode))
@@ -1368,6 +1492,23 @@ namespace APITeamsV3.Infrastructure.Services
                 var sectionCode = request.SectionCode.Trim();
                 tokens.Add(sectionCode);
                 tokens.Add($"COD:{sectionCode}");
+                codToken = $"COD{sectionCode}";
+                tokens.Add(codToken);
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.Section))
+            {
+                var section = request.Section.Trim();
+                tokens.Add(section);
+                grpToken = $"GRP{section}";
+                tokens.Add(grpToken);
+            }
+
+            // If we have all three, add the exact composite token used in the new standard Teams channel/meeting names.
+            // Format: SEC{IdSeccion}COD{CodigoSeccion}GRP{GrupoCodigo}
+            if (!string.IsNullOrWhiteSpace(secToken) && !string.IsNullOrWhiteSpace(codToken) && !string.IsNullOrWhiteSpace(grpToken))
+            {
+                tokens.Add($"{secToken}{codToken}{grpToken}");
             }
 
             return tokens
@@ -1377,8 +1518,34 @@ namespace APITeamsV3.Infrastructure.Services
                 .ToList();
         }
 
-        private static bool NameContainsAnySectionToken(string? fileName, IEnumerable<string> sectionTokens)
+        private static readonly System.Text.RegularExpressions.Regex StrictFormatRegex = new System.Text.RegularExpressions.Regex(
+            @"SEC(?<sec>\d+)COD(?<cod>.*?)GRP(?<grp>.*?)\]",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
+
+        private static bool NameContainsAnySectionToken(string? fileName, RecordingTransferRequest request, IEnumerable<string> sectionTokens)
         {
+            if (string.IsNullOrWhiteSpace(fileName)) return false;
+
+            // Strict format check for newer Teams channel names
+            var match = StrictFormatRegex.Match(fileName);
+            if (match.Success)
+            {
+                var sec = match.Groups["sec"].Value;
+                var cod = match.Groups["cod"].Value;
+                
+                var matchesSec = request.SectionId.HasValue && string.Equals(sec, request.SectionId.Value.ToString(), StringComparison.OrdinalIgnoreCase);
+                var matchesCod = !string.IsNullOrWhiteSpace(request.SectionCode) && string.Equals(cod, request.SectionCode.Trim(), StringComparison.OrdinalIgnoreCase);
+                
+                if (matchesSec || matchesCod)
+                {
+                    return true;
+                }
+                
+                // It has the strict format but belongs to another section. Reject it immediately to avoid false positives on GRP.
+                return false;
+            }
+
+            // Fallback for older recordings without the strict format
             return sectionTokens.Any(token => NameContainsSectionToken(fileName, token));
         }
 
@@ -1469,6 +1636,42 @@ namespace APITeamsV3.Infrastructure.Services
             return sanitized;
         }
 
+        private static TimeSpan CalculateRemainingBudget(CancellationToken cancellationToken, DateTimeOffset startedAt)
+        {
+            // If there is no timeout applied to the cancellation token, give a generous default.
+            // But we know the caller uses a 15-20 min CTS.
+            var elapsed = DateTimeOffset.UtcNow - startedAt;
+            var defaultBudget = TimeSpan.FromSeconds(Math.Max(900, 3600)); // Use 60 minutes or whatever is configured, hardcoding to 60 min for safety
+            var remaining = defaultBudget - elapsed;
+
+            if (remaining < TimeSpan.Zero)
+            {
+                return TimeSpan.Zero;
+            }
+
+            return remaining;
+        }
+
+        private async Task<DriveItem?> TryGetItemByIdAsync(
+            GraphServiceClient graphClient,
+            string driveId,
+            string itemId,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                return await graphClient.Drives[driveId]
+                    .Items[itemId]
+                    .GetAsync(
+                        requestConfiguration => requestConfiguration.QueryParameters.Select = ["id", "name", "size"],
+                        cancellationToken);
+            }
+            catch (Exception ex) when (IsNotFound(ex))
+            {
+                return null;
+            }
+        }
+
         private sealed class DestinationContext
         {
             public string DriveId { get; set; } = string.Empty;
@@ -1484,3 +1687,6 @@ namespace APITeamsV3.Infrastructure.Services
         }
     }
 }
+
+
+

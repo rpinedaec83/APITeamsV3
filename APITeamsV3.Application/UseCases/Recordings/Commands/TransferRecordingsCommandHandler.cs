@@ -27,17 +27,28 @@ namespace APITeamsV3.Application.UseCases.Recordings.Commands
 
         public async Task<RecordingTransferResult> Handle(TransferRecordingsCommand request, CancellationToken cancellationToken)
         {
-            try
+            using (var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
             {
-                var result = await _recordingsService.TransferAsync(request, cancellationToken);
+                cts.CancelAfter(TimeSpan.FromMinutes(20));
 
-                await TryLogAsync(request, result);
-                return result;
-            }
-            catch (Exception ex)
-            {
-                await TryLogFailureAsync(request, ex);
-                throw;
+                try
+                {
+                    var result = await _recordingsService.TransferAsync(request, cts.Token);
+
+                    await TryLogAsync(request, result);
+                    return result;
+                }
+                catch (OperationCanceledException ex) when (cts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+                {
+                    var timeoutEx = new TimeoutException("La transferencia de grabaciones excedió el tiempo límite de 20 minutos para esta sección.", ex);
+                    await TryLogFailureAsync(request, timeoutEx);
+                    throw timeoutEx;
+                }
+                catch (Exception ex)
+                {
+                    await TryLogFailureAsync(request, ex);
+                    throw;
+                }
             }
         }
 

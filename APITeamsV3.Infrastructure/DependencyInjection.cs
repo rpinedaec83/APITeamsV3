@@ -45,6 +45,7 @@ namespace APITeamsV3.Infrastructure
             services.AddTransient<IHangfireJobService, HangfireJobService>();
             services.AddScoped<IGraphUserLookupService, GraphUserLookupService>();
             services.AddScoped<ITeamsRecordingTransferService, TeamsRecordingTransferService>();
+            services.AddHttpClient("RecordingCopyMonitor");
             services.Configure<RecordingTransferOptions>(configuration.GetSection(RecordingTransferOptions.SectionName));
 
             // Database Initialization Service (Background)

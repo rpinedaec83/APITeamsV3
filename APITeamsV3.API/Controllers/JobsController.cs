@@ -285,6 +285,52 @@ namespace APITeamsV3.API.Controllers
             }
         }
 
+        [HttpDelete("{jobId}")]
+        public async Task<ActionResult<object>> DeleteJob(string jobId)
+        {
+            var executedBy = GetManualExecutorName();
+            var tenant = _tenantProvider.GetCurrentTenant();
+            if (string.IsNullOrWhiteSpace(tenant.CompanyKey))
+            {
+                return BadRequest(new { Message = "No se pudo resolver el tenant actual." });
+            }
+
+            try
+            {
+                var storage = await _tenantHangfireRuntime.GetStorageAsync(tenant.CompanyKey, HttpContext.RequestAborted);
+                var client = new BackgroundJobClient(storage);
+                
+                // BackgroundJob.Delete cancels executing jobs (throws OperationCanceledException if the job uses the token)
+                // and removes them from the enqueued/processing list, placing them in Deleted state.
+                var deleted = client.Delete(jobId);
+                
+                if (!deleted)
+                {
+                    return Conflict(new
+                    {
+                        Message = $"No se pudo detener el job {jobId}. Es posible que ya haya finalizado o no exista."
+                    });
+                }
+
+                return Ok(new
+                {
+                    Message = $"El job {jobId} ha sido detenido/eliminado."
+                });
+            }
+            catch (FormatException)
+            {
+                return BadRequest(new { Message = $"El jobId '{jobId}' no es válido." });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(503, new
+                {
+                    Message = $"Error al intentar detener el job {jobId}.",
+                    Detail = ex.Message
+                });
+            }
+        }
+
         [HttpDelete("company-data")]
         public async Task<ActionResult<object>> PurgeCompanyData()
         {
@@ -526,6 +572,24 @@ namespace APITeamsV3.API.Controllers
             {
                 JobId = jobId,
                 Message = $"Recording transfer piloto encolado para tenant {tenant.CompanyKey} por {executedBy}."
+            });
+        }
+
+        [HttpPost("recordings-transfer/{idSeccion}")]
+        public async Task<ActionResult<object>> RunRecordingTransferForSectionNow(int idSeccion)
+        {
+            var tenant = _tenantProvider.GetCurrentTenant();
+            if (string.IsNullOrWhiteSpace(tenant.CompanyKey))
+            {
+                return BadRequest(new { Message = "No se pudo resolver el tenant actual." });
+            }
+
+            var executedBy = GetManualExecutorName();
+            var jobId = await _jobService.EnqueueRecordingTransferForSection(idSeccion, tenant.CompanyKey, executedBy);
+            return Ok(new
+            {
+                JobId = jobId,
+                Message = $"Recording transfer para la sección {idSeccion} encolado por {executedBy}."
             });
         }
 

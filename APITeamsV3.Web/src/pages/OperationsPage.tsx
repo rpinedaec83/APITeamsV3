@@ -36,6 +36,7 @@ import {
     TriangleUpRegular,
     TriangleDownRegular,
     CopyRegular,
+    VideoRegular,
 } from '@fluentui/react-icons';
 import { useMsal } from '@azure/msal-react';
 import { useApiClient } from '../hooks/useApiClient';
@@ -92,7 +93,7 @@ interface StudentData {
     enrolledSections: EnrolledSection[];
 }
 
-type TeamActionProgress = 'refresh-members' | 'regenerate-agenda' | 'recreate-team' | null;
+type TeamActionProgress = 'refresh-members' | 'regenerate-agenda' | 'recreate-team' | 'transfer-recordings' | null;
 
 const useStyles = makeStyles({
     root: {
@@ -315,6 +316,8 @@ const OperationsPage: React.FC = () => {
                 return 'Regenerando agendas del Team...';
             case 'recreate-team':
                 return 'Recreando Team y aprovisionando en Microsoft 365...';
+            case 'transfer-recordings':
+                return 'Encolando transferencia de grabaciones...';
             default:
                 return '';
         }
@@ -645,6 +648,27 @@ const OperationsPage: React.FC = () => {
         }
     };
 
+    const handleTransferRecordings = async () => {
+        if (!seccionData?.idSeccion) return;
+        if (!await ensureCanUseAdminItTeamActions()) return;
+        
+        const result = await showConfirm('¿Estás seguro de encolar la transferencia de grabaciones para esta sección?');
+        if (!result.isConfirmed) return;
+
+        setTeamActionInProgress('transfer-recordings');
+        setLoading(true);
+        try {
+            const response = await apiClient.post(`/jobs/recordings-transfer/${seccionData.idSeccion}`);
+            showSuccess(response.data.message || 'Transferencia encolada correctamente', 'Job Encolado');
+        } catch (err: unknown) {
+            const errorMessage = err instanceof Error ? err.message : 'Error al encolar transferencia de grabaciones.';
+            showError(errorMessage);
+        } finally {
+            setTeamActionInProgress(null);
+            setLoading(false);
+        }
+    };
+
     const handleSyncAlumno = async () => {
         const codigo = (alumnoData?.codigo || alumnoCodigo || '').trim();
         if (!codigo) return;
@@ -882,6 +906,14 @@ const OperationsPage: React.FC = () => {
                                             title={!canUseAdminItTeamActions ? 'Disponible solo para ADMIN o IT' : undefined}
                                         >
                                             Refrescar Miembros
+                                        </Button>
+                                        <Button
+                                            icon={<VideoRegular />}
+                                            onClick={handleTransferRecordings}
+                                            disabled={loading || !canUseAdminItTeamActions}
+                                            title={!canUseAdminItTeamActions ? 'Disponible solo para ADMIN o IT' : undefined}
+                                        >
+                                            Transferir Grabaciones
                                         </Button>
                                         <Button
                                             icon={<CalendarRegular />}

@@ -7,6 +7,7 @@ import {
     Card,
     Input,
     Select,
+    Spinner,
     Table,
     TableBody,
     TableCell,
@@ -533,98 +534,99 @@ const Dashboard: React.FC = () => {
 
     return (
         <div className={styles.root}>
-            <div className={styles.hero}>
-                <div className={styles.heroPanel}>
-                    <div className={styles.heroGlow} />
-                    <div className={styles.heroGlowSecondary} />
-                    <div className={styles.heroContent} style={{ gap: '8px' }}>
-                        <div className={styles.eyebrow}>Resumen Operativo</div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                            <Title1 style={{ color: '#fff', margin: 0 }}>Dashboard Ejecutivo</Title1>
-                            <Text style={{ color: 'rgba(255,255,255,0.78)' }}>
-                                {summary?.displayName ?? 'Tenant actual'} · Bienvenido, {accounts[0]?.name}
-                            </Text>
-                        </div>
-                        <div className={styles.heroMeta}>
-                            <Badge appearance="filled" color={summary?.isPilotMode ? 'warning' : 'success'}>
-                                {summary?.isPilotMode ? 'Pilot Mode activo' : 'Despliegue total'}
-                            </Badge>
-                            {summary?.defaultChannelName ? (
-                                <Badge appearance="filled" color="informative">Canal default: {summary.defaultChannelName}</Badge>
-                            ) : null}
-                            {summary?.meetingPolicyMode ? (
-                                <Badge appearance="filled" color="brand">Agenda: {summary.meetingPolicyMode}</Badge>
-                            ) : null}
-                            {summary?.timeZoneId ? (
-                                <Badge appearance="filled">TZ: {summary.timeZoneId}</Badge>
-                            ) : null}
-                        </div>
-                        <div style={{ display: 'flex', gap: '18px', flexWrap: 'wrap' }}>
-                            <Text size={200} style={{ color: 'rgba(255,255,255,0.78)' }}>
-                                Ultima actualizacion: <b>{formatRefreshTime(ultimaActualizacion)}</b>
-                            </Text>
-                            <Text size={200} style={{ color: 'rgba(255,255,255,0.78)' }}>
-                                Proxima actualizacion: <b>{formatRefreshTime(proximaActualizacion)}</b>
-                            </Text>
-                        </div>
-                        <div className={styles.heroMetricRow}>
-                            <div className={styles.heroMetric}>
-                                <Text size={800} weight="bold">{numberFormatter.format(programsCount)}</Text>
-                                <Text size={200} style={{ color: 'rgba(255,255,255,0.8)' }}>Programas monitoreados</Text>
-                            </div>
-                            <div className={styles.heroMetric}>
-                                <Text size={800} weight="bold">{numberFormatter.format(sedeCount)}</Text>
-                                <Text size={200} style={{ color: 'rgba(255,255,255,0.8)' }}>Sedes activas en tablero</Text>
-                            </div>
-                            <div className={styles.heroMetric}>
-                                <Text size={800} weight="bold">{numberFormatter.format(periodCount)}</Text>
-                                <Text size={200} style={{ color: 'rgba(255,255,255,0.8)' }}>Periodos activos</Text>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div className={styles.sidePanel}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: '12px' }}>
-                        <div>
-                            <Text weight="semibold" size={500}>Estado del tenant</Text>
-                            <div className={styles.badgeRow} style={{ marginTop: '10px' }}>
-                                <Badge color={summary?.isPilotMode ? 'warning' : 'success'} appearance="filled">
-                                    {summary?.isPilotMode ? 'Solo secciones piloto' : 'Cobertura global'}
-                                </Badge>
-                            </div>
-                        </div>
-                        <Button appearance="primary" icon={<ArrowTrendingRegular />} onClick={() => navigate('/operations')}>
-                            Ir a Operaciones
-                        </Button>
-                    </div>
-
-                    <Card>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                <Text size={800} weight="bold">{numberFormatter.format(summary?.pilotSectionsConfigured ?? 0)}</Text>
-                                <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>Secciones en whitelist piloto</Text>
-                            </div>
-                            <WarningRegular fontSize={28} color={summary?.isPilotMode ? '#f39c12' : '#00a65a'} />
-                        </div>
-                    </Card>
-
-                    {renderProgress('Cobertura de Teams', teamCoverage, 'linear-gradient(90deg, #00c0ef 0%, #0097bc 100%)', `${numberFormatter.format(aggregate.equiposActivos)} / ${numberFormatter.format(aggregate.equipos)}`)}
-                    {renderProgress('Cobertura de estudiantes', studentCoverage, 'linear-gradient(90deg, #00a65a 0%, #008d4c 100%)', `${numberFormatter.format(aggregate.enTeams)} / ${numberFormatter.format(aggregate.alumnos)}`)}
-                    {renderProgress('Cobertura de membresías por curso', courseCoverage, 'linear-gradient(90deg, #f39c12 0%, #d68910 100%)', `${numberFormatter.format(aggregate.cursoxTeams)} / ${numberFormatter.format(aggregate.cursoxAlumnos)}`)}
-                </div>
-            </div>
-
             {loading ? (
-                <div className={styles.emptyState}>
-                    <Text size={500}>Cargando estadisticas operativas...</Text>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, height: '60vh', gap: '16px' }}>
+                    <Spinner size="huge" />
+                    <Title3>Cargando estadísticas operativas...</Title3>
+                    <Text style={{ color: tokens.colorNeutralForeground3 }}>Obteniendo resumen del tenant</Text>
                 </div>
             ) : !summary || rows.length === 0 ? (
-                <div className={styles.emptyState}>
+                <div className={styles.emptyState} style={{ marginTop: '40px' }}>
                     <Title3>No se encontraron datos para los periodos activos.</Title3>
                 </div>
             ) : (
                 <>
+                    <div className={styles.hero}>
+                        <div className={styles.heroPanel}>
+                            <div className={styles.heroGlow} />
+                            <div className={styles.heroGlowSecondary} />
+                            <div className={styles.heroContent} style={{ gap: '8px' }}>
+                                <div className={styles.eyebrow}>Resumen Operativo</div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                    <Title1 style={{ color: '#fff', margin: 0 }}>Dashboard Ejecutivo</Title1>
+                                    <Text style={{ color: 'rgba(255,255,255,0.78)' }}>
+                                        {summary?.displayName ?? 'Tenant actual'} · Bienvenido, {accounts[0]?.name}
+                                    </Text>
+                                </div>
+                                <div className={styles.heroMeta}>
+                                    <Badge appearance="filled" color={summary?.isPilotMode ? 'warning' : 'success'}>
+                                        {summary?.isPilotMode ? 'Pilot Mode activo' : 'Despliegue total'}
+                                    </Badge>
+                                    {summary?.defaultChannelName ? (
+                                        <Badge appearance="filled" color="informative">Canal default: {summary.defaultChannelName}</Badge>
+                                    ) : null}
+                                    {summary?.meetingPolicyMode ? (
+                                        <Badge appearance="filled" color="brand">Agenda: {summary.meetingPolicyMode}</Badge>
+                                    ) : null}
+                                    {summary?.timeZoneId ? (
+                                        <Badge appearance="filled">TZ: {summary.timeZoneId}</Badge>
+                                    ) : null}
+                                </div>
+                                <div style={{ display: 'flex', gap: '18px', flexWrap: 'wrap' }}>
+                                    <Text size={200} style={{ color: 'rgba(255,255,255,0.78)' }}>
+                                        Ultima actualizacion: <b>{formatRefreshTime(ultimaActualizacion)}</b>
+                                    </Text>
+                                    <Text size={200} style={{ color: 'rgba(255,255,255,0.78)' }}>
+                                        Proxima actualizacion: <b>{formatRefreshTime(proximaActualizacion)}</b>
+                                    </Text>
+                                </div>
+                                <div className={styles.heroMetricRow}>
+                                    <div className={styles.heroMetric}>
+                                        <Text size={800} weight="bold">{numberFormatter.format(programsCount)}</Text>
+                                        <Text size={200} style={{ color: 'rgba(255,255,255,0.8)' }}>Programas monitoreados</Text>
+                                    </div>
+                                    <div className={styles.heroMetric}>
+                                        <Text size={800} weight="bold">{numberFormatter.format(sedeCount)}</Text>
+                                        <Text size={200} style={{ color: 'rgba(255,255,255,0.8)' }}>Sedes activas en tablero</Text>
+                                    </div>
+                                    <div className={styles.heroMetric}>
+                                        <Text size={800} weight="bold">{numberFormatter.format(periodCount)}</Text>
+                                        <Text size={200} style={{ color: 'rgba(255,255,255,0.8)' }}>Periodos activos</Text>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className={styles.sidePanel}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: '12px' }}>
+                                <div>
+                                    <Text weight="semibold" size={500}>Estado del tenant</Text>
+                                    <div className={styles.badgeRow} style={{ marginTop: '10px' }}>
+                                        <Badge color={summary?.isPilotMode ? 'warning' : 'success'} appearance="filled">
+                                            {summary?.isPilotMode ? 'Solo secciones piloto' : 'Cobertura global'}
+                                        </Badge>
+                                    </div>
+                                </div>
+                                <Button appearance="primary" icon={<ArrowTrendingRegular />} onClick={() => navigate('/operations')}>
+                                    Ir a Operaciones
+                                </Button>
+                            </div>
+
+                            <Card>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                        <Text size={800} weight="bold">{numberFormatter.format(summary?.pilotSectionsConfigured ?? 0)}</Text>
+                                        <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>Secciones en whitelist piloto</Text>
+                                    </div>
+                                    <WarningRegular fontSize={28} color={summary?.isPilotMode ? '#f39c12' : '#00a65a'} />
+                                </div>
+                            </Card>
+
+                            {renderProgress('Cobertura de Teams', teamCoverage, 'linear-gradient(90deg, #00c0ef 0%, #0097bc 100%)', `${numberFormatter.format(aggregate.equiposActivos)} / ${numberFormatter.format(aggregate.equipos)}`)}
+                            {renderProgress('Cobertura de estudiantes', studentCoverage, 'linear-gradient(90deg, #00a65a 0%, #008d4c 100%)', `${numberFormatter.format(aggregate.enTeams)} / ${numberFormatter.format(aggregate.alumnos)}`)}
+                            {renderProgress('Cobertura de membresías por curso', courseCoverage, 'linear-gradient(90deg, #f39c12 0%, #d68910 100%)', `${numberFormatter.format(aggregate.cursoxTeams)} / ${numberFormatter.format(aggregate.cursoxAlumnos)}`)}
+                        </div>
+                    </div>
                     <div className={styles.smallBoxGrid}>
                         <div className={styles.smallBox} style={{ background: smallBoxColors.teal }}>
                             <div className={styles.smallBoxIcon}><BoardRegular fontSize={40} /></div>

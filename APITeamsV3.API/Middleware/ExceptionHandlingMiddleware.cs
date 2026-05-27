@@ -39,7 +39,8 @@ namespace APITeamsV3.API.Middleware
             var result = JsonSerializer.Serialize(new
             {
                 error = "Internal Server Error",
-                message = "An unexpected error occurred."
+                message = exception.Message,
+                stackTrace = exception.StackTrace
             });
 
             return context.Response.WriteAsync(result);

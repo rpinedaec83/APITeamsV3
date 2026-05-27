@@ -175,10 +175,24 @@ namespace APITeamsV3.Infrastructure.Services
             return client.Enqueue(() => SendSyncSectionTeam(idSeccion, key, executedBy, null));
         }
 
-        public async Task<string> EnqueuePilotRecordingTransfers(string companyKey, string? executedBy = null)
+        public Task<string> EnqueuePilotRecordingTransfers(string companyKey, string? executedBy = null)
+        {
+            var jobId = BackgroundJob.Enqueue<HangfireJobService>(
+                job => job.RunPilotRecordingTransfers(companyKey, executedBy, null));
+            return Task.FromResult(jobId);
+        }
+
+        public Task<string> EnqueueAllRecordingTransfers(string companyKey, string? executedBy = null)
+        {
+            var jobId = BackgroundJob.Enqueue<HangfireJobService>(
+                job => job.RunAllRecordingTransfers(companyKey, executedBy, null));
+            return Task.FromResult(jobId);
+        }
+
+        public async Task<string> EnqueueRecordingTransferForSection(int idSeccion, string companyKey, string? executedBy = null)
         {
             var client = await CreateClientAsync(companyKey);
-            return client.Enqueue(() => RunPilotRecordingTransfers(companyKey, executedBy, null));
+            return client.Enqueue(() => RunRecordingTransferForSection(idSeccion, companyKey, executedBy, null));
         }
 
         private async Task<IBackgroundJobClient> CreateClientAsync(string companyKey)
@@ -295,6 +309,7 @@ namespace APITeamsV3.Infrastructure.Services
         public Task RunPilotRecordingTransfers(string companyKey, string? executedBy = null)
             => RunPilotRecordingTransfers(companyKey, executedBy, null);
 
+        [AutomaticRetry(Attempts = 0)]
         [JobDisplayName("Transfer Pilot Recordings [{0}]")]
         public async Task RunPilotRecordingTransfers(string companyKey, string? executedBy, PerformContext? performContext)
         {
@@ -330,10 +345,112 @@ namespace APITeamsV3.Infrastructure.Services
             }
 
             var failures = new List<string>();
-            var processedSections = 0;
-            var skippedInconsistentSections = 0;
+            var state = new ProcessRecordingState();
+            await ProcessRecordingTransfersForSections(
+                companyKey,
+                executedBy,
+                hangfireJobId,
+                pilotSectionIds,
+                failures,
+                state);
 
-            foreach (var idSeccion in pilotSectionIds)
+            LogAndThrowTransferResults(companyKey, state.ProcessedSections, state.SkippedInconsistentSections, failures);
+        }
+
+        public Task RunAllRecordingTransfers(string companyKey, string? executedBy = null)
+            => RunAllRecordingTransfers(companyKey, executedBy, null);
+
+        [AutomaticRetry(Attempts = 0)]
+        [JobDisplayName("Transfer All Recordings [{0}]")]
+        public async Task RunAllRecordingTransfers(string companyKey, string? executedBy, PerformContext? performContext)
+        {
+            var hangfireJobId = performContext?.BackgroundJob?.Id;
+            var config = await ResolveTenantAsync(companyKey, includePilotSections: false);
+            if (!config.IsRecordingTransferJobEnabled)
+            {
+                _logger.LogInformation(
+                    "Recording transfer job omitted for tenant {CompanyKey}: IsRecordingTransferJobEnabled is disabled.",
+                    companyKey);
+                return;
+            }
+
+            if (config.IsPilotMode)
+            {
+                _logger.LogInformation(
+                    "All-sections recording transfer job omitted for tenant {CompanyKey}: tenant is in Pilot Mode.",
+                    companyKey);
+                return;
+            }
+
+            // In non-pilot mode, process ALL active sections that have an active Team.
+            // We filter by active academic periods dynamically if needed, or rely on active Team status.
+            var activeSectionIds = await _smartDb.Set<TeamEntity>()
+                .AsNoTracking()
+                .Where(t => t.EstadoTeam == "A" && t.IsActive == "A" && t.IdSeccionSmart > 0)
+                .Select(t => t.IdSeccionSmart)
+                .Distinct()
+                .ToListAsync(CancellationToken.None);
+
+            if (activeSectionIds.Count == 0)
+            {
+                _logger.LogInformation(
+                    "Recording transfer job omitted for tenant {CompanyKey}: there are no active teams configured.",
+                    companyKey);
+                return;
+            }
+
+            _logger.LogInformation(
+                "Tenant {CompanyKey} running recording transfer for ALL active teams. Total sections: {Count}.",
+                companyKey, activeSectionIds.Count);
+
+            var failures = new List<string>();
+            var state = new ProcessRecordingState();
+            await ProcessRecordingTransfersForSections(
+                companyKey,
+                executedBy,
+                hangfireJobId,
+                activeSectionIds,
+                failures,
+                state);
+
+            LogAndThrowTransferResults(companyKey, state.ProcessedSections, state.SkippedInconsistentSections, failures);
+        }
+
+        [AutomaticRetry(Attempts = 0)]
+        [JobDisplayName("Transfer Recordings for Section {0}")]
+        public async Task RunRecordingTransferForSection(int idSeccion, string companyKey, string? executedBy, PerformContext? performContext)
+        {
+            var hangfireJobId = performContext?.BackgroundJob?.Id;
+            var failures = new List<string>();
+            var state = new ProcessRecordingState();
+
+            _logger.LogInformation(
+                "Tenant {CompanyKey} running manual recording transfer for section {IdSeccion} executed by {ExecutedBy}.",
+                companyKey, idSeccion, executedBy ?? "unknown");
+
+            // VERY IMPORTANT: Initialize the tenant context for this background thread
+            await ResolveTenantAsync(companyKey, includePilotSections: false);
+
+            await ProcessRecordingTransfersForSections(
+                companyKey,
+                executedBy,
+                hangfireJobId,
+                new List<int> { idSeccion },
+                failures,
+                state);
+
+            LogAndThrowTransferResults(companyKey, state.ProcessedSections, state.SkippedInconsistentSections, failures);
+        }
+
+        private async Task ProcessRecordingTransfersForSections(
+            string companyKey,
+            string? executedBy,
+            string? hangfireJobId,
+            List<int> sectionIds,
+            List<string> failures,
+            ProcessRecordingState state)
+        {
+            foreach (var idSeccion in sectionIds)
             {
                 try
                 {
@@ -388,7 +505,7 @@ namespace APITeamsV3.Infrastructure.Services
                         SectionCode = !string.IsNullOrWhiteSpace(section?.Codigo) ? section.Codigo : section?.GrupoCodigo
                     });
 
-                    processedSections++;
+                    state.ProcessedSections++;
 
                     if (result.FilesErrored > 0)
                     {
@@ -403,7 +520,7 @@ namespace APITeamsV3.Infrastructure.Services
                 {
                     if (IsRecoverableRecordingTransferInconsistency(ex))
                     {
-                        skippedInconsistentSections++;
+                        state.SkippedInconsistentSections++;
                         _logger.LogWarning(
                             ex,
                             "Recording transfer skipped as inconsistent for tenant {CompanyKey}, section {IdSeccion}.",
@@ -421,7 +538,10 @@ namespace APITeamsV3.Infrastructure.Services
                     failures.Add($"Seccion {idSeccion}: {ex.Message}");
                 }
             }
+        }
 
+        private void LogAndThrowTransferResults(string companyKey, int processedSections, int skippedInconsistentSections, List<string> failures)
+        {
             if (failures.Count > 0)
             {
                 var summary = string.Join(" || ", failures.Take(5));
@@ -472,7 +592,18 @@ namespace APITeamsV3.Infrastructure.Services
                    message.Contains("Requested API is not supported", StringComparison.OrdinalIgnoreCase) ||
                    message.Contains("Resource is not found", StringComparison.OrdinalIgnoreCase) ||
                    message.Contains("No se encontro el canal", StringComparison.OrdinalIgnoreCase) ||
-                   message.Contains("No se pudo resolver filesFolder", StringComparison.OrdinalIgnoreCase);
+                   message.Contains("No se pudo resolver filesFolder", StringComparison.OrdinalIgnoreCase) ||
+                   message.Contains("No existe carpeta origen", StringComparison.OrdinalIgnoreCase) ||
+                   message.Contains("No se pudo resolver el Drive", StringComparison.OrdinalIgnoreCase) ||
+                   message.Contains("tiempo límite de", StringComparison.OrdinalIgnoreCase) ||
+                   message.Contains("configured HttpClient.Timeout", StringComparison.OrdinalIgnoreCase) ||
+                   message.Contains("Timeout esperando confirmacion de copia", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private sealed class ProcessRecordingState
+        {
+            public int ProcessedSections { get; set; } = 0;
+            public int SkippedInconsistentSections { get; set; } = 0;
         }
     }
 }

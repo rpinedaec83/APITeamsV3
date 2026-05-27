@@ -66,7 +66,7 @@ namespace APITeamsV3.Infrastructure.Services
                     var storage = await runtime.GetStorageAsync(company.CompanyKey, cancellationToken);
                     var manager = new RecurringJobManager(storage);
 
-                    if (!company.IsPilotMode || company.PilotSections.Count == 0 || !company.IsRecordingTransferJobEnabled)
+                    if (!company.IsRecordingTransferJobEnabled)
                     {
                         manager.RemoveIfExists(RecurringJobId);
                         continue;
@@ -75,14 +75,34 @@ namespace APITeamsV3.Infrastructure.Services
                     var cron = ResolveCron(company.RecordingTransferCron);
                     var timeZone = ResolveTimeZone(company.TimeZoneId);
 
-                    manager.AddOrUpdate<HangfireJobService>(
-                        RecurringJobId,
-                        service => service.RunPilotRecordingTransfers(company.CompanyKey, null),
-                        cron,
-                        new RecurringJobOptions
+                    if (company.IsPilotMode)
+                    {
+                        if (company.PilotSections.Count == 0)
                         {
-                            TimeZone = timeZone
-                        });
+                            manager.RemoveIfExists(RecurringJobId);
+                            continue;
+                        }
+
+                        manager.AddOrUpdate<HangfireJobService>(
+                            RecurringJobId,
+                            service => service.RunPilotRecordingTransfers(company.CompanyKey, null),
+                            cron,
+                            new RecurringJobOptions
+                            {
+                                TimeZone = timeZone
+                            });
+                    }
+                    else
+                    {
+                        manager.AddOrUpdate<HangfireJobService>(
+                            RecurringJobId,
+                            service => service.RunAllRecordingTransfers(company.CompanyKey, null),
+                            cron,
+                            new RecurringJobOptions
+                            {
+                                TimeZone = timeZone
+                            });
+                    }
                 }
                 catch (Exception ex)
                 {

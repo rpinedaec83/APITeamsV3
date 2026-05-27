@@ -1,10 +1,3 @@
-﻿USE [Academico]
-GO
-/****** Object:  StoredProcedure [dbo].[cTeamsPorSeccion]    Script Date: 7/04/2026 07:22:07 ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
  --————————————————————————————————————————————————————————————————————————————                                          
 --Creado por      : LARRIETA   08.10.2020                                      
 --Funcionalidad   : Creación de los equipos a demanda            
@@ -35,10 +28,11 @@ cTeamsPorSeccion @Opcion = 16, @IdSeccion =468389
 @18 25.09.2025 rpineda Regularizacion de Eventos 
 @19 11.03.2026  alaureano Para la opción 16, se filtran los horarios proximos y se ordena por el numero
 @20 13.03.2026 miquiroz se agrega nueva opcion 48 para la eliminacion del link de teams
-@21 07.04.2026 rpineda exclusion de ids para piloto de APITeams V3
+@21 07.04.2026 rpineda exclusion de ids para piloto de APITeams V3 para Zegel e IDAT
+@22 25.05.2026 rpineda tercer piloto - exclusion dinamica por periodo 2026-IIE (Zegel) y 2026-II (IDAT)
 */          
         
-ALTER PROCEDURE [dbo].[cTeamsPorSeccion] @Opcion INT = NULL          
+CREATE PROCEDURE [dbo].[cTeamsPorSeccion] @Opcion INT = NULL          
  ,@IdSeccion INT = NULL          
  ,@Sede VARCHAR(max) = NULL          
  ,@FechaMaximaAgendas VARCHAR(10) = NULL          
@@ -132,35 +126,100 @@ END
 --INI @21
 DECLARE @SeccionesOmitidas TABLE (IdSeccion INT PRIMARY KEY)
 
-INSERT INTO @SeccionesOmitidas (IdSeccion)
-VALUES (414994),
- (416759),
- (415002),
- (415010),
- (415018),
- (415026),
- (415034),
- (416760),
- (417429),
- (416761),
- (417431),
- (416756),
- (416758),
- (416757);
+IF @Empresa = '00002500'
+BEGIN
+	INSERT INTO @SeccionesOmitidas (IdSeccion)
+	VALUES
+		--primer piloto 14 secciones
+		(414994),
+		(416759),
+		(415002),
+		(415010),
+		(415018),
+		(415026),
+		(415034),
+		(416760),
+		(417429),
+		(416761),
+		(417431),
+		(416756),
+		(416758),
+		(416757),
+		--segundo piloto 16 secciones de captacion
+		(409526),
+		(409538),
+		(409562),
+		(409514),
+		(409550),
+		(409574),
+		(417234),
+		(409586),
+		(409533),
+		(409545),
+		(409569),
+		(409521),
+		(409557),
+		(417238),
+		(417332),
+		(409593);
+
+	--INI @22 tercer piloto - periodo 2026-II (IDAT)
+	INSERT INTO @SeccionesOmitidas (IdSeccion)
+	SELECT s.IdSeccion
+	FROM Seccion s WITH(NOLOCK)
+	INNER JOIN PromocionGrupo pg WITH(NOLOCK) ON s.IdGrupo = pg.IdGrupo AND s.IdPromocion = pg.IdPromocion
+	INNER JOIN Promocion p WITH(NOLOCK) ON pg.IdPromocion = p.IdPromocion
+	INNER JOIN Periodo pe WITH(NOLOCK) ON p.IdPeriodo = pe.IdPeriodo
+	WHERE pe.Codigo = '2026-II'
+	AND NOT EXISTS (SELECT 1 FROM @SeccionesOmitidas x WHERE x.IdSeccion = s.IdSeccion);
+	--FIN @22
+END
+
+IF @Empresa = '00002700'
+BEGIN
+	INSERT INTO @SeccionesOmitidas (IdSeccion)
+	VALUES
+		--segundo piloto 16 secciones de captacion
+		(665220),
+		(665232),
+		(665244),
+		(665172),
+		(665208),
+		(665184),
+		(675068),
+		(665196),
+		(665216),
+		(665228),
+		(665240),
+		(665168),
+		(665204),
+		(665180),
+		(670749),
+		(665192);
+
+	--INI @22 tercer piloto - periodo 2026-IIE (Zegel)
+	INSERT INTO @SeccionesOmitidas (IdSeccion)
+	SELECT s.IdSeccion
+	FROM Seccion s WITH(NOLOCK)
+	INNER JOIN PromocionGrupo pg WITH(NOLOCK) ON s.IdGrupo = pg.IdGrupo AND s.IdPromocion = pg.IdPromocion
+	INNER JOIN Promocion p WITH(NOLOCK) ON pg.IdPromocion = p.IdPromocion
+	INNER JOIN Periodo pe WITH(NOLOCK) ON p.IdPeriodo = pe.IdPeriodo
+	WHERE pe.Codigo = '2026-IIE'
+	AND NOT EXISTS (SELECT 1 FROM @SeccionesOmitidas x WHERE x.IdSeccion = s.IdSeccion);
+	--FIN @22
+END
 
 DECLARE @IdSeccionOmitida INT = COALESCE(@IdSeccion, @idSeccionSmart)
 
-IF @IdSeccionOmitida IS NOT NULL
- AND EXISTS (
-  SELECT 1
-  FROM @SeccionesOmitidas SO
-  WHERE SO.IdSeccion = @IdSeccionOmitida
-  )
- AND @Opcion IN (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 20, 21, 24, 30, 31, 37, 38, 45, 46, 47, 48)
+IF @IdSeccionOmitida IS NOT NULL AND EXISTS (
+		SELECT 1
+		FROM @SeccionesOmitidas SO
+		WHERE SO.IdSeccion = @IdSeccionOmitida
+		) AND @Opcion IN (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 20, 21, 24, 30, 31, 37, 38, 45, 46, 47, 48)
 BEGIN
- RETURN;
+	RETURN;
 END
---FIN @21
+		--FIN @21
           
 IF @Opcion = - 1          
 BEGIN          

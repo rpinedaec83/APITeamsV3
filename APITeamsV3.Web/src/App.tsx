@@ -9,6 +9,7 @@ import SchedulesPage from './pages/SchedulesPage';
 import ScheduleExecutionsPage from './pages/ScheduleExecutionsPage';
 import LogsPage from './pages/LogsPage';
 import ReportsPage from './pages/ReportsPage';
+import PilotManagementPage from './pages/PilotManagementPage';
 import MainLayout from './components/layout/MainLayout';
 
 import { MsalProvider, AuthenticatedTemplate, UnauthenticatedTemplate, useMsal } from "@azure/msal-react";
@@ -134,6 +135,7 @@ function AuthenticatedApp() {
           {/* Admin and IT Protected Routes */}
           <Route element={<RequiredRoleRoute allowedRoles={['ADMIN', 'IT']} />}>
             <Route path="/admin/company-configs" element={<CompanyConfigsPage />} />
+            <Route path="/admin/pilot-management" element={<PilotManagementPage />} />
             <Route path="/jobs" element={<JobsPage />} />
             <Route path="/schedules" element={<SchedulesPage />} />
             <Route path="/schedules/:id/executions" element={<ScheduleExecutionsPage />} />

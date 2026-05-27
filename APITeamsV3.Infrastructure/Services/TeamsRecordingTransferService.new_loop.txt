@@ -1,0 +1,204 @@
+            var generatedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var transferStartedAt = DateTimeOffset.UtcNow;
+
+            var semaphore = new SemaphoreSlim(3);
+            var tasks = recordings.Select(async recording =>
+            {
+                await semaphore.WaitAsync(cancellationToken);
+                try
+                {
+                    var fileResult = new RecordingTransferFileResult
+                    {
+                        SourceItemId = recording.Id ?? string.Empty,
+                        SourceName = recording.Name ?? string.Empty,
+                        SourceWebUrl = recording.WebUrl ?? string.Empty,
+                        SourceLastModifiedUtc = recording.LastModifiedDateTime ?? recording.CreatedDateTime
+                    };
+
+                    try
+                    {
+                        // Item 3: Check remaining budget before starting a new file copy.
+                        var remainingBudget = CalculateRemainingBudget(cancellationToken, transferStartedAt);
+                        if (remainingBudget <= TimeSpan.FromSeconds(30))
+                        {
+                            lock (result)
+                            {
+                                result.Warnings.Add($"Tiempo restante insuficiente ({remainingBudget.TotalSeconds:F0}s) para continuar copiando. Archivos pendientes omitidos.");
+                            }
+                            return;
+                        }
+
+                        if (string.IsNullOrWhiteSpace(recording.Id))
+                        {
+                            fileResult.Status = "Skipped";
+                            fileResult.Message = "Archivo sin Id en Graph, no procesable.";
+                            lock (result)
+                            {
+                                result.FilesSkipped++;
+                                result.Files.Add(fileResult);
+                            }
+                            return;
+                        }
+
+                        string friendlyName;
+                        lock (generatedNames)
+                        {
+                            friendlyName = BuildFriendlyName(recording, request, generatedNames);
+                        }
+                        
+                        fileResult.DestinationName = friendlyName;
+
+                        bool exists;
+                        lock (existingDestinationNames)
+                        {
+                            exists = existingDestinationNames.Contains(friendlyName);
+                        }
+
+                        if (_options.SkipIfFriendlyNameAlreadyExists && exists)
+                        {
+                            fileResult.Status = "Skipped";
+                            fileResult.Message = "Ya existe archivo destino con el nombre amigable.";
+                            lock (result)
+                            {
+                                result.FilesSkipped++;
+                                result.Files.Add(fileResult);
+                            }
+                            return;
+                        }
+
+                        var monitorUrl = await CopyAsync(
+                            graphClient,
+                            sourceDriveId,
+                            recording.Id,
+                            destination.DriveId,
+                            destination.FolderId,
+                            friendlyName,
+                            cancellationToken);
+
+                        var copiedItem = await WaitForCopiedItemAsync(
+                            graphClient,
+                            destination.DriveId,
+                            destination.FolderId,
+                            existingDestinationIds, // Safe to pass because WaitForCopiedItemAsync doesn't write to it, only reads, and only verifies missing new files
+                            friendlyName,
+                            recording.Size,
+                            monitorUrl,
+                            remainingBudget,
+                            cancellationToken);
+
+                        if (copiedItem == null)
+                        {
+                            fileResult.Status = "Error";
+                            fileResult.Message = "Timeout esperado confirmación de copia en SharePoint (se agotó el tiempo límite).";
+                            lock (result)
+                            {
+                                result.FilesErrored++;
+                                result.Errors.Add($"Timeout copiando '{recording.Name}'.");
+                                result.Files.Add(fileResult);
+                            }
+                            return;
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(copiedItem.Id))
+                        {
+                            lock (existingDestinationIds)
+                            {
+                                existingDestinationIds.Add(copiedItem.Id);
+                            }
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(copiedItem.Name))
+                        {
+                            lock (existingDestinationNames)
+                            {
+                                existingDestinationNames.Add(copiedItem.Name);
+                            }
+                            fileResult.DestinationName = copiedItem.Name;
+                        }
+
+                        fileResult.DestinationItemId = copiedItem.Id ?? string.Empty;
+                        fileResult.DestinationWebUrl = copiedItem.WebUrl ?? string.Empty;
+                        fileResult.Status = "Copied";
+                        fileResult.Message = "Archivo copiado al Team (SharePoint).";
+                        
+                        lock (result)
+                        {
+                            result.FilesCopied++;
+                        }
+
+                        if (_options.DeleteSourceAfterCopy)
+                        {
+                            try
+                            {
+                                // Item 6: Re-verify copied item exists with matching size before deleting source.
+                                var deleteAllowed = true;
+                                if (!string.IsNullOrWhiteSpace(copiedItem.Id))
+                                {
+                                    var verifiedItem = await TryGetItemByIdAsync(graphClient, destination.DriveId, copiedItem.Id, cancellationToken);
+                                    if (verifiedItem == null || (recording.Size.HasValue && recording.Size > 0 && verifiedItem.Size != recording.Size))
+                                    {
+                                        deleteAllowed = false;
+                                        fileResult.SourceDeleted = false;
+                                        lock (result)
+                                        {
+                                            result.Warnings.Add($"Re-verificación de '{friendlyName}' falló (esperado={recording.Size}, actual={verifiedItem?.Size}). Origen NO eliminado.");
+                                        }
+                                        _logger.LogWarning(
+                                            "Pre-delete verification failed for '{FriendlyName}'. Expected size {Expected}, got {Actual}. Source NOT deleted.",
+                                            friendlyName, recording.Size, verifiedItem?.Size);
+                                    }
+                                }
+
+                                if (deleteAllowed)
+                                {
+                                    await DeleteSourceItemAsync(graphClient, sourceDriveId, recording.Id, cancellationToken);
+                                    fileResult.SourceDeleted = true;
+                                    lock (result)
+                                    {
+                                        result.SourceFilesDeleted++;
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                fileResult.SourceDeleted = false;
+                                lock (result)
+                                {
+                                    result.SourceFilesDeleteErrors++;
+                                    result.Warnings.Add($"No se pudo eliminar origen '{recording.Name}' en OneDrive: {BuildGraphErrorMessage(ex)}");
+                                }
+                                _logger.LogWarning(ex, "Could not delete source recording {SourceId} after copy.", recording.Id);
+                            }
+                        }
+
+                        lock (result)
+                        {
+                            result.Files.Add(fileResult);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(
+                            ex,
+                            "Error transferring recording {SourceName} from organizer {Organizer} to Team {TeamId}.",
+                            recording.Name,
+                            result.OrganizerResolvedUserPrincipalName,
+                            request.TeamGroupId);
+
+                        fileResult.Status = "Error";
+                        fileResult.Message = BuildGraphErrorMessage(ex);
+                        lock (result)
+                        {
+                            result.FilesErrored++;
+                            result.Errors.Add($"{recording.Name}: {fileResult.Message}");
+                            result.Files.Add(fileResult);
+                        }
+                    }
+                }
+                finally
+                {
+                    semaphore.Release();
+                }
+            });
+
+            await Task.WhenAll(tasks);

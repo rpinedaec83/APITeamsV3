@@ -16,13 +16,10 @@ namespace APITeamsV3.Infrastructure.Services
     {
         private readonly IServiceProvider _serviceProvider;
         private readonly ILogger<DatabaseInitializerService> _logger;
-        private readonly ICurrentUserService _currentUserService;
-
-        public DatabaseInitializerService(IServiceProvider serviceProvider, ILogger<DatabaseInitializerService> logger, ICurrentUserService currentUserService)
+        public DatabaseInitializerService(IServiceProvider serviceProvider, ILogger<DatabaseInitializerService> logger)
         {
             _serviceProvider = serviceProvider;
             _logger = logger;
-            _currentUserService = currentUserService;
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -36,6 +33,8 @@ namespace APITeamsV3.Infrastructure.Services
             {
                 var context = services.GetRequiredService<CentralDbContext>();
                 var encryptionService = services.GetRequiredService<IEncryptionService>();
+
+                var currentUserService = services.GetRequiredService<ICurrentUserService>();
 
                 // Update View for SmartDbContext for ALL active tenants
                 var configs = await context.CompanyConfigs.Where(c => c.IsActive).ToListAsync(stoppingToken);
@@ -58,7 +57,7 @@ namespace APITeamsV3.Infrastructure.Services
                                 errorNumbersToAdd: null);
                         });
 
-                        using (var directSmartContext = new SmartDbContext(optionsBuilder.Options, null!, _currentUserService))
+                        using (var directSmartContext = new SmartDbContext(optionsBuilder.Options, null!, currentUserService))
                         {
                             var viewSql = GetViewSql();
                             // Use a timeout for the SQL command to avoid hanging the background service indefinitely

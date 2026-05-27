@@ -196,6 +196,12 @@ namespace APITeamsV3.Infrastructure.Persistence.Contexts
                 entity.HasNoKey();
             });
 
+            // SmartPilotSectionImport (Keyless for Raw SQL — pilot candidate sections query)
+            modelBuilder.Entity<APITeamsV3.Domain.Entities.SmartPilotSectionImport>(entity =>
+            {
+                entity.HasNoKey();
+            });
+
             modelBuilder.Entity<TenancyStatsDto>(entity =>
             {
                 entity.HasNoKey();
