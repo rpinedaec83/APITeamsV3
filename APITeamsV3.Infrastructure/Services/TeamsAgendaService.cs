@@ -184,10 +184,13 @@ namespace APITeamsV3.Infrastructure.Services
 
                 var graphClient = await CreateAgendaGraphClientAsync();
                 var timeZoneId = ResolveTimeZoneId();
-                var attendees = (request.RequiredAttendeeEmails ?? Array.Empty<string>())
+                var requestedEmails = (request.RequiredAttendeeEmails ?? Array.Empty<string>())
                     .Where(email => !string.IsNullOrWhiteSpace(email))
                     .Select(email => email.Trim())
                     .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                var attendees = requestedEmails
                     .Select(email => new Attendee
                     {
                         EmailAddress = new EmailAddress { Address = email },
@@ -195,52 +198,139 @@ namespace APITeamsV3.Infrastructure.Services
                     })
                     .ToList();
 
-                var patch = new Event();
-                if (request.Start.HasValue)
+                Event? currentEvent = null;
+                try
                 {
-                    patch.Start = new DateTimeTimeZone
-                    {
-                        DateTime = request.Start.Value.ToString("yyyy-MM-ddTHH:mm:ss"),
-                        TimeZone = timeZoneId
-                    };
+                    currentEvent = await graphClient.Groups[request.TeamId].Events[request.EventId].GetAsync(
+                        cancellationToken: cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Could not load meeting {EventId} in Team {TeamId} to check for changes before update.",
+                        request.EventId,
+                        request.TeamId);
                 }
 
-                if (request.End.HasValue)
+                var hasChanges = false;
+
+                if (currentEvent == null)
                 {
-                    patch.End = new DateTimeTimeZone
+                    hasChanges = true;
+                }
+                else
+                {
+                    if (request.Start.HasValue)
                     {
-                        DateTime = request.End.Value.ToString("yyyy-MM-ddTHH:mm:ss"),
-                        TimeZone = timeZoneId
-                    };
+                        if (DateTime.TryParse(currentEvent.Start?.DateTime, out var currentStart))
+                        {
+                            if (Math.Abs((currentStart - request.Start.Value).TotalSeconds) > 1)
+                            {
+                                hasChanges = true;
+                            }
+                        }
+                        else
+                        {
+                            hasChanges = true;
+                        }
+                    }
+
+                    if (request.End.HasValue && !hasChanges)
+                    {
+                        if (DateTime.TryParse(currentEvent.End?.DateTime, out var currentEnd))
+                        {
+                            if (Math.Abs((currentEnd - request.End.Value).TotalSeconds) > 1)
+                            {
+                                hasChanges = true;
+                            }
+                        }
+                        else
+                        {
+                            hasChanges = true;
+                        }
+                    }
+
+                    if (!hasChanges)
+                    {
+                        var currentEmails = currentEvent.Attendees?
+                            .Select(a => a.EmailAddress?.Address)
+                            .Where(e => !string.IsNullOrWhiteSpace(e))
+                            .Select(e => e!.Trim())
+                            .Distinct(StringComparer.OrdinalIgnoreCase)
+                            .OrderBy(e => e, StringComparer.OrdinalIgnoreCase)
+                            .ToList() ?? new List<string>();
+
+                        var orderedRequestedEmails = requestedEmails
+                            .OrderBy(e => e, StringComparer.OrdinalIgnoreCase)
+                            .ToList();
+
+                        if (!currentEmails.SequenceEqual(orderedRequestedEmails, StringComparer.OrdinalIgnoreCase))
+                        {
+                            hasChanges = true;
+                        }
+                    }
                 }
 
-                patch.Attendees = attendees;
+                if (hasChanges)
+                {
+                    var patch = new Event();
+                    if (request.Start.HasValue)
+                    {
+                        patch.Start = new DateTimeTimeZone
+                        {
+                            DateTime = request.Start.Value.ToString("yyyy-MM-ddTHH:mm:ss"),
+                            TimeZone = timeZoneId
+                        };
+                    }
 
-                await graphClient.Groups[request.TeamId].Events[request.EventId].PatchAsync(
-                    patch,
-                    cancellationToken: cancellationToken);
+                    if (request.End.HasValue)
+                    {
+                        patch.End = new DateTimeTimeZone
+                        {
+                            DateTime = request.End.Value.ToString("yyyy-MM-ddTHH:mm:ss"),
+                            TimeZone = timeZoneId
+                        };
+                    }
+
+                    patch.Attendees = attendees;
+
+                    await graphClient.Groups[request.TeamId].Events[request.EventId].PatchAsync(
+                        patch,
+                        cancellationToken: cancellationToken);
+                }
+                else
+                {
+                    _logger.LogInformation(
+                        "No changes detected for meeting {EventId} in Team {TeamId}, skipping patch.",
+                        request.EventId,
+                        request.TeamId);
+                }
 
                 var joinUrl = request.JoinUrl;
                 if (string.IsNullOrWhiteSpace(joinUrl))
                 {
-                    try
+                    if (currentEvent == null && hasChanges)
                     {
-                        var currentEvent = await graphClient.Groups[request.TeamId].Events[request.EventId].GetAsync(
-                            cancellationToken: cancellationToken);
+                        try
+                        {
+                            currentEvent = await graphClient.Groups[request.TeamId].Events[request.EventId].GetAsync(
+                                cancellationToken: cancellationToken);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(
+                                ex,
+                                "Could not reload meeting {EventId} in Team {TeamId} after update to resolve JoinUrl.",
+                                request.EventId,
+                                request.TeamId);
+                        }
+                    }
 
-                        joinUrl = currentEvent?.OnlineMeeting?.JoinUrl
-                            ?? currentEvent?.OnlineMeetingUrl
-                            ?? currentEvent?.WebLink
-                            ?? string.Empty;
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(
-                            ex,
-                            "Could not reload meeting {EventId} in Team {TeamId} after update to resolve JoinUrl.",
-                            request.EventId,
-                            request.TeamId);
-                    }
+                    joinUrl = currentEvent?.OnlineMeeting?.JoinUrl
+                        ?? currentEvent?.OnlineMeetingUrl
+                        ?? currentEvent?.WebLink
+                        ?? string.Empty;
                 }
 
                 if (!string.IsNullOrWhiteSpace(joinUrl))
