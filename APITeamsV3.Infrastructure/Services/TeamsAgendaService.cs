@@ -198,10 +198,30 @@ namespace APITeamsV3.Infrastructure.Services
                     })
                     .ToList();
 
+                var groupEmail = string.Empty;
+                try
+                {
+                    var group = await graphClient.Groups[request.TeamId].GetAsync(
+                        requestConfiguration =>
+                        {
+                            requestConfiguration.QueryParameters.Select = new[] { "id", "mail" };
+                        },
+                        cancellationToken: cancellationToken);
+                    groupEmail = group?.Mail;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Could not load Group {TeamId} mail to filter attendees.", request.TeamId);
+                }
+
                 Event? currentEvent = null;
                 try
                 {
                     currentEvent = await graphClient.Groups[request.TeamId].Events[request.EventId].GetAsync(
+                        requestConfiguration =>
+                        {
+                            requestConfiguration.Headers.Add("Prefer", $"outlook.timezone=\"{timeZoneId}\"");
+                        },
                         cancellationToken: cancellationToken);
                 }
                 catch (Exception ex)
@@ -253,21 +273,32 @@ namespace APITeamsV3.Infrastructure.Services
 
                     if (!hasChanges)
                     {
-                        var currentEmails = currentEvent.Attendees?
+                        var organizerEmail = currentEvent.Organizer?.EmailAddress?.Address;
+
+                        var filteredCurrentEmails = currentEvent.Attendees?
+                            .Where(a => string.IsNullOrWhiteSpace(organizerEmail) || !string.Equals(a.EmailAddress?.Address, organizerEmail, StringComparison.OrdinalIgnoreCase))
                             .Select(a => a.EmailAddress?.Address)
                             .Where(e => !string.IsNullOrWhiteSpace(e))
                             .Select(e => e!.Trim())
                             .Distinct(StringComparer.OrdinalIgnoreCase)
-                            .OrderBy(e => e, StringComparer.OrdinalIgnoreCase)
                             .ToList() ?? new List<string>();
 
-                        var orderedRequestedEmails = requestedEmails
-                            .OrderBy(e => e, StringComparer.OrdinalIgnoreCase)
+                        var added = requestedEmails.Except(filteredCurrentEmails, StringComparer.OrdinalIgnoreCase).ToList();
+                        var removed = filteredCurrentEmails.Except(requestedEmails, StringComparer.OrdinalIgnoreCase)
+                            .Where(e => 
+                                !e.EndsWith(".teams.ms", StringComparison.OrdinalIgnoreCase) &&
+                                (string.IsNullOrWhiteSpace(groupEmail) || !string.Equals(e, groupEmail, StringComparison.OrdinalIgnoreCase))
+                            )
                             .ToList();
 
-                        if (!currentEmails.SequenceEqual(orderedRequestedEmails, StringComparer.OrdinalIgnoreCase))
+                        if (added.Count > 0 || removed.Count > 0)
                         {
                             hasChanges = true;
+                            _logger.LogInformation(
+                                "Meeting {EventId} attendees changed. Added: {Added}, Removed: {Removed}",
+                                request.EventId,
+                                string.Join(", ", added),
+                                string.Join(", ", removed));
                         }
                     }
                 }
@@ -315,6 +346,10 @@ namespace APITeamsV3.Infrastructure.Services
                         try
                         {
                             currentEvent = await graphClient.Groups[request.TeamId].Events[request.EventId].GetAsync(
+                                requestConfiguration =>
+                                {
+                                    requestConfiguration.Headers.Add("Prefer", $"outlook.timezone=\"{timeZoneId}\"");
+                                },
                                 cancellationToken: cancellationToken);
                         }
                         catch (Exception ex)
@@ -436,19 +471,31 @@ namespace APITeamsV3.Infrastructure.Services
 
                 if (!changed)
                 {
-                    await PatchOnlineMeetingWithFallbackAsync(
-                        graphClient,
-                        onlineMeeting.Id,
-                        new OnlineMeeting
-                        {
-                            AllowedPresenters = OnlineMeetingPresenters.RoleIsPresenter,
-                            AllowRecording = true
-                        },
-                        cancellationToken);
+                    var needsSettingsPatch = onlineMeeting.AllowedPresenters != OnlineMeetingPresenters.RoleIsPresenter ||
+                                             onlineMeeting.AllowRecording != true;
 
-                    _logger.LogInformation(
-                        "Set allowedPresenters=roleIsPresenter and allowRecording=true for onlineMeeting {MeetingId} (no attendee role changes applied).",
-                        onlineMeeting.Id);
+                    if (needsSettingsPatch)
+                    {
+                        await PatchOnlineMeetingWithFallbackAsync(
+                            graphClient,
+                            onlineMeeting.Id,
+                            new OnlineMeeting
+                            {
+                                AllowedPresenters = OnlineMeetingPresenters.RoleIsPresenter,
+                                AllowRecording = true
+                            },
+                            cancellationToken);
+
+                        _logger.LogInformation(
+                            "Set allowedPresenters=roleIsPresenter and allowRecording=true for onlineMeeting {MeetingId} (no attendee role changes applied).",
+                            onlineMeeting.Id);
+                    }
+                    else
+                    {
+                        _logger.LogInformation(
+                            "OnlineMeeting {MeetingId} already has correct presenters and settings. No patch required.",
+                            onlineMeeting.Id);
+                    }
                     return;
                 }
 
