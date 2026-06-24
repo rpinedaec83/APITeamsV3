@@ -1,5 +1,5 @@
 import type { SelectTabData, TabValue } from '@fluentui/react-components';
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import {
     TabList,
@@ -68,6 +68,10 @@ interface SectionData {
     fechaFin?: string | null;
     linkGrabacion?: string | null;
     linkSharePoint?: string | null;
+    sharePointTotalBytes?: number | null;
+    sharePointUsedBytes?: number | null;
+    sharePointRemainingBytes?: number | null;
+    sharePointPercentAvailable?: number | null;
     hasTeam: boolean;
     esTeams: boolean; // Added to enforce academic flag check
     ineligibilityReason?: string;
@@ -271,6 +275,17 @@ const copyTextToClipboard = async (text: string) => {
     }
 };
 
+interface DriveQuotaResult {
+    totalBytes: number;
+    usedBytes: number;
+    remainingBytes: number;
+    percentAvailable: number;
+    state: string;
+    userPrincipalName: string;
+    errorMessage: string;
+    success: boolean;
+}
+
 const OperationsPage: React.FC = () => {
     const styles = useStyles();
     const apiClient = useApiClient();
@@ -278,11 +293,53 @@ const OperationsPage: React.FC = () => {
     const recreateProvisioningWaitMs = 5 * 60 * 1000;
 
     const [loading, setLoading] = useState(false);
+    const [storageQuota, setStorageQuota] = useState<DriveQuotaResult | null>(null);
+
+    const fetchStorageQuota = async () => {
+        try {
+            const response = await apiClient.get<DriveQuotaResult>('/recordings/storage-quota');
+            if (response.data && response.data.success) {
+                setStorageQuota(response.data);
+            } else {
+                console.error(response.data?.errorMessage || 'Error al cargar almacenamiento');
+            }
+        } catch (err) {
+            console.error('Error fetching storage quota:', err);
+        }
+    };
+
+    useEffect(() => {
+        fetchStorageQuota();
+    }, []);
     const [teamActionInProgress, setTeamActionInProgress] = useState<TeamActionProgress>(null);
     const [error, setError] = useState('');
 
     // State for Top Tabs
     const [selectedTab, setSelectedTab] = useState<TabValue>('seccion');
+
+    // State for Section Sub-tabs and Attendance
+    const [seccionSubTab, setSeccionSubTab] = useState<'alumnos' | 'asistencia'>('alumnos');
+    const [attendanceData, setAttendanceData] = useState<any>(null);
+    const [loadingAttendance, setLoadingAttendance] = useState(false);
+    const [selectedReportId, setSelectedReportId] = useState<string>('');
+
+    const fetchAttendance = async () => {
+        if (!seccionData?.idSeccion) return;
+        setLoadingAttendance(true);
+        try {
+            const response = await apiClient.get(`/sections/${seccionData.idSeccion}/attendance`);
+            setAttendanceData(response.data);
+            if (response.data?.reports && response.data.reports.length > 0) {
+                setSelectedReportId(response.data.reports[0].id);
+            }
+        } catch (err: any) {
+            console.error('Error fetching attendance:', err);
+            const errMsg = err.response?.data?.message || 'No se pudo obtener el reporte de asistencia de la reunión.';
+            showError(errMsg);
+        } finally {
+            setLoadingAttendance(false);
+        }
+    };
 
 
     // Form State (Seccion)
@@ -379,6 +436,9 @@ const OperationsPage: React.FC = () => {
         setLoading(true);
         setError('');
         setSeccionData(null);
+        setSeccionSubTab('alumnos');
+        setAttendanceData(null);
+        setSelectedReportId('');
         try {
             const response = await apiClient.get(`/sections/search?code=${seccionCodigo}${isGestor ? '&skipSharePoint=true' : ''}`);
             setSeccionData(response.data);
@@ -811,6 +871,44 @@ const OperationsPage: React.FC = () => {
                         <div style={{ fontSize: '12px', color: tokens.colorNeutralForeground2 }}>Gestión de Aprovisionamiento de Teams</div>
                     </div>
                 </div>
+
+                {storageQuota && (
+                    <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '12px',
+                        backgroundColor: tokens.colorNeutralBackground2,
+                        padding: '8px 16px',
+                        borderRadius: tokens.borderRadiusMedium,
+                        border: `1px solid ${tokens.colorNeutralStroke2}`,
+                        fontSize: '13px',
+                    }}>
+                        <VideoRegular style={{ color: tokens.colorBrandForeground1, fontSize: '18px' }} />
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                            <div style={{ fontWeight: 'semibold', display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                <span>Grabaciones (OneDrive):</span>
+                                <span style={{ 
+                                    color: storageQuota.percentAvailable < 15 ? tokens.colorPaletteRedForeground1 : tokens.colorBrandForeground1,
+                                    fontWeight: 'bold' 
+                                }}>
+                                    {((storageQuota.remainingBytes) / (1024 * 1024 * 1024)).toFixed(1)} GB libres ({storageQuota.percentAvailable.toFixed(1)}%)
+                                </span>
+                            </div>
+                            <div style={{ display: 'flex', gap: '12px', color: tokens.colorNeutralForeground2, fontSize: '11px' }}>
+                                <span>Total: {((storageQuota.totalBytes) / (1024 * 1024 * 1024)).toFixed(1)} GB</span>
+                                <span>•</span>
+                                <span>Usado: {((storageQuota.usedBytes) / (1024 * 1024 * 1024)).toFixed(1)} GB</span>
+                                {storageQuota.userPrincipalName && (
+                                    <>
+                                        <span>•</span>
+                                        <span style={{ textTransform: 'lowercase' }}>{storageQuota.userPrincipalName}</span>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 <div style={{ display: 'flex', gap: '10px' }}>
                     <Button 
                         icon={<ArrowUploadRegular />} 
@@ -894,9 +992,41 @@ const OperationsPage: React.FC = () => {
                             <div className={styles.actionsRegion}>
                                 {seccionData.hasTeam ? (
                                     <>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: tokens.colorPaletteGreenForeground1 }}>
-                                            <CheckmarkRegular fontSize={24} />
-                                            <Title3>Equipo Activo</Title3>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: tokens.colorPaletteGreenForeground1 }}>
+                                                <CheckmarkRegular fontSize={24} />
+                                                <Title3>Equipo Activo</Title3>
+                                            </div>
+                                            {seccionData.sharePointTotalBytes !== undefined && seccionData.sharePointTotalBytes !== null && (
+                                                <div style={{
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '12px',
+                                                    backgroundColor: tokens.colorNeutralBackground2,
+                                                    padding: '8px 16px',
+                                                    borderRadius: tokens.borderRadiusMedium,
+                                                    border: `1px solid ${tokens.colorNeutralStroke2}`,
+                                                    fontSize: '13px',
+                                                }}>
+                                                    <VideoRegular style={{ color: tokens.colorBrandForeground1, fontSize: '18px' }} />
+                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                                        <div style={{ fontWeight: 'semibold', display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                                            <span>Almacenamiento (SharePoint):</span>
+                                                            <span style={{ 
+                                                                color: (seccionData.sharePointPercentAvailable ?? 100) < 15 ? tokens.colorPaletteRedForeground1 : tokens.colorBrandForeground1,
+                                                                fontWeight: 'bold' 
+                                                            }}>
+                                                                {((seccionData.sharePointRemainingBytes ?? 0) / (1024 * 1024 * 1024)).toFixed(1)} GB libres ({seccionData.sharePointPercentAvailable?.toFixed(1)}%)
+                                                            </span>
+                                                        </div>
+                                                        <div style={{ display: 'flex', gap: '12px', color: tokens.colorNeutralForeground2, fontSize: '11px' }}>
+                                                            <span>Total: {((seccionData.sharePointTotalBytes ?? 0) / (1024 * 1024 * 1024)).toFixed(1)} GB</span>
+                                                            <span>•</span>
+                                                            <span>Usado: {((seccionData.sharePointUsedBytes ?? 0) / (1024 * 1024 * 1024)).toFixed(1)} GB</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )}
                                         </div>
                                         <span style={{ flex: 1 }}></span>
                                         <Button
@@ -1053,135 +1183,251 @@ const OperationsPage: React.FC = () => {
 
             {/* Bottom Data Grids */}
             <div className={styles.bottomTabs}>
-                <Title3>Resultados y Detalles</Title3>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '16px' }}>
+                    <Title3>Resultados y Detalles</Title3>
+                    {selectedTab === 'seccion' && seccionData && (
+                        <TabList
+                            selectedValue={seccionSubTab}
+                            onTabSelect={(_e, d) => {
+                                const val = d.value as 'alumnos' | 'asistencia';
+                                setSeccionSubTab(val);
+                                if (val === 'asistencia' && !attendanceData) {
+                                    fetchAttendance();
+                                }
+                            }}
+                            appearance="subtle"
+                        >
+                            <Tab value="alumnos">Listado de Alumnos</Tab>
+                            <Tab value="asistencia">Asistencia de Reunión</Tab>
+                        </TabList>
+                    )}
+                </div>
                 <div className={styles.tableContainer}>
-                    <div style={{ padding: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div style={{ fontWeight: 600, color: tokens.colorNeutralForeground1 }}>
-                            {selectedTab === 'seccion' ? `Listado de Alumnos (${processedData.length || 0})` : `Cursos Matriculados (${processedData.length || 0})`}
-                        </div>
-                        <Input
-                            placeholder="Filtrar por nombre, código o estado..."
-                            size="small"
-                            contentBefore={<SearchRegular />}
-                            value={gridSearch}
-                            onChange={(_e, d) => setGridSearch(d.value)}
-                            style={{ minWidth: '300px' }}
-                        />
-                    </div>
+                    {selectedTab === 'seccion' && seccionSubTab === 'asistencia' ? (
+                        loadingAttendance ? (
+                            <div style={{ padding: '40px', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                                <Spinner label="Cargando asistencia desde Teams..." />
+                            </div>
+                        ) : !attendanceData || !attendanceData.reports || attendanceData.reports.length === 0 ? (
+                            <div style={{ padding: '40px', textAlign: 'center', color: tokens.colorNeutralForeground2 }}>
+                                <VideoRegular fontSize={48} style={{ marginBottom: '12px' }} />
+                                <div>No se encontraron reportes de asistencia para esta sección en Teams.</div>
+                                <div style={{ fontSize: '12px', marginTop: '4px' }}>Esto puede deberse a que la reunión virtual aún no se ha iniciado o no tiene participantes registrados.</div>
+                            </div>
+                        ) : (
+                            <div>
+                                <div style={{ padding: '16px', display: 'flex', gap: '16px', alignItems: 'center', backgroundColor: tokens.colorNeutralBackground3, borderBottom: `1px solid ${tokens.colorNeutralStroke1}` }}>
+                                    <Label style={{ fontWeight: '600' }}>Reuniones Realizadas:</Label>
+                                    <select
+                                        value={selectedReportId}
+                                        onChange={(e) => setSelectedReportId(e.target.value)}
+                                        style={{
+                                            padding: '6px 12px',
+                                            borderRadius: tokens.borderRadiusMedium,
+                                            border: `1px solid ${tokens.colorNeutralStroke1}`,
+                                            backgroundColor: tokens.colorNeutralBackground1,
+                                            fontSize: '13px',
+                                            cursor: 'pointer',
+                                            minWidth: '280px'
+                                        }}
+                                    >
+                                        {attendanceData.reports.map((report: any) => (
+                                            <option key={report.id} value={report.id}>
+                                                Sesión del {formatDateTime(report.meetingStartDateTime)} ({report.totalParticipantCount} asistentes)
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                                
+                                {(() => {
+                                    const selectedReport = attendanceData.reports.find((r: any) => r.id === selectedReportId);
+                                    if (!selectedReport) return null;
+                                    return (
+                                        <Table>
+                                            <TableHeader>
+                                                <TableRow>
+                                                    <TableHeaderCell style={{ width: '40px' }}>#</TableHeaderCell>
+                                                    <TableHeaderCell style={{ fontWeight: '600' }}>Nombre / Correo</TableHeaderCell>
+                                                    <TableHeaderCell style={{ fontWeight: '600' }}>Rol</TableHeaderCell>
+                                                    <TableHeaderCell style={{ fontWeight: '600' }}>Tiempo Total</TableHeaderCell>
+                                                    <TableHeaderCell style={{ fontWeight: '600' }}>Detalle de Conexiones</TableHeaderCell>
+                                                </TableRow>
+                                            </TableHeader>
+                                            <TableBody>
+                                                {selectedReport.attendanceRecords && selectedReport.attendanceRecords.length > 0 ? (
+                                                    selectedReport.attendanceRecords.map((record: any, idx: number) => (
+                                                        <TableRow key={idx}>
+                                                            <TableCell>{idx + 1}</TableCell>
+                                                            <TableCell>
+                                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                                    <Avatar name={record.displayName || 'Invitado'} size={24} color="colorful" />
+                                                                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                                                        <span style={{ fontWeight: 600 }}>{record.displayName || 'Invitado'}</span>
+                                                                        <span style={{ fontSize: '11px', color: tokens.colorNeutralForeground2 }}>{record.emailAddress || 'Sin correo registrado'}</span>
+                                                                    </div>
+                                                                </div>
+                                                            </TableCell>
+                                                            <TableCell>
+                                                                <Badge appearance="outline" color={record.role === 'Organizer' ? 'brand' : 'informative'}>
+                                                                    {record.role === 'Organizer' ? 'Organizador' : record.role === 'Presenter' ? 'Presentador' : 'Asistente'}
+                                                                </Badge>
+                                                            </TableCell>
+                                                            <TableCell style={{ fontWeight: '600' }}>
+                                                                {formatDuration(record.totalAttendanceInSeconds)}
+                                                            </TableCell>
+                                                            <TableCell>
+                                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontSize: '11px' }}>
+                                                                    {record.intervals && record.intervals.map((interval: any, iIdx: number) => (
+                                                                        <div key={iIdx} style={{ color: tokens.colorNeutralForeground2 }}>
+                                                                            Entrada: {formatTimeOnly(interval.joinDateTime)} • Salida: {formatTimeOnly(interval.leaveDateTime)} ({formatDuration(interval.durationInSeconds)})
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            </TableCell>
+                                                        </TableRow>
+                                                    ))
+                                                ) : (
+                                                    <TableRow>
+                                                        <TableCell colSpan={5} style={{ textAlign: 'center', padding: '20px' }}>No hay registros de asistencia en este reporte.</TableCell>
+                                                    </TableRow>
+                                                )}
+                                            </TableBody>
+                                        </Table>
+                                    );
+                                })()}
+                            </div>
+                        )
+                    ) : (
+                        <>
+                            <div style={{ padding: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <div style={{ fontWeight: 600, color: tokens.colorNeutralForeground1 }}>
+                                    {selectedTab === 'seccion' ? `Listado de Alumnos (${processedData.length || 0})` : `Cursos Matriculados (${processedData.length || 0})`}
+                                </div>
+                                <Input
+                                    placeholder="Filtrar por nombre, código o estado..."
+                                    size="small"
+                                    contentBefore={<SearchRegular />}
+                                    value={gridSearch}
+                                    onChange={(_e, d) => setGridSearch(d.value)}
+                                    style={{ minWidth: '300px' }}
+                                />
+                            </div>
 
-                    <Divider />
+                            <Divider />
 
-                    <Table>
-                        <TableHeader>
-                            <TableRow>
-                                <TableHeaderCell style={{ width: '40px' }}>#</TableHeaderCell>
-                                <TableHeaderCell 
-                                    style={{ cursor: 'pointer' }} 
-                                    onClick={() => handleSort(selectedTab === 'seccion' ? 'code' : 'sectionCode')}
-                                >
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                        Código
-                                        {sortConfig.key === (selectedTab === 'seccion' ? 'code' : 'sectionCode') && (
-                                            sortConfig.direction === 'ascending' ? <TriangleUpRegular /> : <TriangleDownRegular />
-                                        )}
-                                    </div>
-                                </TableHeaderCell>
-                                <TableHeaderCell 
-                                    style={{ cursor: 'pointer' }} 
-                                    onClick={() => handleSort(selectedTab === 'seccion' ? 'name' : 'courseName')}
-                                >
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                        {selectedTab === 'seccion' ? 'Nombre' : 'Curso / Sección'}
-                                        {sortConfig.key === (selectedTab === 'seccion' ? 'name' : 'courseName') && (
-                                            sortConfig.direction === 'ascending' ? <TriangleUpRegular /> : <TriangleDownRegular />
-                                        )}
-                                    </div>
-                                </TableHeaderCell>
-                                <TableHeaderCell 
-                                    style={{ cursor: 'pointer' }} 
-                                    onClick={() => handleSort(selectedTab === 'seccion' ? 'status' : 'studentStatus')}
-                                >
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                        Estado
-                                        {sortConfig.key === (selectedTab === 'seccion' ? 'status' : 'studentStatus') && (
-                                            sortConfig.direction === 'ascending' ? <TriangleUpRegular /> : <TriangleDownRegular />
-                                        )}
-                                    </div>
-                                </TableHeaderCell>
-                            </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                            {processedData.length > 0 ? (
-                                processedData.map((item: any, index) => (
-                                    <TableRow key={index}>
-                                        <TableCell>{index + 1}</TableCell>
-                                        <TableCell style={{ fontFamily: 'monospace' }}>
-                                            {selectedTab === 'seccion' ? item.code : item.sectionCode}
-                                        </TableCell>
-                                        <TableCell>
-                                            {selectedTab === 'seccion' ? (
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                    <Avatar name={item.name} size={24} color="colorful" />
-                                                    <span style={{ fontWeight: 600 }}>{item.name || 'MISSING'}</span>
-                                                </div>
-                                            ) : (
-                                                <span style={{ fontWeight: 600 }}>{item.courseName}</span>
-                                            )}
-                                        </TableCell>
-                                        <TableCell>
-                                            {selectedTab === 'seccion' ? (
-                                                <Badge
-                                                    appearance="filled"
-                                                    color={
-                                                        (item.status === 'En Team') ? 'success' :
-                                                            (item.status === 'Pendiente') ? 'warning' :
-                                                                (item.status === 'Sin Team') ? 'danger' :
-                                                                    'brand'
-                                                    }
-                                                    className={styles.statusBadge}
-                                                >
-                                                    {item.status}
-                                                </Badge>
-                                            ) : (
-                                                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                                                    <Badge appearance="outline" color={item.teamStatus === 'Activo' ? 'success' : 'important'}>
-                                                        Team: {item.teamStatus}
-                                                    </Badge>
-                                                    <Badge
-                                                        appearance="filled"
-                                                        color={
-                                                            item.studentStatus === 'En Team' ? 'success' :
-                                                                item.studentStatus === 'Pendiente' ? 'warning' : 'danger'
-                                                        }
-                                                    >
-                                                        {item.studentStatus}
-                                                    </Badge>
-                                                </div>
-                                            )}
-                                        </TableCell>
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHeaderCell style={{ width: '40px' }}>#</TableHeaderCell>
+                                        <TableHeaderCell 
+                                            style={{ cursor: 'pointer' }} 
+                                            onClick={() => handleSort(selectedTab === 'seccion' ? 'code' : 'sectionCode')}
+                                        >
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                Código
+                                                {sortConfig.key === (selectedTab === 'seccion' ? 'code' : 'sectionCode') && (
+                                                    sortConfig.direction === 'ascending' ? <TriangleUpRegular /> : <TriangleDownRegular />
+                                                )}
+                                            </div>
+                                        </TableHeaderCell>
+                                        <TableHeaderCell 
+                                            style={{ cursor: 'pointer' }} 
+                                            onClick={() => handleSort(selectedTab === 'seccion' ? 'name' : 'courseName')}
+                                        >
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                {selectedTab === 'seccion' ? 'Nombre' : 'Curso / Sección'}
+                                                {sortConfig.key === (selectedTab === 'seccion' ? 'name' : 'courseName') && (
+                                                    sortConfig.direction === 'ascending' ? <TriangleUpRegular /> : <TriangleDownRegular />
+                                                )}
+                                            </div>
+                                        </TableHeaderCell>
+                                        <TableHeaderCell 
+                                            style={{ cursor: 'pointer' }} 
+                                            onClick={() => handleSort(selectedTab === 'seccion' ? 'status' : 'studentStatus')}
+                                        >
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                Estado
+                                                {sortConfig.key === (selectedTab === 'seccion' ? 'status' : 'studentStatus') && (
+                                                    sortConfig.direction === 'ascending' ? <TriangleUpRegular /> : <TriangleDownRegular />
+                                                )}
+                                            </div>
+                                        </TableHeaderCell>
                                     </TableRow>
-                                ))
-                            ) : (
-                                <TableRow>
-                                    <TableCell colSpan={4} style={{ textAlign: 'center', padding: '40px', color: tokens.colorNeutralForeground3 }}>
-                                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
-                                            {(selectedTab === 'seccion' ? !seccionData : !alumnoData) ? (
-                                                <>
-                                                    <GridDotsRegular fontSize={48} />
-                                                    No hay datos cargados. Por favor busca una {(selectedTab === 'seccion' ? 'sección' : 'alumno')}.
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <SearchRegular fontSize={48} />
-                                                    No se encontraron resultados que coincidan con la búsqueda.
-                                                </>
-                                            )}
-                                        </div>
-                                    </TableCell>
-                                </TableRow>
-                            )}
-                        </TableBody>
-                    </Table>
+                                </TableHeader>
+                                <TableBody>
+                                    {processedData.length > 0 ? (
+                                        processedData.map((item: any, index) => (
+                                            <TableRow key={index}>
+                                                <TableCell>{index + 1}</TableCell>
+                                                <TableCell style={{ fontFamily: 'monospace' }}>
+                                                    {selectedTab === 'seccion' ? item.code : item.sectionCode}
+                                                </TableCell>
+                                                <TableCell>
+                                                    {selectedTab === 'seccion' ? (
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                            <Avatar name={item.name} size={24} color="colorful" />
+                                                            <span style={{ fontWeight: 600 }}>{item.name || 'MISSING'}</span>
+                                                        </div>
+                                                    ) : (
+                                                        <span style={{ fontWeight: 600 }}>{item.courseName}</span>
+                                                    )}
+                                                </TableCell>
+                                                <TableCell>
+                                                    {selectedTab === 'seccion' ? (
+                                                        <Badge
+                                                            appearance="filled"
+                                                            color={
+                                                                (item.status === 'En Team') ? 'success' :
+                                                                    (item.status === 'Pendiente') ? 'warning' :
+                                                                        (item.status === 'Sin Team') ? 'danger' :
+                                                                            'brand'
+                                                            }
+                                                            className={styles.statusBadge}
+                                                        >
+                                                            {item.status}
+                                                        </Badge>
+                                                    ) : (
+                                                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                                            <Badge appearance="outline" color={item.teamStatus === 'Activo' ? 'success' : 'important'}>
+                                                                Team: {item.teamStatus}
+                                                            </Badge>
+                                                            <Badge
+                                                                appearance="filled"
+                                                                color={
+                                                                    item.studentStatus === 'En Team' ? 'success' :
+                                                                        item.studentStatus === 'Pendiente' ? 'warning' : 'danger'
+                                                                }
+                                                            >
+                                                                {item.studentStatus}
+                                                            </Badge>
+                                                        </div>
+                                                    )}
+                                                </TableCell>
+                                            </TableRow>
+                                        ))
+                                    ) : (
+                                        <TableRow>
+                                            <TableCell colSpan={4} style={{ textAlign: 'center', padding: '40px', color: tokens.colorNeutralForeground3 }}>
+                                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+                                                    {(selectedTab === 'seccion' ? !seccionData : !alumnoData) ? (
+                                                        <>
+                                                            <GridDotsRegular fontSize={48} />
+                                                            No hay datos cargados. Por favor busca una {(selectedTab === 'seccion' ? 'sección' : 'alumno')}.
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <SearchRegular fontSize={48} />
+                                                            No se encontraron resultados que coincidan con la búsqueda.
+                                                        </>
+                                                    )}
+                                                </div>
+                                            </TableCell>
+                                        </TableRow>
+                                    )}
+                                </TableBody>
+                            </Table>
+                        </>
+                    )}
                 </div>
             </div>
         </div>
@@ -1237,5 +1483,44 @@ const CopyDetailItem: React.FC<{
         </div>
     );
 }
+
+const formatDateTime = (value?: string | null) => {
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        return value;
+    }
+    return new Intl.DateTimeFormat('es-PE', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+    }).format(date);
+};
+
+const formatTimeOnly = (value?: string | null) => {
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        return value;
+    }
+    return new Intl.DateTimeFormat('es-PE', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+    }).format(date);
+};
+
+const formatDuration = (seconds?: number | null) => {
+    if (seconds === undefined || seconds === null) return '0s';
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    if (h > 0) return `${h}h ${m}m ${s}s`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+};
 
 export default OperationsPage;

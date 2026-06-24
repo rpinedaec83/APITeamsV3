@@ -1672,6 +1672,78 @@ namespace APITeamsV3.Infrastructure.Services
             }
         }
 
+        public async Task<DriveQuotaResult> GetStorageQuotaAsync(CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                var graphClient = await CreatePreferredGraphClientAsync();
+                var organizerKey = await ResolveOrganizerFromAplicativosTeamsAsync(cancellationToken);
+                
+                if (string.IsNullOrWhiteSpace(organizerKey))
+                {
+                    return new DriveQuotaResult
+                    {
+                        Success = false,
+                        ErrorMessage = "No se pudo resolver el organizador de grabaciones (cuenta técnica activa en AplicativosTeams)."
+                    };
+                }
+
+                var organizer = await graphClient.Users[organizerKey].GetAsync(
+                    requestConfiguration => requestConfiguration.QueryParameters.Select = ["id", "mail", "userPrincipalName"],
+                    cancellationToken);
+
+                if (organizer == null || string.IsNullOrWhiteSpace(organizer.Id))
+                {
+                    return new DriveQuotaResult
+                    {
+                        Success = false,
+                        ErrorMessage = $"No se encontró la cuenta técnica '{organizerKey}' en Graph."
+                    };
+                }
+
+                var upn = organizer.UserPrincipalName ?? organizer.Mail ?? organizerKey;
+
+                var drive = await graphClient.Users[organizer.Id].Drive.GetAsync(
+                    requestConfiguration => requestConfiguration.QueryParameters.Select = ["id", "quota"],
+                    cancellationToken);
+
+                if (drive?.Quota == null)
+                {
+                    return new DriveQuotaResult
+                    {
+                        Success = false,
+                        UserPrincipalName = upn,
+                        ErrorMessage = "No se pudo recuperar la información de cuota (quota) del Drive del usuario."
+                    };
+                }
+
+                long total = drive.Quota.Total ?? 0;
+                long used = drive.Quota.Used ?? 0;
+                long remaining = drive.Quota.Remaining ?? 0;
+                double percentAvailable = total > 0 ? ((double)remaining / total) * 100 : 0;
+
+                return new DriveQuotaResult
+                {
+                    Success = true,
+                    TotalBytes = total,
+                    UsedBytes = used,
+                    RemainingBytes = remaining,
+                    PercentAvailable = percentAvailable,
+                    State = drive.Quota.State ?? string.Empty,
+                    UserPrincipalName = upn
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving storage quota for active technical account.");
+                return new DriveQuotaResult
+                {
+                    Success = false,
+                    ErrorMessage = $"Error al consultar Graph API: {ex.Message}"
+                };
+            }
+        }
+
         private sealed class DestinationContext
         {
             public string DriveId { get; set; } = string.Empty;
@@ -1687,6 +1759,3 @@ namespace APITeamsV3.Infrastructure.Services
         }
     }
 }
-
-
-

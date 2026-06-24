@@ -243,9 +243,13 @@ namespace APITeamsV3.Infrastructure.Services
                 {
                     if (request.Start.HasValue)
                     {
-                        if (DateTime.TryParse(currentEvent.Start?.DateTime, out var currentStart))
+                        var currentStartUtc = ToUtcDateTime(currentEvent.Start?.DateTime, currentEvent.Start?.TimeZone);
+                        var requestStartUtc = ToUtcDateTime(request.Start, timeZoneId);
+
+                        if (currentStartUtc.HasValue && requestStartUtc.HasValue)
                         {
-                            if (Math.Abs((currentStart - request.Start.Value).TotalSeconds) > 1)
+                            if (currentStartUtc.Value.TimeOfDay != requestStartUtc.Value.TimeOfDay ||
+                                requestStartUtc.Value.Date > currentStartUtc.Value.Date)
                             {
                                 hasChanges = true;
                             }
@@ -258,9 +262,13 @@ namespace APITeamsV3.Infrastructure.Services
 
                     if (request.End.HasValue && !hasChanges)
                     {
-                        if (DateTime.TryParse(currentEvent.End?.DateTime, out var currentEnd))
+                        var currentEndUtc = ToUtcDateTime(currentEvent.End?.DateTime, currentEvent.End?.TimeZone);
+                        var requestEndUtc = ToUtcDateTime(request.End, timeZoneId);
+
+                        if (currentEndUtc.HasValue && requestEndUtc.HasValue)
                         {
-                            if (Math.Abs((currentEnd - request.End.Value).TotalSeconds) > 1)
+                            if (currentEndUtc.Value.TimeOfDay != requestEndUtc.Value.TimeOfDay ||
+                                requestEndUtc.Value.Date > currentEndUtc.Value.Date)
                             {
                                 hasChanges = true;
                             }
@@ -971,6 +979,60 @@ namespace APITeamsV3.Infrastructure.Services
             }
 
             return "SA Pacific Standard Time";
+        }
+        private DateTime? ToUtcDateTime(string? dateTimeStr, string? timeZoneId)
+        {
+            if (string.IsNullOrWhiteSpace(dateTimeStr))
+            {
+                return null;
+            }
+
+            if (!DateTime.TryParse(dateTimeStr, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var parsedDateTime))
+            {
+                return null;
+            }
+
+            if (string.IsNullOrWhiteSpace(timeZoneId) || string.Equals(timeZoneId, "UTC", StringComparison.OrdinalIgnoreCase))
+            {
+                return DateTime.SpecifyKind(parsedDateTime, DateTimeKind.Utc);
+            }
+
+            try
+            {
+                var tz = TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
+                var unspecifiedDateTime = DateTime.SpecifyKind(parsedDateTime, DateTimeKind.Unspecified);
+                return TimeZoneInfo.ConvertTimeToUtc(unspecifiedDateTime, tz);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not resolve timezone {TimeZoneId} for date conversion. Treating as UTC.", timeZoneId);
+                return DateTime.SpecifyKind(parsedDateTime, DateTimeKind.Utc);
+            }
+        }
+
+        private DateTime? ToUtcDateTime(DateTime? localDateTime, string? timeZoneId)
+        {
+            if (!localDateTime.HasValue)
+            {
+                return null;
+            }
+
+            if (string.IsNullOrWhiteSpace(timeZoneId) || string.Equals(timeZoneId, "UTC", StringComparison.OrdinalIgnoreCase))
+            {
+                return DateTime.SpecifyKind(localDateTime.Value, DateTimeKind.Utc);
+            }
+
+            try
+            {
+                var tz = TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
+                var unspecifiedDateTime = DateTime.SpecifyKind(localDateTime.Value, DateTimeKind.Unspecified);
+                return TimeZoneInfo.ConvertTimeToUtc(unspecifiedDateTime, tz);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not resolve timezone {TimeZoneId} for request datetime conversion. Treating as UTC.", timeZoneId);
+                return DateTime.SpecifyKind(localDateTime.Value, DateTimeKind.Utc);
+            }
         }
 
         private static string ToGraphDayName(System.DayOfWeek day) =>

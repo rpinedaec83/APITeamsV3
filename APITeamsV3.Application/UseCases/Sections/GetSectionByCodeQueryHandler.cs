@@ -99,23 +99,46 @@ namespace APITeamsV3.Application.UseCases.Sections
                 : latestSessionJoinUrl;
 
             string? linkSharePoint = null;
+            long? sharePointTotalBytes = null;
+            long? sharePointUsedBytes = null;
+            long? sharePointRemainingBytes = null;
+            double? sharePointPercentAvailable = null;
+
             if (!request.SkipSharePoint && team != null && !string.IsNullOrWhiteSpace(team.IdTeamsGroup))
             {
                 try
                 {
                     var graphClient = await _graphClientFactory.CreateClientAsync();
-                    var primaryChannel = await graphClient.Teams[team.IdTeamsGroup].PrimaryChannel.GetAsync(cancellationToken: cancellationToken);
+                    
+                    var primaryChannelTask = graphClient.Teams[team.IdTeamsGroup].PrimaryChannel.GetAsync(cancellationToken: cancellationToken);
+                    var driveTask = graphClient.Groups[team.IdTeamsGroup].Drive.GetAsync(cancellationToken: cancellationToken);
+
+                    await Task.WhenAll(primaryChannelTask, driveTask);
+
+                    var primaryChannel = primaryChannelTask.Result;
                     if (!string.IsNullOrWhiteSpace(primaryChannel?.Id))
                     {
                         var folder = await graphClient.Teams[team.IdTeamsGroup].Channels[primaryChannel.Id].FilesFolder.GetAsync(cancellationToken: cancellationToken);
                         linkSharePoint = folder?.WebUrl;
+                    }
+
+                    var drive = driveTask.Result;
+                    if (drive?.Quota != null)
+                    {
+                        sharePointTotalBytes = drive.Quota.Total;
+                        sharePointUsedBytes = drive.Quota.Used;
+                        sharePointRemainingBytes = drive.Quota.Remaining;
+                        if (sharePointTotalBytes.HasValue && sharePointTotalBytes.Value > 0)
+                        {
+                            sharePointPercentAvailable = ((double)(sharePointRemainingBytes ?? 0) / sharePointTotalBytes.Value) * 100;
+                        }
                     }
                 }
                 catch (Exception ex)
                 {
                     _logger.LogWarning(
                         ex,
-                        "No se pudo resolver LinkSharePoint para IdSeccion={IdSeccion}, TeamId={TeamId}.",
+                        "No se pudo resolver LinkSharePoint o almacenamiento para IdSeccion={IdSeccion}, TeamId={TeamId}.",
                         section.IdSeccion,
                         team.IdTeamsGroup);
                 }
@@ -219,6 +242,10 @@ namespace APITeamsV3.Application.UseCases.Sections
                 FechaFin = section.FechaFin == default ? null : section.FechaFin,
                 LinkGrabacion = linkGrabacion,
                 LinkSharePoint = linkSharePoint,
+                SharePointTotalBytes = sharePointTotalBytes,
+                SharePointUsedBytes = sharePointUsedBytes,
+                SharePointRemainingBytes = sharePointRemainingBytes,
+                SharePointPercentAvailable = sharePointPercentAvailable,
                 Members = students,
                 HasTeam = team != null,
                 EsTeams = eligibility.IsEligible,

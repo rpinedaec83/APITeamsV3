@@ -32,6 +32,10 @@ namespace APITeamsV3.Application.UseCases.Sections
         public DateTime? FechaFin { get; set; }
         public string? LinkGrabacion { get; set; }
         public string? LinkSharePoint { get; set; }
+        public long? SharePointTotalBytes { get; set; }
+        public long? SharePointUsedBytes { get; set; }
+        public long? SharePointRemainingBytes { get; set; }
+        public double? SharePointPercentAvailable { get; set; }
         public List<StudentSummaryDto> Members { get; set; } = new();
         public bool HasTeam { get; set; }
         public bool EsTeams { get; set; }

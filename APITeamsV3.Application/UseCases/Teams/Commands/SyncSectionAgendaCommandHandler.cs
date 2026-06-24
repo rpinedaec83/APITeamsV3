@@ -957,7 +957,7 @@ WHERE IdTeams = {0} AND IdEvento = {1} AND Estado = 'A'";
                 return false;
             }
 
-            var searchStart = DateTime.Today > courseStartDate ? DateTime.Today : courseStartDate;
+            var searchStart = courseStartDate;
             for (var date = searchStart.Date; date <= courseEndDate.Date; date = date.AddDays(1))
             {
                 if (recurrenceDays.Contains(date.DayOfWeek))
