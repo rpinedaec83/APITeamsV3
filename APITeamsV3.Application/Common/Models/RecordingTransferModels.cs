@@ -56,4 +56,16 @@ namespace APITeamsV3.Application.Common.Models
         public string Message { get; set; } = string.Empty;
         public bool SourceDeleted { get; set; }
     }
+
+    public class DriveQuotaResult
+    {
+        public long TotalBytes { get; set; }
+        public long UsedBytes { get; set; }
+        public long RemainingBytes { get; set; }
+        public double PercentAvailable { get; set; }
+        public string State { get; set; } = string.Empty;
+        public string UserPrincipalName { get; set; } = string.Empty;
+        public string ErrorMessage { get; set; } = string.Empty;
+        public bool Success { get; set; }
+    }
 }

@@ -1,3 +1,4 @@
+using APITeamsV3.Application.Common.Interfaces;
 using APITeamsV3.Application.Common.Models;
 using APITeamsV3.Application.UseCases.Recordings.Commands;
 using MediatR;
@@ -18,6 +19,15 @@ namespace APITeamsV3.API.Controllers
         public RecordingsController(IMediator mediator)
         {
             _mediator = mediator;
+        }
+
+        [HttpGet("storage-quota")]
+        public async Task<ActionResult<DriveQuotaResult>> GetStorageQuota(
+            [FromServices] ITeamsRecordingTransferService recordingTransferService,
+            CancellationToken cancellationToken)
+        {
+            var result = await recordingTransferService.GetStorageQuotaAsync(cancellationToken);
+            return Ok(result);
         }
 
         [HttpPost("transfer")]

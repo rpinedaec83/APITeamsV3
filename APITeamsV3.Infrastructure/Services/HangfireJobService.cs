@@ -175,18 +175,16 @@ namespace APITeamsV3.Infrastructure.Services
             return client.Enqueue(() => SendSyncSectionTeam(idSeccion, key, executedBy, null));
         }
 
-        public Task<string> EnqueuePilotRecordingTransfers(string companyKey, string? executedBy = null)
+        public async Task<string> EnqueuePilotRecordingTransfers(string companyKey, string? executedBy = null)
         {
-            var jobId = BackgroundJob.Enqueue<HangfireJobService>(
-                job => job.RunPilotRecordingTransfers(companyKey, executedBy, null));
-            return Task.FromResult(jobId);
+            var client = await CreateClientAsync(companyKey);
+            return client.Enqueue(() => RunPilotRecordingTransfers(companyKey, executedBy, null));
         }
 
-        public Task<string> EnqueueAllRecordingTransfers(string companyKey, string? executedBy = null)
+        public async Task<string> EnqueueAllRecordingTransfers(string companyKey, string? executedBy = null)
         {
-            var jobId = BackgroundJob.Enqueue<HangfireJobService>(
-                job => job.RunAllRecordingTransfers(companyKey, executedBy, null));
-            return Task.FromResult(jobId);
+            var client = await CreateClientAsync(companyKey);
+            return client.Enqueue(() => RunAllRecordingTransfers(companyKey, executedBy, null));
         }
 
         public async Task<string> EnqueueRecordingTransferForSection(int idSeccion, string companyKey, string? executedBy = null)
