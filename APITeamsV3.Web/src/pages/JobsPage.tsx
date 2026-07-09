@@ -40,6 +40,7 @@ import {
     InfoRegular,
     ClockRegular,
     DismissCircleRegular,
+    VideoRegular,
 } from '@fluentui/react-icons';
 import { useApiClient } from '../hooks/useApiClient';
 import { showConfirm, showSuccess, showWarning } from '../utils/alerts';
@@ -277,6 +278,7 @@ interface JobDefinition {
     icon: React.ReactNode;
     color: string;
     category: 'sync' | 'schedule';
+    requiresSection?: boolean;
 }
 
 const JOB_DEFINITIONS: JobDefinition[] = [
@@ -324,6 +326,43 @@ const JOB_DEFINITIONS: JobDefinition[] = [
         icon: <ArrowSyncRegular />,
         color: tokens.colorPaletteTealBorderActive,
         category: 'sync',
+    },
+    {
+        key: 'sync-section-team',
+        label: 'Sinc. Equipo de Sección',
+        description: 'Crea o actualiza el equipo de Teams de la sección.',
+        endpoint: '/jobs/sync-section-team',
+        icon: <ArrowSyncRegular />,
+        color: tokens.colorPaletteTealBorderActive,
+        category: 'sync',
+    },
+    {
+        key: 'sync-attendance',
+        label: 'Sinc. Asistencia',
+        description: 'Sincroniza la asistencia a reuniones de Teams en la base de datos.',
+        endpoint: '/jobs/sync-attendance',
+        icon: <ClockRegular />,
+        color: tokens.colorPalettePinkBorderActive,
+        category: 'sync',
+    },
+    {
+        key: 'recordings-transfer',
+        label: 'Transferir Grabaciones',
+        description: 'Transfiere las grabaciones de clases virtuales de la sección a SharePoint.',
+        endpoint: '/jobs/recordings-transfer',
+        icon: <VideoRegular />,
+        color: tokens.colorPaletteRoyalBlueBorderActive,
+        category: 'sync',
+    },
+    {
+        key: 'check-storage-quota',
+        label: 'Monitorear Almacenamiento',
+        description: 'Consulta espacio disponible de SharePoint y envía alertas de correo si supera el límite.',
+        endpoint: '/jobs/check-storage-quota',
+        icon: <VideoRegular />,
+        color: tokens.colorPaletteMarigoldBorderActive,
+        category: 'sync',
+        requiresSection: false,
     },
     {
         key: 'generate-schedule',
@@ -585,23 +624,28 @@ const JobsPage: React.FC = () => {
     }, [apiClient]);
 
     const handleEnqueueJob = async (job: JobDefinition) => {
-        if (!idSeccion || !idSeccion.trim()) {
-            showWarning('Ingrese un ID de Seccion valido.');
-            return;
-        }
+        const requiresSection = job.requiresSection !== false;
+        let url = job.endpoint;
 
-        const seccionId = parseInt(idSeccion, 10);
-        if (isNaN(seccionId)) {
-            showWarning('El ID de Seccion debe ser numerico.');
-            return;
+        if (requiresSection) {
+            if (!idSeccion || !idSeccion.trim()) {
+                showWarning('Ingrese un ID de Seccion valido.');
+                return;
+            }
+
+            const seccionId = parseInt(idSeccion, 10);
+            if (isNaN(seccionId)) {
+                showWarning('El ID de Seccion debe ser numerico.');
+                return;
+            }
+
+            url = job.key === 'sync-roster'
+                ? `${job.endpoint}/${seccionId}?fullSync=true`
+                : `${job.endpoint}/${seccionId}`;
         }
 
         setLoading(job.key);
         try {
-            const url = job.key === 'sync-roster'
-                ? `${job.endpoint}/${seccionId}?fullSync=true`
-                : `${job.endpoint}/${seccionId}`;
-
             await apiClient.post(url, {});
             await loadRecentJobs(true);
         } catch (err: unknown) {

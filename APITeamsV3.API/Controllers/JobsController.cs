@@ -1281,6 +1281,30 @@ namespace APITeamsV3.API.Controllers
             return Ok(new { JobId = jobId, Message = $"Sync Renamed Teams Job Enqueued by {executedBy}" });
         }
 
+        [HttpPost("sync-attendance/{idSeccion}")]
+        public async Task<ActionResult<string>> SyncAttendance(int idSeccion)
+        {
+            var executedBy = GetManualExecutorName();
+            var jobId = await _jobService.EnqueueSyncAttendance(idSeccion, executedBy);
+            return Ok(new { JobId = jobId, Message = $"Sync Attendance Job Enqueued by {executedBy}" });
+        }
+
+        [HttpPost("sync-section-team/{idSeccion}")]
+        public async Task<ActionResult<string>> SyncSectionTeam(int idSeccion)
+        {
+            var executedBy = GetManualExecutorName();
+            var jobId = await _jobService.EnqueueSyncSectionTeam(idSeccion, executedBy);
+            return Ok(new { JobId = jobId, Message = $"Sync Section Team Job Enqueued by {executedBy}" });
+        }
+
+        [HttpPost("check-storage-quota")]
+        public async Task<ActionResult<string>> CheckStorageQuota()
+        {
+            var executedBy = GetManualExecutorName();
+            var jobId = await _jobService.EnqueueCheckStorageQuota(executedBy);
+            return Ok(new { JobId = jobId, Message = $"Storage Quota Check Job Enqueued by {executedBy}" });
+        }
+
         [HttpGet("stats")]
         public async Task<ActionResult<HangfireStatsDto>> GetJobStats()
         {

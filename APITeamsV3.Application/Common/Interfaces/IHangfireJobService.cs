@@ -15,5 +15,7 @@ namespace APITeamsV3.Application.Common.Interfaces
         Task<string> EnqueuePilotRecordingTransfers(string companyKey, string? executedBy = null);
         Task<string> EnqueueAllRecordingTransfers(string companyKey, string? executedBy = null);
         Task<string> EnqueueRecordingTransferForSection(int idSeccion, string companyKey, string? executedBy = null);
+        Task<string> EnqueueSyncAttendance(int idSeccion, string? executedBy = null);
+        Task<string> EnqueueCheckStorageQuota(string? executedBy = null);
     }
 }

@@ -16,6 +16,8 @@ namespace APITeamsV3.Infrastructure.Persistence.Contexts
         public DbSet<APITeamsV3.Domain.Entities.TeamMember> TeamsUsuarios { get; set; }
         public DbSet<APITeamsV3.Domain.Entities.TeamSession> TeamsHorarios { get; set; }
         public DbSet<APITeamsV3.Domain.Entities.AplicativoTeams> AplicativosTeams { get; set; }
+        public DbSet<APITeamsV3.Domain.Entities.ReunionAsistencia> TeamsReunionAsistencia { get; set; }
+        public DbSet<APITeamsV3.Domain.Entities.ReunionAsistenciaDetalle> TeamsReunionAsistenciaDetalle { get; set; }
         private readonly ITenantProvider _tenantProvider;
         private readonly ICurrentUserService _currentUserService;
 
@@ -93,6 +95,27 @@ namespace APITeamsV3.Infrastructure.Persistence.Contexts
                 entity.ToTable("TeamsHorarios");
                 entity.HasKey(e => e.IdHorarioTeams);
                 entity.Property(e => e.IdHorarioTeams).ValueGeneratedOnAdd();
+            });
+
+            // ReunionAsistencia
+            modelBuilder.Entity<APITeamsV3.Domain.Entities.ReunionAsistencia>(entity =>
+            {
+                entity.ToTable("TeamsReunionAsistencia");
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Id).ValueGeneratedOnAdd();
+                entity.HasIndex(e => e.MeetingReportId).IsUnique();
+            });
+
+            // ReunionAsistenciaDetalle
+            modelBuilder.Entity<APITeamsV3.Domain.Entities.ReunionAsistenciaDetalle>(entity =>
+            {
+                entity.ToTable("TeamsReunionAsistenciaDetalle");
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Id).ValueGeneratedOnAdd();
+                entity.HasOne(e => e.ReunionAsistencia)
+                      .WithMany(a => a.Detalles)
+                      .HasForeignKey(e => e.IdReunionAsistencia)
+                      .OnDelete(DeleteBehavior.Cascade);
             });
 
             // Read-Only Views

@@ -81,7 +81,38 @@ namespace APITeamsV3.API.Controllers
             [FromServices] ISmartDbContext context,
             CancellationToken cancellationToken)
         {
-            // 1. Fetch SeccionHorario to get UrlClaseVirtual
+            // 1. Fetch from Database first
+            var localReports = await context.TeamsReunionAsistencia
+                .Include(r => r.Detalles)
+                .Where(r => r.IdSeccion == idSeccion)
+                .OrderByDescending(r => r.MeetingStartDateTime)
+                .ToListAsync(cancellationToken);
+
+            if (localReports.Any())
+            {
+                var reportsList = localReports.Select(r => new
+                {
+                    id = r.MeetingReportId,
+                    meetingStartDateTime = r.MeetingStartDateTime,
+                    meetingEndDateTime = r.MeetingEndDateTime,
+                    totalParticipantCount = r.TotalParticipantCount,
+                    attendanceRecords = r.Detalles.Select(d => new
+                    {
+                        emailAddress = d.EmailAddress,
+                        displayName = d.DisplayName,
+                        role = d.Role,
+                        totalAttendanceInSeconds = d.TotalAttendanceInSeconds,
+                        firstJoinDateTime = d.FirstJoinDateTime,
+                        lastLeaveDateTime = d.LastLeaveDateTime,
+                        intervals = new List<object>()
+                    }).ToList()
+                }).ToList();
+
+                var firstMeetingId = localReports.First().MeetingId;
+                return Ok(new { meetingId = firstMeetingId, reports = reportsList });
+            }
+
+            // Fallback: Fetch SeccionHorario to get UrlClaseVirtual
             var seccionHorario = await context.Set<SeccionHorario>()
                 .AsNoTracking()
                 .FirstOrDefaultAsync(sh => sh.IdSeccion == idSeccion, cancellationToken);
@@ -265,6 +296,12 @@ namespace APITeamsV3.API.Controllers
                                     displayName = rec.Identity?.DisplayName,
                                     role = rec.Role,
                                     totalAttendanceInSeconds = rec.TotalAttendanceInSeconds,
+                                    firstJoinDateTime = rec.AttendanceIntervals != null && rec.AttendanceIntervals.Any(i => i.JoinDateTime.HasValue)
+                                        ? rec.AttendanceIntervals.Where(i => i.JoinDateTime.HasValue).Min(i => i.JoinDateTime)?.UtcDateTime
+                                        : null,
+                                    lastLeaveDateTime = rec.AttendanceIntervals != null && rec.AttendanceIntervals.Any(i => i.LeaveDateTime.HasValue)
+                                        ? rec.AttendanceIntervals.Where(i => i.LeaveDateTime.HasValue).Max(i => i.LeaveDateTime)?.UtcDateTime
+                                        : null,
                                     intervals = rec.AttendanceIntervals?.Select(i => new {
                                         joinDateTime = i.JoinDateTime,
                                         leaveDateTime = i.LeaveDateTime,

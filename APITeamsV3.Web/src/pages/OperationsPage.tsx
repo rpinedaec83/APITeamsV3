@@ -322,6 +322,7 @@ const OperationsPage: React.FC = () => {
     const [attendanceData, setAttendanceData] = useState<any>(null);
     const [loadingAttendance, setLoadingAttendance] = useState(false);
     const [selectedReportId, setSelectedReportId] = useState<string>('');
+    const [attendanceSearch, setAttendanceSearch] = useState<string>('');
 
     const fetchAttendance = async () => {
         if (!seccionData?.idSeccion) return;
@@ -329,6 +330,7 @@ const OperationsPage: React.FC = () => {
         try {
             const response = await apiClient.get(`/sections/${seccionData.idSeccion}/attendance`);
             setAttendanceData(response.data);
+            setAttendanceSearch('');
             if (response.data?.reports && response.data.reports.length > 0) {
                 setSelectedReportId(response.data.reports[0].id);
             }
@@ -1216,83 +1218,132 @@ const OperationsPage: React.FC = () => {
                             </div>
                         ) : (
                             <div>
-                                <div style={{ padding: '16px', display: 'flex', gap: '16px', alignItems: 'center', backgroundColor: tokens.colorNeutralBackground3, borderBottom: `1px solid ${tokens.colorNeutralStroke1}` }}>
-                                    <Label style={{ fontWeight: '600' }}>Reuniones Realizadas:</Label>
-                                    <select
-                                        value={selectedReportId}
-                                        onChange={(e) => setSelectedReportId(e.target.value)}
-                                        style={{
-                                            padding: '6px 12px',
-                                            borderRadius: tokens.borderRadiusMedium,
-                                            border: `1px solid ${tokens.colorNeutralStroke1}`,
-                                            backgroundColor: tokens.colorNeutralBackground1,
-                                            fontSize: '13px',
-                                            cursor: 'pointer',
-                                            minWidth: '280px'
-                                        }}
-                                    >
-                                        {attendanceData.reports.map((report: any) => (
-                                            <option key={report.id} value={report.id}>
-                                                Sesión del {formatDateTime(report.meetingStartDateTime)} ({report.totalParticipantCount} asistentes)
-                                            </option>
-                                        ))}
-                                    </select>
+                                <div style={{ padding: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: tokens.colorNeutralBackground3, borderBottom: `1px solid ${tokens.colorNeutralStroke1}` }}>
+                                    <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+                                        <Label style={{ fontWeight: '600' }}>Reuniones Realizadas:</Label>
+                                        <select
+                                            value={selectedReportId}
+                                            onChange={(e) => setSelectedReportId(e.target.value)}
+                                            style={{
+                                                padding: '6px 12px',
+                                                borderRadius: tokens.borderRadiusMedium,
+                                                border: `1px solid ${tokens.colorNeutralStroke1}`,
+                                                backgroundColor: tokens.colorNeutralBackground1,
+                                                fontSize: '13px',
+                                                cursor: 'pointer',
+                                                minWidth: '280px'
+                                            }}
+                                        >
+                                            {attendanceData.reports.map((report: any) => (
+                                                <option key={report.id} value={report.id}>
+                                                    Sesión del {formatDateTime(report.meetingStartDateTime)} ({report.totalParticipantCount} asistentes)
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <Input
+                                        placeholder="Buscar por nombre o correo..."
+                                        size="small"
+                                        contentBefore={<SearchRegular />}
+                                        value={attendanceSearch}
+                                        onChange={(_e, d) => setAttendanceSearch(d.value)}
+                                        style={{ minWidth: '280px' }}
+                                    />
                                 </div>
                                 
                                 {(() => {
                                     const selectedReport = attendanceData.reports.find((r: any) => r.id === selectedReportId);
                                     if (!selectedReport) return null;
+
+                                    const records = selectedReport.attendanceRecords || [];
+                                    const totalParticipants = selectedReport.totalParticipantCount || records.length;
+                                    const organizersCount = records.filter((r: any) => r.role === 'Organizer').length;
+                                    const attendeesCount = records.filter((r: any) => r.role === 'Attendee' || r.role !== 'Organizer').length;
+                                    
+                                    const averageDurationSeconds = records.length > 0 
+                                        ? Math.round(records.reduce((acc: number, curr: any) => acc + (curr.totalAttendanceInSeconds || 0), 0) / records.length)
+                                        : 0;
+
+                                    const filteredRecords = records.filter((r: any) => {
+                                        if (!attendanceSearch) return true;
+                                        const search = attendanceSearch.toLowerCase();
+                                        return (r.displayName?.toLowerCase().includes(search) || 
+                                                r.emailAddress?.toLowerCase().includes(search) || 
+                                                r.role?.toLowerCase().includes(search));
+                                    });
+
                                     return (
-                                        <Table>
-                                            <TableHeader>
-                                                <TableRow>
-                                                    <TableHeaderCell style={{ width: '40px' }}>#</TableHeaderCell>
-                                                    <TableHeaderCell style={{ fontWeight: '600' }}>Nombre / Correo</TableHeaderCell>
-                                                    <TableHeaderCell style={{ fontWeight: '600' }}>Rol</TableHeaderCell>
-                                                    <TableHeaderCell style={{ fontWeight: '600' }}>Tiempo Total</TableHeaderCell>
-                                                    <TableHeaderCell style={{ fontWeight: '600' }}>Detalle de Conexiones</TableHeaderCell>
-                                                </TableRow>
-                                            </TableHeader>
-                                            <TableBody>
-                                                {selectedReport.attendanceRecords && selectedReport.attendanceRecords.length > 0 ? (
-                                                    selectedReport.attendanceRecords.map((record: any, idx: number) => (
-                                                        <TableRow key={idx}>
-                                                            <TableCell>{idx + 1}</TableCell>
-                                                            <TableCell>
-                                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                                    <Avatar name={record.displayName || 'Invitado'} size={24} color="colorful" />
-                                                                    <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                                                        <span style={{ fontWeight: 600 }}>{record.displayName || 'Invitado'}</span>
-                                                                        <span style={{ fontSize: '11px', color: tokens.colorNeutralForeground2 }}>{record.emailAddress || 'Sin correo registrado'}</span>
-                                                                    </div>
-                                                                </div>
-                                                            </TableCell>
-                                                            <TableCell>
-                                                                <Badge appearance="outline" color={record.role === 'Organizer' ? 'brand' : 'informative'}>
-                                                                    {record.role === 'Organizer' ? 'Organizador' : record.role === 'Presenter' ? 'Presentador' : 'Asistente'}
-                                                                </Badge>
-                                                            </TableCell>
-                                                            <TableCell style={{ fontWeight: '600' }}>
-                                                                {formatDuration(record.totalAttendanceInSeconds)}
-                                                            </TableCell>
-                                                            <TableCell>
-                                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontSize: '11px' }}>
-                                                                    {record.intervals && record.intervals.map((interval: any, iIdx: number) => (
-                                                                        <div key={iIdx} style={{ color: tokens.colorNeutralForeground2 }}>
-                                                                            Entrada: {formatTimeOnly(interval.joinDateTime)} • Salida: {formatTimeOnly(interval.leaveDateTime)} ({formatDuration(interval.durationInSeconds)})
-                                                                        </div>
-                                                                    ))}
-                                                                </div>
-                                                            </TableCell>
-                                                        </TableRow>
-                                                    ))
-                                                ) : (
+                                        <>
+                                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', padding: '16px', backgroundColor: tokens.colorNeutralBackground2, borderBottom: `1px solid ${tokens.colorNeutralStroke1}` }}>
+                                                <div style={{ backgroundColor: tokens.colorNeutralBackground1, padding: '12px 16px', borderRadius: tokens.borderRadiusMedium, border: `1px solid ${tokens.colorNeutralStroke1}`, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                                    <span style={{ fontSize: '11px', color: tokens.colorNeutralForeground2, fontWeight: '600', textTransform: 'uppercase' }}>Total Participantes</span>
+                                                    <span style={{ fontSize: '20px', fontWeight: 'bold', color: tokens.colorBrandForegroundLink }}>{totalParticipants}</span>
+                                                </div>
+                                                <div style={{ backgroundColor: tokens.colorNeutralBackground1, padding: '12px 16px', borderRadius: tokens.borderRadiusMedium, border: `1px solid ${tokens.colorNeutralStroke1}`, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                                    <span style={{ fontSize: '11px', color: tokens.colorNeutralForeground2, fontWeight: '600', textTransform: 'uppercase' }}>Docentes / Organizadores</span>
+                                                    <span style={{ fontSize: '20px', fontWeight: 'bold', color: tokens.colorPaletteBlueForeground2 }}>{organizersCount}</span>
+                                                </div>
+                                                <div style={{ backgroundColor: tokens.colorNeutralBackground1, padding: '12px 16px', borderRadius: tokens.borderRadiusMedium, border: `1px solid ${tokens.colorNeutralStroke1}`, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                                    <span style={{ fontSize: '11px', color: tokens.colorNeutralForeground2, fontWeight: '600', textTransform: 'uppercase' }}>Asistentes / Alumnos</span>
+                                                    <span style={{ fontSize: '20px', fontWeight: 'bold', color: tokens.colorPaletteGreenForeground1 }}>{attendeesCount}</span>
+                                                </div>
+                                                <div style={{ backgroundColor: tokens.colorNeutralBackground1, padding: '12px 16px', borderRadius: tokens.borderRadiusMedium, border: `1px solid ${tokens.colorNeutralStroke1}`, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                                    <span style={{ fontSize: '11px', color: tokens.colorNeutralForeground2, fontWeight: '600', textTransform: 'uppercase' }}>Tiempo Promedio</span>
+                                                    <span style={{ fontSize: '20px', fontWeight: 'bold', color: tokens.colorPalettePurpleForeground2 }}>{formatDuration(averageDurationSeconds)}</span>
+                                                </div>
+                                            </div>
+
+                                            <Table>
+                                                <TableHeader>
                                                     <TableRow>
-                                                        <TableCell colSpan={5} style={{ textAlign: 'center', padding: '20px' }}>No hay registros de asistencia en este reporte.</TableCell>
+                                                        <TableHeaderCell style={{ width: '40px' }}>#</TableHeaderCell>
+                                                        <TableHeaderCell style={{ fontWeight: '600' }}>Nombre / Correo</TableHeaderCell>
+                                                        <TableHeaderCell style={{ fontWeight: '600' }}>Rol</TableHeaderCell>
+                                                        <TableHeaderCell style={{ fontWeight: '600' }}>Tiempo Total</TableHeaderCell>
+                                                        <TableHeaderCell style={{ fontWeight: '600' }}>Inicio / Fin</TableHeaderCell>
                                                     </TableRow>
-                                                )}
-                                            </TableBody>
-                                        </Table>
+                                                </TableHeader>
+                                                <TableBody>
+                                                    {filteredRecords.length > 0 ? (
+                                                        filteredRecords.map((record: any, idx: number) => (
+                                                            <TableRow key={idx}>
+                                                                <TableCell>{idx + 1}</TableCell>
+                                                                <TableCell>
+                                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                                        <Avatar name={record.displayName || 'Invitado'} size={24} color="colorful" />
+                                                                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                                                            <span style={{ fontWeight: 600 }}>{record.displayName || 'Invitado'}</span>
+                                                                            <span style={{ fontSize: '11px', color: tokens.colorNeutralForeground2 }}>{record.emailAddress || 'Sin correo registrado'}</span>
+                                                                        </div>
+                                                                    </div>
+                                                                </TableCell>
+                                                                <TableCell>
+                                                                    <Badge appearance="outline" color={record.role === 'Organizer' ? 'brand' : 'informative'}>
+                                                                        {record.role === 'Organizer' ? 'Organizador' : record.role === 'Presenter' ? 'Presentador' : 'Asistente'}
+                                                                    </Badge>
+                                                                </TableCell>
+                                                                <TableCell style={{ fontWeight: '600' }}>
+                                                                    {formatDuration(record.totalAttendanceInSeconds)}
+                                                                </TableCell>
+                                                                <TableCell>
+                                                                    {record.firstJoinDateTime || record.lastLeaveDateTime ? (
+                                                                        <span style={{ fontSize: '12px' }}>
+                                                                            {formatTimeOnly(record.firstJoinDateTime)} – {formatTimeOnly(record.lastLeaveDateTime)}
+                                                                        </span>
+                                                                    ) : (
+                                                                        <span style={{ color: tokens.colorNeutralForeground4 }}>-</span>
+                                                                    )}
+                                                                </TableCell>
+                                                            </TableRow>
+                                                        ))
+                                                    ) : (
+                                                        <TableRow>
+                                                            <TableCell colSpan={5} style={{ textAlign: 'center', padding: '20px' }}>No hay registros de asistencia que coincidan con la búsqueda.</TableCell>
+                                                        </TableRow>
+                                                    )}
+                                                </TableBody>
+                                            </Table>
+                                        </>
                                     );
                                 })()}
                             </div>
@@ -1512,6 +1563,7 @@ const formatTimeOnly = (value?: string | null) => {
         second: '2-digit'
     }).format(date);
 };
+
 
 const formatDuration = (seconds?: number | null) => {
     if (seconds === undefined || seconds === null) return '0s';

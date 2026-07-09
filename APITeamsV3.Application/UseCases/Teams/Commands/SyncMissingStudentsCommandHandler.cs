@@ -15,6 +15,7 @@ using System.Data;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Configuration;
 
 namespace APITeamsV3.Application.UseCases.Teams.Commands
 {
@@ -28,6 +29,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
         private readonly ITenantProvider _tenantProvider;
         private readonly IGraphUserLookupService _userLookupService;
         private readonly ICurrentUserService _currentUserService;
+        private readonly IConfiguration _configuration;
 
         public SyncMissingStudentsCommandHandler(
             ISmartDbContext context,
@@ -37,7 +39,8 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
             ICentralDbContext centralContext,
             ITenantProvider tenantProvider,
             IGraphUserLookupService userLookupService,
-            ICurrentUserService currentUserService)
+            ICurrentUserService currentUserService,
+            IConfiguration configuration)
         {
             _context = context;
             _graphFactory = graphFactory;
@@ -47,6 +50,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
             _tenantProvider = tenantProvider;
             _userLookupService = userLookupService;
             _currentUserService = currentUserService;
+            _configuration = configuration;
         }
 
         public async Task<List<MissingStudentDto>> Handle(SyncMissingStudentsCommand request, CancellationToken cancellationToken)
@@ -75,6 +79,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
 
             var graphClient = await _graphFactory.CreateClientAsync();
             var syncedCount = 0;
+            var missingInAzureAd = new List<MissingStudentDto>();
             var tenant = _tenantProvider.GetCurrentTenant();
             var config = await _centralContext.CompanyConfigs.FirstOrDefaultAsync(c => c.CompanyKey == tenant.CompanyKey, cancellationToken);
             var validGroupIds = await FilterValidGroupIdsAsync(
@@ -108,6 +113,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                         var warnMsg = $"Información: El alumno con correo {student.EmailAlumno} no existe en Azure AD. Acción: Verifique que la cuenta del alumno esté creada y activa en Office 365.";
                         _logger.LogWarning(warnMsg);
                         await LogOperativoAsync("Warning", "AzureAD", student.CodigoAlumno, warnMsg, request.JobId);
+                        missingInAzureAd.Add(student);
                         continue;
                     }
 
@@ -189,6 +195,11 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                 {
                     _logger.LogError(dbEx, "Failed to persist student sync status in DB for section {SectionId}.", request.IdSeccion);
                 }
+            }
+
+            if (missingInAzureAd.Any())
+            {
+                await SendAzureAdMissingAlertEmailAsync(graphClient, missingInAzureAd, request.IdSeccion, cancellationToken);
             }
 
             return missingStudents;
@@ -473,6 +484,129 @@ WHERE AC.IdSeccion = {{0}}
                     "Graph group {GroupId} does not exist. Matching TeamsEquipos rows were marked inactive before syncing missing students.",
                     groupId);
             }
+        }
+
+        private async Task SendAzureAdMissingAlertEmailAsync(
+            GraphServiceClient graphClient,
+            List<MissingStudentDto> missingInAzureAd,
+            int idSeccion,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                var recipient = _configuration["StorageQuotaAlert:AlertEmailRecipient"];
+                if (string.IsNullOrWhiteSpace(recipient))
+                {
+                    _logger.LogWarning("No AlertEmailRecipient configured. Bypassing Azure AD missing student email alert.");
+                    return;
+                }
+
+                var organizerKey = await ResolveOrganizerFromAplicativosTeamsAsync(cancellationToken);
+                if (string.IsNullOrWhiteSpace(organizerKey))
+                {
+                    _logger.LogWarning("Could not resolve active technical account to send Azure AD missing student email.");
+                    return;
+                }
+
+                var organizer = await graphClient.Users[organizerKey].GetAsync(
+                    requestConfiguration => requestConfiguration.QueryParameters.Select = ["id", "mail", "userPrincipalName"],
+                    cancellationToken);
+
+                if (organizer == null || string.IsNullOrWhiteSpace(organizer.Id))
+                {
+                    _logger.LogWarning("Technical account user not found in Graph. Bypassing Azure AD missing student email.");
+                    return;
+                }
+
+                var subject = $"[ALERTA] Alumnos no existen en Azure AD - Sección {idSeccion}";
+                
+                var rowsHtml = string.Join("", missingInAzureAd.Select(student => $@"
+                    <tr>
+                        <td style='border: 1px solid #ddd; padding: 8px;'>{student.CodigoAlumno}</td>
+                        <td style='border: 1px solid #ddd; padding: 8px; color: #d9534f; font-weight: bold;'>{student.EmailAlumno}</td>
+                        <td style='border: 1px solid #ddd; padding: 8px;'>{student.IdTeamsGroup}</td>
+                    </tr>"));
+
+                var bodyHtml = $@"
+<html>
+<body style='font-family: Arial, sans-serif; line-height: 1.6; color: #333;'>
+    <h2 style='color: #d9534f;'>Alerta de Alumnos Inexistentes en Azure AD</h2>
+    <p>Se ha detectado que los siguientes alumnos de la sección <b>{idSeccion}</b> no existen en Azure AD durante el proceso de sincronización:</p>
+    <table style='border-collapse: collapse; width: 100%; max-width: 700px; margin-top: 15px;'>
+        <tr style='background-color: #f2f2f2;'>
+            <th style='border: 1px solid #ddd; padding: 8px; text-align: left;'>Código</th>
+            <th style='border: 1px solid #ddd; padding: 8px; text-align: left;'>Correo</th>
+            <th style='border: 1px solid #ddd; padding: 8px; text-align: left;'>Grupo Teams ID</th>
+        </tr>
+        {rowsHtml}
+    </table>
+    <p style='margin-top: 15px;'><b>Acción recomendada:</b> Verifique que las cuentas de estos alumnos estén creadas y activas en Office 365.</p>
+    <p style='margin-top: 20px; font-size: 12px; color: #777;'>
+        Este es un correo automático generado por el sistema APITeamsV3.
+    </p>
+</body>
+</html>";
+
+                var requestBody = new Microsoft.Graph.Users.Item.SendMail.SendMailPostRequestBody
+                {
+                    Message = new Message
+                    {
+                        Subject = subject,
+                        Body = new ItemBody
+                        {
+                            ContentType = BodyType.Html,
+                            Content = bodyHtml
+                        },
+                        ToRecipients = new List<Recipient>
+                        {
+                            new Recipient
+                            {
+                                EmailAddress = new EmailAddress
+                                {
+                                    Address = recipient
+                                }
+                            }
+                        }
+                    },
+                    SaveToSentItems = false
+                };
+
+                _logger.LogInformation("Sending Azure AD missing students email alert via Graph from {Sender} to {Recipient}", organizerKey, recipient);
+                await graphClient.Users[organizer.Id].SendMail.PostAsync(requestBody, cancellationToken: cancellationToken);
+                _logger.LogInformation("Azure AD missing students email alert sent successfully.");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error sending Azure AD missing student email alert.");
+            }
+        }
+
+        private async Task<string?> ResolveOrganizerFromAplicativosTeamsAsync(CancellationToken cancellationToken)
+        {
+            var tenantGraphId = string.Empty;
+            try
+            {
+                tenantGraphId = (_tenantProvider.GetCurrentTenant().GraphTenantId ?? string.Empty).Trim();
+            }
+            catch
+            {
+                // ignore
+            }
+
+            var query = _context.AplicativosTeams
+                .AsNoTracking()
+                .Where(a => a.Activo == "A");
+
+            if (!string.IsNullOrWhiteSpace(tenantGraphId))
+            {
+                query = query.Where(a => a.TenantId == tenantGraphId);
+            }
+
+            var appAccount = await query
+                .OrderBy(a => a.IdAplicativo)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            return (appAccount?.UsernameApp ?? string.Empty).Trim();
         }
     }
 }

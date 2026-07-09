@@ -18,6 +18,8 @@ namespace APITeamsV3.Application.Common.Interfaces
         DbSet<TeamMember> TeamsUsuarios { get; }
         DbSet<APITeamsV3.Domain.Entities.TeamSession> TeamsHorarios { get; set; }
         DbSet<APITeamsV3.Domain.Entities.AplicativoTeams> AplicativosTeams { get; set; }
+        DbSet<ReunionAsistencia> TeamsReunionAsistencia { get; }
+        DbSet<ReunionAsistenciaDetalle> TeamsReunionAsistenciaDetalle { get; }
         Task<int> SaveChangesAsync(CancellationToken cancellationToken);
     }
 }

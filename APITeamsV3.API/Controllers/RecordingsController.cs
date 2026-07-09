@@ -26,7 +26,7 @@ namespace APITeamsV3.API.Controllers
             [FromServices] ITeamsRecordingTransferService recordingTransferService,
             CancellationToken cancellationToken)
         {
-            var result = await recordingTransferService.GetStorageQuotaAsync(cancellationToken);
+            var result = await recordingTransferService.GetStorageQuotaAsync(cancellationToken: cancellationToken);
             return Ok(result);
         }
 

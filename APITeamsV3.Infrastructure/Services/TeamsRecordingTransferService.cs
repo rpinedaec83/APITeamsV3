@@ -3,6 +3,7 @@ using APITeamsV3.Application.Common.Models;
 using APITeamsV3.Infrastructure.Options;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Configuration;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
@@ -32,6 +33,8 @@ namespace APITeamsV3.Infrastructure.Services
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly RecordingTransferOptions _options;
         private readonly ILogger<TeamsRecordingTransferService> _logger;
+        private readonly IConfiguration _configuration;
+        private static DateTime? _lastAlertSentUtc = null;
 
         public TeamsRecordingTransferService(
             IGraphClientFactory graphFactory,
@@ -39,7 +42,8 @@ namespace APITeamsV3.Infrastructure.Services
             ISmartDbContext smartDbContext,
             IHttpClientFactory httpClientFactory,
             IOptions<RecordingTransferOptions> options,
-            ILogger<TeamsRecordingTransferService> logger)
+            ILogger<TeamsRecordingTransferService> logger,
+            IConfiguration configuration)
         {
             _graphFactory = graphFactory;
             _tenantProvider = tenantProvider;
@@ -47,6 +51,7 @@ namespace APITeamsV3.Infrastructure.Services
             _httpClientFactory = httpClientFactory;
             _options = options.Value;
             _logger = logger;
+            _configuration = configuration;
         }
 
         public async Task<RecordingTransferResult> TransferAsync(RecordingTransferRequest request, CancellationToken cancellationToken = default)
@@ -1672,7 +1677,7 @@ namespace APITeamsV3.Infrastructure.Services
             }
         }
 
-        public async Task<DriveQuotaResult> GetStorageQuotaAsync(CancellationToken cancellationToken = default)
+        public async Task<DriveQuotaResult> GetStorageQuotaAsync(bool forceEmailAlert = false, CancellationToken cancellationToken = default)
         {
             try
             {
@@ -1722,6 +1727,9 @@ namespace APITeamsV3.Infrastructure.Services
                 long remaining = drive.Quota.Remaining ?? 0;
                 double percentAvailable = total > 0 ? ((double)remaining / total) * 100 : 0;
 
+                // Check storage quota threshold and send alert email if needed
+                await CheckAndSendStorageAlertAsync(graphClient, organizer.Id, percentAvailable, remaining, total, upn, forceEmailAlert, cancellationToken);
+
                 return new DriveQuotaResult
                 {
                     Success = true,
@@ -1742,6 +1750,125 @@ namespace APITeamsV3.Infrastructure.Services
                     ErrorMessage = $"Error al consultar Graph API: {ex.Message}"
                 };
             }
+        }
+
+        private async Task CheckAndSendStorageAlertAsync(
+            GraphServiceClient graphClient,
+            string organizerUserId,
+            double percentAvailable,
+            long remainingBytes,
+            long totalBytes,
+            string upn,
+            bool forceEmailAlert,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                var thresholdStr = _configuration["StorageQuotaAlert:MinPercentAvailableThreshold"];
+                if (string.IsNullOrEmpty(thresholdStr) || !double.TryParse(thresholdStr, out double threshold))
+                {
+                    threshold = 20.0; // Default to 20%
+                }
+
+                if (percentAvailable <= threshold)
+                {
+                    // Throttle alerts to once every 24 hours (unless forced)
+                    if (!forceEmailAlert && _lastAlertSentUtc.HasValue && DateTime.UtcNow < _lastAlertSentUtc.Value.AddHours(24))
+                    {
+                        return;
+                    }
+
+                    var recipient = _configuration["StorageQuotaAlert:AlertEmailRecipient"];
+                    if (string.IsNullOrWhiteSpace(recipient))
+                    {
+                        _logger.LogWarning("Storage alert threshold reached, but no AlertEmailRecipient is configured.");
+                        return;
+                    }
+
+                    await SendAlertEmailAsync(graphClient, organizerUserId, recipient, percentAvailable, remainingBytes, totalBytes, upn, cancellationToken);
+                    _lastAlertSentUtc = DateTime.UtcNow;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error checking storage quota threshold or sending alert email.");
+            }
+        }
+
+        private async Task SendAlertEmailAsync(
+            GraphServiceClient graphClient,
+            string organizerUserId,
+            string recipient,
+            double percentAvailable,
+            long remainingBytes,
+            long totalBytes,
+            string upn,
+            CancellationToken cancellationToken)
+        {
+            double remainingGb = (double)remainingBytes / (1024 * 1024 * 1024);
+            double totalGb = (double)totalBytes / (1024 * 1024 * 1024);
+
+            var subject = $"[ALERTA] Almacenamiento SharePoint Crítico: UPN {upn}";
+            var bodyHtml = $@"
+<html>
+<body style='font-family: Arial, sans-serif; line-height: 1.6; color: #333;'>
+    <h2 style='color: #d9534f;'>Alerta de Almacenamiento Crítico</h2>
+    <p>Se ha detectado que el almacenamiento de SharePoint del usuario técnico de grabación está por debajo del límite configurado.</p>
+    <table style='border-collapse: collapse; width: 100%; max-width: 600px; margin-top: 15px;'>
+        <tr style='background-color: #f2f2f2;'>
+            <th style='border: 1px solid #ddd; padding: 8px; text-align: left;'>Métrica</th>
+            <th style='border: 1px solid #ddd; padding: 8px; text-align: left;'>Valor</th>
+        </tr>
+        <tr>
+            <td style='border: 1px solid #ddd; padding: 8px;'>Usuario Técnico (UPN)</td>
+            <td style='border: 1px solid #ddd; padding: 8px;'><b>{upn}</b></td>
+        </tr>
+        <tr>
+            <td style='border: 1px solid #ddd; padding: 8px;'>Espacio Disponible %</td>
+            <td style='border: 1px solid #ddd; padding: 8px; color: #d9534f; font-weight: bold;'>{percentAvailable:F1}%</td>
+        </tr>
+        <tr>
+            <td style='border: 1px solid #ddd; padding: 8px;'>Espacio Libre (GB)</td>
+            <td style='border: 1px solid #ddd; padding: 8px;'>{remainingGb:F2} GB</td>
+        </tr>
+        <tr>
+            <td style='border: 1px solid #ddd; padding: 8px;'>Espacio Total (GB)</td>
+            <td style='border: 1px solid #ddd; padding: 8px;'>{totalGb:F2} GB</td>
+        </tr>
+    </table>
+    <p style='margin-top: 20px; font-size: 12px; color: #777;'>
+        Este es un correo automático generado por el sistema APITeamsV3.
+    </p>
+</body>
+</html>";
+
+            var requestBody = new Microsoft.Graph.Users.Item.SendMail.SendMailPostRequestBody
+            {
+                Message = new Message
+                {
+                    Subject = subject,
+                    Body = new ItemBody
+                    {
+                        ContentType = BodyType.Html,
+                        Content = bodyHtml
+                    },
+                    ToRecipients = new List<Recipient>
+                    {
+                        new Recipient
+                        {
+                            EmailAddress = new EmailAddress
+                            {
+                                Address = recipient
+                            }
+                        }
+                    }
+                },
+                SaveToSentItems = false
+            };
+
+            _logger.LogInformation("Sending storage alert email via Microsoft Graph from {Upn} to {Recipient} (Available: {Percent:F1}%)", upn, recipient, percentAvailable);
+            await graphClient.Users[organizerUserId].SendMail.PostAsync(requestBody, cancellationToken: cancellationToken);
+            _logger.LogInformation("Storage alert email sent successfully via Graph.");
         }
 
         private sealed class DestinationContext

@@ -24,6 +24,7 @@ namespace APITeamsV3.Infrastructure.Services
         private readonly IEncryptionService _encryptionService;
         private readonly TenantHangfireRuntime _tenantHangfireRuntime;
         private readonly ILogger<HangfireJobService> _logger;
+        private readonly ITeamsRecordingTransferService _recordingTransferService;
 
         public HangfireJobService(
             IMediator mediator,
@@ -32,7 +33,8 @@ namespace APITeamsV3.Infrastructure.Services
             ISmartDbContext smartDb,
             IEncryptionService encryptionService,
             TenantHangfireRuntime tenantHangfireRuntime,
-            ILogger<HangfireJobService> logger)
+            ILogger<HangfireJobService> logger,
+            ITeamsRecordingTransferService recordingTransferService)
         {
             _mediator = mediator;
             _tenantProvider = tenantProvider;
@@ -41,6 +43,7 @@ namespace APITeamsV3.Infrastructure.Services
             _encryptionService = encryptionService;
             _tenantHangfireRuntime = tenantHangfireRuntime;
             _logger = logger;
+            _recordingTransferService = recordingTransferService;
         }
 
         private string GetCurrentCompanyKey()
@@ -175,6 +178,20 @@ namespace APITeamsV3.Infrastructure.Services
             return client.Enqueue(() => SendSyncSectionTeam(idSeccion, key, executedBy, null));
         }
 
+        public async Task<string> EnqueueSyncAttendance(int idSeccion, string? executedBy = null)
+        {
+            var key = GetCurrentCompanyKey();
+            var client = await CreateClientAsync(key);
+            return client.Enqueue(() => SendSyncAttendance(idSeccion, key, executedBy));
+        }
+
+        public async Task<string> EnqueueCheckStorageQuota(string? executedBy = null)
+        {
+            var key = GetCurrentCompanyKey();
+            var client = await CreateClientAsync(key);
+            return client.Enqueue(() => SendCheckStorageQuota(key, executedBy));
+        }
+
         public async Task<string> EnqueuePilotRecordingTransfers(string companyKey, string? executedBy = null)
         {
             var client = await CreateClientAsync(companyKey);
@@ -233,6 +250,7 @@ namespace APITeamsV3.Infrastructure.Services
             {
                 await _mediator.Send(new SyncSectionTeamCommand(idSeccion, companyKey, jobId, executedBy));
                 await _mediator.Send(new SyncSectionAgendaCommand(idSeccion, companyKey, jobId, executedBy));
+                await _mediator.Send(new SyncSectionAttendanceCommand(idSeccion, companyKey, jobId, executedBy));
                 return;
             }
 
@@ -281,6 +299,24 @@ namespace APITeamsV3.Infrastructure.Services
             if (!await ShouldRunForSectionAsync(companyKey, idSeccion, "SyncSectionTeam")) return;
             var jobId = performContext?.BackgroundJob?.Id;
             await _mediator.Send(new SyncSectionTeamCommand(idSeccion, companyKey, jobId, executedBy));
+        }
+
+        [JobDisplayName("Sync Attendance: Section {0} [{1}]")]
+        public async Task SendSyncAttendance(int idSeccion, string companyKey, string? executedBy = null)
+        {
+            if (!await ShouldRunForSectionAsync(companyKey, idSeccion, "SyncAttendance")) return;
+            await _mediator.Send(new SyncSectionAttendanceCommand(idSeccion, companyKey, null, executedBy));
+        }
+
+        [JobDisplayName("Sync SharePoint Quota & Alert Check [{1}]")]
+        public async Task SendCheckStorageQuota(string companyKey, string? executedBy = null)
+        {
+            await ResolveTenantAsync(companyKey, includePilotSections: false);
+            var result = await _recordingTransferService.GetStorageQuotaAsync(forceEmailAlert: true, CancellationToken.None);
+            if (!result.Success)
+            {
+                throw new InvalidOperationException($"Error en verificación de cuota de almacenamiento: {result.ErrorMessage}");
+            }
         }
 
         [JobDisplayName("Regenerate Agenda: Section {0} [{1}]")]
