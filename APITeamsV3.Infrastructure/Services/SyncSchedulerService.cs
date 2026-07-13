@@ -161,7 +161,9 @@ namespace APITeamsV3.Infrastructure.Services
 
                     tenantProvider.SetTenant(new TenantContext
                     {
+                        CompanyId = companyConfig.Id,
                         CompanyKey = companyConfig.CompanyKey,
+                        DisplayName = companyConfig.DisplayName ?? string.Empty,
                         ConnectionString = encryptionService.Decrypt(companyConfig.SmartConnectionString),
                         TimeZoneId = companyConfig.TimeZoneId,
                         GraphTenantId = companyConfig.GraphTenantId,

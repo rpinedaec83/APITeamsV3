@@ -18,6 +18,7 @@ namespace APITeamsV3.Infrastructure.Persistence.Contexts
         public DbSet<APITeamsV3.Domain.Entities.AplicativoTeams> AplicativosTeams { get; set; }
         public DbSet<APITeamsV3.Domain.Entities.ReunionAsistencia> TeamsReunionAsistencia { get; set; }
         public DbSet<APITeamsV3.Domain.Entities.ReunionAsistenciaDetalle> TeamsReunionAsistenciaDetalle { get; set; }
+        public DbSet<APITeamsV3.Domain.Entities.ReunionAsistenciaIntervalo> TeamsReunionAsistenciaIntervalo { get; set; }
         private readonly ITenantProvider _tenantProvider;
         private readonly ICurrentUserService _currentUserService;
 
@@ -115,6 +116,18 @@ namespace APITeamsV3.Infrastructure.Persistence.Contexts
                 entity.HasOne(e => e.ReunionAsistencia)
                       .WithMany(a => a.Detalles)
                       .HasForeignKey(e => e.IdReunionAsistencia)
+                      .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            // ReunionAsistenciaIntervalo
+            modelBuilder.Entity<APITeamsV3.Domain.Entities.ReunionAsistenciaIntervalo>(entity =>
+            {
+                entity.ToTable("TeamsReunionAsistenciaIntervalo");
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Id).ValueGeneratedOnAdd();
+                entity.HasOne(e => e.ReunionAsistenciaDetalle)
+                      .WithMany(a => a.Intervalos)
+                      .HasForeignKey(e => e.IdReunionAsistenciaDetalle)
                       .OnDelete(DeleteBehavior.Cascade);
             });
 

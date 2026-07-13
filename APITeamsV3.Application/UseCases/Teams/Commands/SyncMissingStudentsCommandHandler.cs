@@ -547,6 +547,25 @@ WHERE AC.IdSeccion = {{0}}
 </body>
 </html>";
 
+                var recipientsList = (recipient ?? string.Empty)
+                    .Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Select(r => r.Trim())
+                    .Where(r => !string.IsNullOrEmpty(r))
+                    .Select(r => new Recipient
+                    {
+                        EmailAddress = new EmailAddress
+                        {
+                            Address = r
+                        }
+                    })
+                    .ToList();
+
+                if (recipientsList.Count == 0)
+                {
+                    _logger.LogWarning("No valid recipients parsed from configuration. Azure AD missing students email alert will not be sent.");
+                    return;
+                }
+
                 var requestBody = new Microsoft.Graph.Users.Item.SendMail.SendMailPostRequestBody
                 {
                     Message = new Message
@@ -557,23 +576,53 @@ WHERE AC.IdSeccion = {{0}}
                             ContentType = BodyType.Html,
                             Content = bodyHtml
                         },
-                        ToRecipients = new List<Recipient>
-                        {
-                            new Recipient
-                            {
-                                EmailAddress = new EmailAddress
-                                {
-                                    Address = recipient
-                                }
-                            }
-                        }
+                        ToRecipients = recipientsList
                     },
-                    SaveToSentItems = false
+                    SaveToSentItems = true
                 };
 
                 _logger.LogInformation("Sending Azure AD missing students email alert via Graph from {Sender} to {Recipient}", organizerKey, recipient);
-                await graphClient.Users[organizer.Id].SendMail.PostAsync(requestBody, cancellationToken: cancellationToken);
-                _logger.LogInformation("Azure AD missing students email alert sent successfully.");
+                try
+                {
+                    await graphClient.Users[organizer.Id].SendMail.PostAsync(requestBody, cancellationToken: cancellationToken);
+                    _logger.LogInformation("Azure AD missing students email alert sent successfully.");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed sending Azure AD missing students email alert using preferred Graph client. Attempting fallback via delegated technical account...");
+                    try
+                    {
+                        var delegatedClient = await _graphFactory.CreateDelegatedClientAsync();
+                        var delegatedRequestBody = new Microsoft.Graph.Me.SendMail.SendMailPostRequestBody
+                        {
+                            Message = new Message
+                            {
+                                Subject = subject,
+                                Body = new ItemBody
+                                {
+                                    ContentType = BodyType.Html,
+                                    Content = bodyHtml
+                                },
+                                ToRecipients = (recipient ?? string.Empty)
+                                    .Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
+                                    .Select(r => r.Trim())
+                                    .Where(r => !string.IsNullOrEmpty(r))
+                                    .Select(r => new Recipient
+                                    {
+                                        EmailAddress = new EmailAddress { Address = r }
+                                    })
+                                    .ToList()
+                            },
+                            SaveToSentItems = true
+                        };
+                        await delegatedClient.Me.SendMail.PostAsync(delegatedRequestBody, cancellationToken: cancellationToken);
+                        _logger.LogInformation("Azure AD missing students email alert sent successfully via delegated Graph client.");
+                    }
+                    catch (Exception delegatedEx)
+                    {
+                        _logger.LogError(delegatedEx, "Failed sending Azure AD missing students email alert via delegated Graph client.");
+                    }
+                }
             }
             catch (Exception ex)
             {

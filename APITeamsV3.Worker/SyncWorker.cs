@@ -69,7 +69,9 @@ namespace APITeamsV3.Worker
                                 // 4. Create Tenant Context
                                 var tenantContext = new TenantContext
                                 {
+                                    CompanyId = companyConfig.Id,
                                     CompanyKey = companyConfig.CompanyKey,
+                                    DisplayName = companyConfig.DisplayName ?? string.Empty,
                                     ConnectionString = companyConfig.SmartConnectionString,
                                     TimeZoneId = companyConfig.TimeZoneId,
                                     GraphTenantId = companyConfig.GraphTenantId,

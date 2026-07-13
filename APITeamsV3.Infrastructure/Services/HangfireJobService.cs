@@ -72,7 +72,9 @@ namespace APITeamsV3.Infrastructure.Services
 
             _tenantProvider.SetTenant(new TenantContext
             {
+                CompanyId = config.Id,
                 CompanyKey = config.CompanyKey,
+                DisplayName = config.DisplayName ?? string.Empty,
                 ConnectionString = _encryptionService.Decrypt(config.SmartConnectionString),
                 TimeZoneId = config.TimeZoneId,
                 GraphTenantId = config.GraphTenantId,

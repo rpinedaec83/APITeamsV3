@@ -49,3 +49,18 @@ BEGIN
 END
 GO
 
+IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[TeamsReunionAsistenciaIntervalo]') AND type in (N'U'))
+BEGIN
+    CREATE TABLE [dbo].[TeamsReunionAsistenciaIntervalo] (
+        [Id] INT IDENTITY(1,1) NOT NULL,
+        [IdReunionAsistenciaDetalle] INT NOT NULL,
+        [JoinDateTime] DATETIME2(7) NOT NULL,
+        [LeaveDateTime] DATETIME2(7) NOT NULL,
+        [DurationInSeconds] INT NOT NULL,
+        CONSTRAINT [PK_TeamsReunionAsistenciaIntervalo] PRIMARY KEY CLUSTERED ([Id] ASC),
+        CONSTRAINT [FK_TeamsReunionAsistenciaIntervalo_TeamsReunionAsistenciaDetalle] FOREIGN KEY ([IdReunionAsistenciaDetalle]) 
+            REFERENCES [dbo].[TeamsReunionAsistenciaDetalle] ([Id]) ON DELETE CASCADE
+    );
+END
+GO
+

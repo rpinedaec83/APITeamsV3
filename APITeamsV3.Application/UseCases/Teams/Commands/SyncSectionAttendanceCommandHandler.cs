@@ -255,6 +255,7 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     // Upsert database records
                     var existingReport = await _context.TeamsReunionAsistencia
                         .Include(r => r.Detalles)
+                            .ThenInclude(d => d.Intervalos)
                         .FirstOrDefaultAsync(r => r.MeetingReportId == fullReport.Id, cancellationToken);
 
                     if (existingReport != null)
@@ -275,6 +276,8 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                             {
                                 DateTime? firstJoin = null;
                                 DateTime? lastLeave = null;
+                                var intervalos = new List<ReunionAsistenciaIntervalo>();
+
                                 if (rec.AttendanceIntervals != null)
                                 {
                                     var joins = rec.AttendanceIntervals.Where(i => i.JoinDateTime.HasValue).Select(i => i.JoinDateTime!.Value).ToList();
@@ -284,6 +287,19 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                                         firstJoin = joins.Min().UtcDateTime;
                                     if (leaves.Any())
                                         lastLeave = leaves.Max().UtcDateTime;
+
+                                    foreach (var interval in rec.AttendanceIntervals)
+                                    {
+                                        if (interval.JoinDateTime.HasValue && interval.LeaveDateTime.HasValue)
+                                        {
+                                            intervalos.Add(new ReunionAsistenciaIntervalo
+                                            {
+                                                JoinDateTime = interval.JoinDateTime.Value.UtcDateTime,
+                                                LeaveDateTime = interval.LeaveDateTime.Value.UtcDateTime,
+                                                DurationInSeconds = interval.DurationInSeconds ?? 0
+                                            });
+                                        }
+                                    }
                                 }
 
                                 existingReport.Detalles.Add(new ReunionAsistenciaDetalle
@@ -293,7 +309,8 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                                     Role = rec.Role,
                                     TotalAttendanceInSeconds = rec.TotalAttendanceInSeconds ?? 0,
                                     FirstJoinDateTime = firstJoin,
-                                    LastLeaveDateTime = lastLeave
+                                    LastLeaveDateTime = lastLeave,
+                                    Intervalos = intervalos
                                 });
                                 participantsSaved++;
                             }
@@ -319,6 +336,8 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                             {
                                 DateTime? firstJoin = null;
                                 DateTime? lastLeave = null;
+                                var intervalos = new List<ReunionAsistenciaIntervalo>();
+
                                 if (rec.AttendanceIntervals != null)
                                 {
                                     var joins = rec.AttendanceIntervals.Where(i => i.JoinDateTime.HasValue).Select(i => i.JoinDateTime!.Value).ToList();
@@ -328,6 +347,19 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                                         firstJoin = joins.Min().UtcDateTime;
                                     if (leaves.Any())
                                         lastLeave = leaves.Max().UtcDateTime;
+
+                                    foreach (var interval in rec.AttendanceIntervals)
+                                    {
+                                        if (interval.JoinDateTime.HasValue && interval.LeaveDateTime.HasValue)
+                                        {
+                                            intervalos.Add(new ReunionAsistenciaIntervalo
+                                            {
+                                                JoinDateTime = interval.JoinDateTime.Value.UtcDateTime,
+                                                LeaveDateTime = interval.LeaveDateTime.Value.UtcDateTime,
+                                                DurationInSeconds = interval.DurationInSeconds ?? 0
+                                            });
+                                        }
+                                    }
                                 }
 
                                 newReport.Detalles.Add(new ReunionAsistenciaDetalle
@@ -337,7 +369,8 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                                     Role = rec.Role,
                                     TotalAttendanceInSeconds = rec.TotalAttendanceInSeconds ?? 0,
                                     FirstJoinDateTime = firstJoin,
-                                    LastLeaveDateTime = lastLeave
+                                    LastLeaveDateTime = lastLeave,
+                                    Intervalos = intervalos
                                 });
                                 participantsSaved++;
                             }

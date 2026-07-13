@@ -12,6 +12,8 @@ using APITeamsV3.Application.UseCases.Sections;
 using APITeamsV3.Domain.Entities;
 using Microsoft.Graph;
 using Microsoft.Graph.Models.ODataErrors;
+using Microsoft.AspNetCore.Authorization;
+using APITeamsV3.Application.UseCases.Provisioning.Commands;
 
 namespace APITeamsV3.API.Controllers
 {
@@ -42,6 +44,7 @@ namespace APITeamsV3.API.Controllers
         }
 
         [HttpGet("search")]
+        [AllowAnonymous]
         public async Task<IActionResult> Search([FromQuery] string code, [FromQuery] bool skipSharePoint = false)
         {
             var result = await _mediator.Send(new APITeamsV3.Application.UseCases.Sections.GetSectionByCodeQuery { Code = code, SkipSharePoint = skipSharePoint });
@@ -81,9 +84,9 @@ namespace APITeamsV3.API.Controllers
             [FromServices] ISmartDbContext context,
             CancellationToken cancellationToken)
         {
-            // 1. Fetch from Database first
             var localReports = await context.TeamsReunionAsistencia
                 .Include(r => r.Detalles)
+                    .ThenInclude(d => d.Intervalos)
                 .Where(r => r.IdSeccion == idSeccion)
                 .OrderByDescending(r => r.MeetingStartDateTime)
                 .ToListAsync(cancellationToken);
@@ -104,7 +107,11 @@ namespace APITeamsV3.API.Controllers
                         totalAttendanceInSeconds = d.TotalAttendanceInSeconds,
                         firstJoinDateTime = d.FirstJoinDateTime,
                         lastLeaveDateTime = d.LastLeaveDateTime,
-                        intervals = new List<object>()
+                        intervals = d.Intervalos.Select(i => new {
+                            joinDateTime = i.JoinDateTime,
+                            leaveDateTime = i.LeaveDateTime,
+                            durationInSeconds = i.DurationInSeconds
+                        }).ToList()
                     }).ToList()
                 }).ToList();
 
@@ -346,6 +353,87 @@ namespace APITeamsV3.API.Controllers
                 return BadRequest(new { message = $"Error al obtener los reportes de asistencia de Teams: {ex.Message}" });
             }
         }
+
+        [HttpGet("test-graph-raw/{idSeccion}")]
+        [AllowAnonymous]
+        public async Task<IActionResult> TestGraphRaw(
+            int idSeccion,
+            [FromServices] IGraphClientFactory graphClientFactory,
+            [FromServices] ISmartDbContext context,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                var seccionHorario = await context.Set<SeccionHorario>()
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(sh => sh.IdSeccion == idSeccion, cancellationToken);
+
+                if (seccionHorario == null || string.IsNullOrWhiteSpace(seccionHorario.UrlClaseVirtual))
+                    return NotFound(new { message = "Sección no encontrada o sin enlace virtual." });
+
+                var joinUrl = seccionHorario.UrlClaseVirtual;
+                var organizerId = ExtractOidFromJoinUrl(joinUrl);
+                var escapedJoinUrl = joinUrl.Replace("'", "''");
+
+                Microsoft.Graph.GraphServiceClient graphClient;
+                bool isDelegated = false;
+                try
+                {
+                    graphClient = await graphClientFactory.CreateClientAsync();
+                }
+                catch
+                {
+                    graphClient = await graphClientFactory.CreateDelegatedClientAsync();
+                    isDelegated = true;
+                }
+
+                var meetingResponse = !string.IsNullOrEmpty(organizerId)
+                    ? await graphClient.Users[organizerId].OnlineMeetings.GetAsync(
+                        rc => rc.QueryParameters.Filter = $"joinWebUrl eq '{escapedJoinUrl}'", cancellationToken)
+                    : await graphClient.Communications.OnlineMeetings.GetAsync(
+                        rc => rc.QueryParameters.Filter = $"joinWebUrl eq '{escapedJoinUrl}'", cancellationToken);
+
+                var meeting = meetingResponse?.Value?.FirstOrDefault();
+                if (meeting?.Id == null) return NotFound(new { message = "Meeting no encontrado en Graph", joinUrl, organizerId });
+
+                var reportsCollection = !string.IsNullOrEmpty(organizerId)
+                    ? await graphClient.Users[organizerId].OnlineMeetings[meeting.Id].AttendanceReports.GetAsync(cancellationToken: cancellationToken)
+                    : await graphClient.Communications.OnlineMeetings[meeting.Id].AttendanceReports.GetAsync(cancellationToken: cancellationToken);
+
+                // For testing, expand the first report if exists
+                object? firstReportExpanded = null;
+                if (reportsCollection?.Value != null && reportsCollection.Value.Count > 0)
+                {
+                    var firstId = reportsCollection.Value.First().Id;
+                    if (firstId != null)
+                    {
+                        var reportData = !string.IsNullOrEmpty(organizerId)
+                            ? await graphClient.Users[organizerId].OnlineMeetings[meeting.Id].AttendanceReports[firstId].GetAsync(
+                                rc => rc.QueryParameters.Expand = new[] { "attendanceRecords" }, cancellationToken)
+                            : await graphClient.Communications.OnlineMeetings[meeting.Id].AttendanceReports[firstId].GetAsync(
+                                rc => rc.QueryParameters.Expand = new[] { "attendanceRecords" }, cancellationToken);
+                                
+                        firstReportExpanded = reportData;
+                    }
+                }
+
+                return Ok(new { 
+                    idSeccion,
+                    joinUrl, 
+                    organizerId, 
+                    meetingId = meeting.Id, 
+                    isDelegated,
+                    reportsCount = reportsCollection?.Value?.Count ?? 0,
+                    reports = reportsCollection?.Value,
+                    firstReportExpanded
+                });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { error = ex.Message, stack = ex.StackTrace });
+            }
+        }
+
 
         [HttpGet]
         public async Task<IActionResult> GetSections([FromQuery] int page = 1, [FromQuery] int pageSize = 10)

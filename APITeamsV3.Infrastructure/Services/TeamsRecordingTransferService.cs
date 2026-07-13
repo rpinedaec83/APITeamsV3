@@ -17,6 +17,8 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Collections.Concurrent;
+using APITeamsV3.Domain.Entities;
 using CopyPostRequestBody = Microsoft.Graph.Drives.Item.Items.Item.Copy.CopyPostRequestBody;
 
 namespace APITeamsV3.Infrastructure.Services
@@ -30,16 +32,19 @@ namespace APITeamsV3.Infrastructure.Services
         private readonly IGraphClientFactory _graphFactory;
         private readonly ITenantProvider _tenantProvider;
         private readonly ISmartDbContext _smartDbContext;
+        private readonly ICentralDbContext _centralContext;
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly RecordingTransferOptions _options;
         private readonly ILogger<TeamsRecordingTransferService> _logger;
         private readonly IConfiguration _configuration;
         private static DateTime? _lastAlertSentUtc = null;
+        private static readonly ConcurrentDictionary<string, DateTime> _lastTeamAlertSentUtc = new();
 
         public TeamsRecordingTransferService(
             IGraphClientFactory graphFactory,
             ITenantProvider tenantProvider,
             ISmartDbContext smartDbContext,
+            ICentralDbContext centralContext,
             IHttpClientFactory httpClientFactory,
             IOptions<RecordingTransferOptions> options,
             ILogger<TeamsRecordingTransferService> logger,
@@ -48,6 +53,7 @@ namespace APITeamsV3.Infrastructure.Services
             _graphFactory = graphFactory;
             _tenantProvider = tenantProvider;
             _smartDbContext = smartDbContext;
+            _centralContext = centralContext;
             _httpClientFactory = httpClientFactory;
             _options = options.Value;
             _logger = logger;
@@ -92,6 +98,48 @@ namespace APITeamsV3.Infrastructure.Services
             var destination = await ResolveDestinationAsync(graphClient, request, cancellationToken);
             result.ChannelName = destination.ChannelName;
             result.DestinationPath = destination.LogicalPath;
+
+            // Check destination drive quota before copying
+            try
+            {
+                var destDrive = await graphClient.Drives[destination.DriveId].GetAsync(
+                    requestConfiguration => requestConfiguration.QueryParameters.Select = ["id", "quota"],
+                    cancellationToken);
+
+                if (destDrive?.Quota != null)
+                {
+                    long totalD = destDrive.Quota.Total ?? 0;
+                    long usedD = destDrive.Quota.Used ?? 0;
+                    long remainingD = destDrive.Quota.Remaining ?? 0;
+                    double percentAvailableD = totalD > 0 ? ((double)remainingD / totalD) * 100 : 0;
+
+                    var thresholdStr = _configuration["StorageQuotaAlert:MinPercentAvailableThreshold"];
+                    if (string.IsNullOrEmpty(thresholdStr) || !double.TryParse(thresholdStr, out double threshold))
+                    {
+                        threshold = 20.0;
+                    }
+
+                    if (percentAvailableD <= threshold)
+                    {
+                        var recipient = _configuration["StorageQuotaAlert:AlertEmailRecipient"];
+                        if (!string.IsNullOrWhiteSpace(recipient))
+                        {
+                            if (!_lastTeamAlertSentUtc.TryGetValue(destination.DriveId, out var lastSent) || DateTime.UtcNow >= lastSent.AddHours(24))
+                            {
+                                var teamName = request.CourseName ?? destination.LogicalPath;
+                                var sectionCode = request.SectionCode ?? request.Section ?? "N/A";
+                                
+                                await SendSharePointAlertEmailAsync(graphClient, organizer.Id ?? string.Empty, recipient, percentAvailableD, remainingD, totalD, teamName, sectionCode, cancellationToken);
+                                _lastTeamAlertSentUtc[destination.DriveId] = DateTime.UtcNow;
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to check destination drive quota during recording transfer.");
+            }
 
             var recordings = await GetRecordingCandidatesAsync(
                 graphClient,
@@ -1730,6 +1778,76 @@ namespace APITeamsV3.Infrastructure.Services
                 // Check storage quota threshold and send alert email if needed
                 await CheckAndSendStorageAlertAsync(graphClient, organizer.Id, percentAvailable, remaining, total, upn, forceEmailAlert, cancellationToken);
 
+                // Check SharePoint quotas for pilot teams
+                try
+                {
+                    var tenant = _tenantProvider.GetCurrentTenant();
+                    var pilotSections = await _centralContext.CompanyPilotSections
+                        .AsNoTracking()
+                        .Where(ps => ps.CompanyConfigId == tenant.CompanyId)
+                        .Select(ps => ps.IdSeccion)
+                        .ToListAsync(cancellationToken);
+
+                    if (pilotSections.Count > 0)
+                    {
+                        _logger.LogInformation("Checking SharePoint drive storage quota for {Count} pilot teams...", pilotSections.Count);
+                        var thresholdStr = _configuration["StorageQuotaAlert:MinPercentAvailableThreshold"];
+                        if (string.IsNullOrEmpty(thresholdStr) || !double.TryParse(thresholdStr, out double threshold))
+                        {
+                            threshold = 20.0;
+                        }
+
+                        var recipient = _configuration["StorageQuotaAlert:AlertEmailRecipient"];
+                        if (!string.IsNullOrWhiteSpace(recipient))
+                        {
+                            foreach (var idSeccion in pilotSections)
+                            {
+                                var team = await _smartDbContext.TeamsEquipos
+                                    .AsNoTracking()
+                                    .FirstOrDefaultAsync(t => t.IdSeccionSmart == idSeccion && t.EstadoTeam == "A" && t.IsActive == "A", cancellationToken);
+
+                                if (team != null && !string.IsNullOrWhiteSpace(team.IdTeamsGroup))
+                                {
+                                    try
+                                    {
+                                        var teamDrive = await graphClient.Groups[team.IdTeamsGroup].Drive.GetAsync(
+                                            requestConfiguration => requestConfiguration.QueryParameters.Select = ["id", "quota"],
+                                            cancellationToken);
+
+                                        if (teamDrive?.Quota != null)
+                                        {
+                                            long totalT = teamDrive.Quota.Total ?? 0;
+                                            long usedT = teamDrive.Quota.Used ?? 0;
+                                            long remainingT = teamDrive.Quota.Remaining ?? 0;
+                                            double percentAvailableT = totalT > 0 ? ((double)remainingT / totalT) * 100 : 0;
+
+                                            _logger.LogInformation("Quota status for Team {TeamCode} ({TeamName}): {Percent:F1}% available (Used: {Used} GB / Total: {Total} GB)", 
+                                                team.MailNickName, team.NombreTeam, percentAvailableT, (double)usedT / (1024*1024*1024), (double)totalT / (1024*1024*1024));
+
+                                            if (percentAvailableT <= threshold)
+                                            {
+                                                if (forceEmailAlert || !_lastTeamAlertSentUtc.TryGetValue(team.IdTeamsGroup, out var lastSent) || DateTime.UtcNow >= lastSent.AddHours(24))
+                                                {
+                                                    await SendSharePointAlertEmailAsync(graphClient, organizer.Id ?? string.Empty, recipient, percentAvailableT, remainingT, totalT, team.NombreTeam, team.MailNickName, cancellationToken);
+                                                    _lastTeamAlertSentUtc[team.IdTeamsGroup] = DateTime.UtcNow;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    catch (Exception teamEx)
+                                    {
+                                        _logger.LogWarning(teamEx, "Failed to retrieve storage quota for Team Group {GroupId} (Section {SectionId}).", team.IdTeamsGroup, idSeccion);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to check pilot teams SharePoint storage quotas in GetStorageQuotaAsync.");
+                }
+
                 return new DriveQuotaResult
                 {
                     Success = true,
@@ -1792,6 +1910,7 @@ namespace APITeamsV3.Infrastructure.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error checking storage quota threshold or sending alert email.");
+                throw;
             }
         }
 
@@ -1842,6 +1961,25 @@ namespace APITeamsV3.Infrastructure.Services
 </body>
 </html>";
 
+            var recipientsList = (recipient ?? string.Empty)
+                .Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(r => r.Trim())
+                .Where(r => !string.IsNullOrEmpty(r))
+                .Select(r => new Recipient
+                {
+                    EmailAddress = new EmailAddress
+                    {
+                        Address = r
+                    }
+                })
+                .ToList();
+
+            if (recipientsList.Count == 0)
+            {
+                _logger.LogWarning("No valid recipients parsed from configuration. Storage alert email will not be sent.");
+                return;
+            }
+
             var requestBody = new Microsoft.Graph.Users.Item.SendMail.SendMailPostRequestBody
             {
                 Message = new Message
@@ -1852,23 +1990,176 @@ namespace APITeamsV3.Infrastructure.Services
                         ContentType = BodyType.Html,
                         Content = bodyHtml
                     },
-                    ToRecipients = new List<Recipient>
-                    {
-                        new Recipient
-                        {
-                            EmailAddress = new EmailAddress
-                            {
-                                Address = recipient
-                            }
-                        }
-                    }
+                    ToRecipients = recipientsList
                 },
-                SaveToSentItems = false
+                SaveToSentItems = true
             };
 
             _logger.LogInformation("Sending storage alert email via Microsoft Graph from {Upn} to {Recipient} (Available: {Percent:F1}%)", upn, recipient, percentAvailable);
-            await graphClient.Users[organizerUserId].SendMail.PostAsync(requestBody, cancellationToken: cancellationToken);
-            _logger.LogInformation("Storage alert email sent successfully via Graph.");
+            try
+            {
+                await graphClient.Users[organizerUserId].SendMail.PostAsync(requestBody, cancellationToken: cancellationToken);
+                _logger.LogInformation("Storage alert email sent successfully via Graph.");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to send storage alert email using preferred Graph client. Attempting fallback via delegated technical account...");
+                try
+                {
+                    var delegatedClient = await _graphFactory.CreateDelegatedClientAsync();
+                    var delegatedRequestBody = new Microsoft.Graph.Me.SendMail.SendMailPostRequestBody
+                    {
+                        Message = new Message
+                        {
+                            Subject = subject,
+                            Body = new ItemBody
+                            {
+                                ContentType = BodyType.Html,
+                                Content = bodyHtml
+                            },
+                            ToRecipients = (recipient ?? string.Empty)
+                                .Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
+                                .Select(r => r.Trim())
+                                .Where(r => !string.IsNullOrEmpty(r))
+                                .Select(r => new Recipient
+                                {
+                                    EmailAddress = new EmailAddress { Address = r }
+                                })
+                                .ToList()
+                        },
+                        SaveToSentItems = true
+                    };
+                    await delegatedClient.Me.SendMail.PostAsync(delegatedRequestBody, cancellationToken: cancellationToken);
+                    _logger.LogInformation("Storage alert email sent successfully via delegated Graph client.");
+                }
+                catch (Exception delegatedEx)
+                {
+                    _logger.LogError(delegatedEx, "Failed to send storage alert email via delegated Graph client.");
+                    throw;
+                }
+            }
+        }
+
+        private async Task SendSharePointAlertEmailAsync(
+            GraphServiceClient graphClient,
+            string organizerUserId,
+            string recipient,
+            double percentAvailable,
+            long remainingBytes,
+            long totalBytes,
+            string teamName,
+            string sectionCode,
+            CancellationToken cancellationToken)
+        {
+            double remainingGb = (double)remainingBytes / (1024 * 1024 * 1024);
+            double totalGb = (double)totalBytes / (1024 * 1024 * 1024);
+
+            var subject = $"[ALERTA] Almacenamiento SharePoint Crítico: Equipo {teamName} ({sectionCode})";
+            var bodyHtml = $@"
+<html>
+<body style='font-family: Arial, sans-serif; line-height: 1.6; color: #333;'>
+    <h2 style='color: #d9534f;'>Alerta de Almacenamiento SharePoint Crítico</h2>
+    <p>Se ha detectado que el espacio de almacenamiento del sitio de SharePoint del equipo está por debajo del límite configurado.</p>
+    <table style='border-collapse: collapse; width: 100%; max-width: 600px; margin-top: 15px;'>
+        <tr style='background-color: #f2f2f2;'>
+            <th style='border: 1px solid #ddd; padding: 8px; text-align: left;'>Métrica</th>
+            <th style='border: 1px solid #ddd; padding: 8px; text-align: left;'>Valor</th>
+        </tr>
+        <tr>
+            <td style='border: 1px solid #ddd; padding: 8px;'>Equipo (Team)</td>
+            <td style='border: 1px solid #ddd; padding: 8px;'><b>{teamName}</b></td>
+        </tr>
+        <tr>
+            <td style='border: 1px solid #ddd; padding: 8px;'>Código de Horario / Sección</td>
+            <td style='border: 1px solid #ddd; padding: 8px;'><b>{sectionCode}</b></td>
+        </tr>
+        <tr>
+            <td style='border: 1px solid #ddd; padding: 8px;'>Espacio Disponible %</td>
+            <td style='border: 1px solid #ddd; padding: 8px; color: #d9534f; font-weight: bold;'>{percentAvailable:F1}%</td>
+        </tr>
+        <tr>
+            <td style='border: 1px solid #ddd; padding: 8px;'>Espacio Libre (GB)</td>
+            <td style='border: 1px solid #ddd; padding: 8px;'>{remainingGb:F2} GB</td>
+        </tr>
+        <tr>
+            <td style='border: 1px solid #ddd; padding: 8px;'>Espacio Total (GB)</td>
+            <td style='border: 1px solid #ddd; padding: 8px;'>{totalGb:F2} GB</td>
+        </tr>
+    </table>
+    <p style='margin-top: 20px; font-size: 12px; color: #777;'>
+        Este es un correo automático generado por el sistema APITeamsV3.
+    </p>
+</body>
+</html>";
+
+            var recipientsList = (recipient ?? string.Empty)
+                .Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(r => r.Trim())
+                .Where(r => !string.IsNullOrEmpty(r))
+                .Select(r => new Recipient
+                {
+                    EmailAddress = new EmailAddress
+                    {
+                        Address = r
+                    }
+                })
+                .ToList();
+
+            if (recipientsList.Count == 0) return;
+
+            foreach (var recipientObj in recipientsList)
+            {
+                var requestBody = new Microsoft.Graph.Users.Item.SendMail.SendMailPostRequestBody
+                {
+                    Message = new Message
+                    {
+                        Subject = subject,
+                        Body = new ItemBody
+                        {
+                            ContentType = BodyType.Html,
+                            Content = bodyHtml
+                        },
+                        ToRecipients = new List<Recipient> { recipientObj }
+                    },
+                    SaveToSentItems = true
+                };
+
+                _logger.LogInformation("Sending SharePoint storage alert email via Microsoft Graph for team {TeamName} to {Recipient} (Available: {Percent:F1}%)", teamName, recipientObj.EmailAddress?.Address, percentAvailable);
+                
+                try
+                {
+                    await graphClient.Users[organizerUserId].SendMail.PostAsync(requestBody, cancellationToken: cancellationToken);
+                    _logger.LogInformation("SharePoint storage alert email sent successfully via Graph to {Recipient}.", recipientObj.EmailAddress?.Address);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to send SharePoint storage alert email using preferred Graph client to {Recipient}. Attempting fallback via delegated technical account...", recipientObj.EmailAddress?.Address);
+                    try
+                    {
+                        var delegatedClient = await _graphFactory.CreateDelegatedClientAsync();
+                        var delegatedRequestBody = new Microsoft.Graph.Me.SendMail.SendMailPostRequestBody
+                        {
+                            Message = new Message
+                            {
+                                Subject = subject,
+                                Body = new ItemBody
+                                {
+                                    ContentType = BodyType.Html,
+                                    Content = bodyHtml
+                                },
+                                ToRecipients = new List<Recipient> { recipientObj }
+                            },
+                            SaveToSentItems = true
+                        };
+                        await delegatedClient.Me.SendMail.PostAsync(delegatedRequestBody, cancellationToken: cancellationToken);
+                        _logger.LogInformation("SharePoint storage alert email sent successfully via delegated Graph client to {Recipient}.", recipientObj.EmailAddress?.Address);
+                    }
+                    catch (Exception delegatedEx)
+                    {
+                        _logger.LogError(delegatedEx, "Failed to send SharePoint storage alert email via delegated Graph client to {Recipient}.", recipientObj.EmailAddress?.Address);
+                    }
+                }
+            }
         }
 
         private sealed class DestinationContext

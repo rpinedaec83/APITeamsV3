@@ -238,10 +238,14 @@ const useStyles = makeStyles({
     },
 });
 
+const forceUtcDate = (value: string) => {
+    return value.endsWith('Z') || value.includes('+') ? value : value + 'Z';
+};
+
 const formatDisplayDate = (value?: string | null) => {
     if (!value) return '';
 
-    const date = new Date(value);
+    const date = new Date(forceUtcDate(value));
     if (Number.isNaN(date.getTime())) {
         return value;
     }
@@ -250,6 +254,7 @@ const formatDisplayDate = (value?: string | null) => {
         year: 'numeric',
         month: '2-digit',
         day: '2-digit',
+        timeZone: 'America/Lima'
     }).format(date);
 };
 
@@ -1326,8 +1331,16 @@ const OperationsPage: React.FC = () => {
                                                                     {formatDuration(record.totalAttendanceInSeconds)}
                                                                 </TableCell>
                                                                 <TableCell>
-                                                                    {record.firstJoinDateTime || record.lastLeaveDateTime ? (
-                                                                        <span style={{ fontSize: '12px' }}>
+                                                                    {record.intervals && record.intervals.length > 0 ? (
+                                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                                                            {record.intervals.map((interval: any, i: number) => (
+                                                                                <span key={i} style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>
+                                                                                    {formatTimeOnly(interval.joinDateTime)} – {formatTimeOnly(interval.leaveDateTime)}
+                                                                                </span>
+                                                                            ))}
+                                                                        </div>
+                                                                    ) : record.firstJoinDateTime || record.lastLeaveDateTime ? (
+                                                                        <span style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>
                                                                             {formatTimeOnly(record.firstJoinDateTime)} – {formatTimeOnly(record.lastLeaveDateTime)}
                                                                         </span>
                                                                     ) : (
@@ -1535,9 +1548,10 @@ const CopyDetailItem: React.FC<{
     );
 }
 
+
 const formatDateTime = (value?: string | null) => {
     if (!value) return '';
-    const date = new Date(value);
+    const date = new Date(forceUtcDate(value));
     if (Number.isNaN(date.getTime())) {
         return value;
     }
@@ -1547,20 +1561,22 @@ const formatDateTime = (value?: string | null) => {
         day: '2-digit',
         hour: '2-digit',
         minute: '2-digit',
-        second: '2-digit'
+        second: '2-digit',
+        timeZone: 'America/Lima'
     }).format(date);
 };
 
 const formatTimeOnly = (value?: string | null) => {
     if (!value) return '';
-    const date = new Date(value);
+    const date = new Date(forceUtcDate(value));
     if (Number.isNaN(date.getTime())) {
         return value;
     }
     return new Intl.DateTimeFormat('es-PE', {
         hour: '2-digit',
         minute: '2-digit',
-        second: '2-digit'
+        second: '2-digit',
+        timeZone: 'America/Lima'
     }).format(date);
 };
 

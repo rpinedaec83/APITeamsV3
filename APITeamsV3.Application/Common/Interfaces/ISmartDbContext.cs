@@ -20,6 +20,7 @@ namespace APITeamsV3.Application.Common.Interfaces
         DbSet<APITeamsV3.Domain.Entities.AplicativoTeams> AplicativosTeams { get; set; }
         DbSet<ReunionAsistencia> TeamsReunionAsistencia { get; }
         DbSet<ReunionAsistenciaDetalle> TeamsReunionAsistenciaDetalle { get; }
+        DbSet<ReunionAsistenciaIntervalo> TeamsReunionAsistenciaIntervalo { get; }
         Task<int> SaveChangesAsync(CancellationToken cancellationToken);
     }
 }

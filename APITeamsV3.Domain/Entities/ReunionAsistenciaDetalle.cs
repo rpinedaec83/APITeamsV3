@@ -15,5 +15,6 @@ namespace APITeamsV3.Domain.Entities
 
         // Navigation property
         public ReunionAsistencia? ReunionAsistencia { get; set; }
+        public ICollection<ReunionAsistenciaIntervalo> Intervalos { get; set; } = new List<ReunionAsistenciaIntervalo>();
     }
 }
