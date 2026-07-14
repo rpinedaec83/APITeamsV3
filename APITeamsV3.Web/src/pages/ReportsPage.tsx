@@ -14,7 +14,8 @@ import {
     Spinner,
     Toolbar,
     ToolbarButton,
-    Label
+    Label,
+    Button
 } from '@fluentui/react-components';
 import { 
     ArrowDownloadRegular, 
@@ -23,7 +24,8 @@ import {
     AlertRegular,
     PersonRegular,
     CalendarAgendaRegular,
-    CloudSyncRegular
+    CloudSyncRegular,
+    HatGraduationRegular
 } from '@fluentui/react-icons';
 import { useApiClient } from '../hooks/useApiClient';
 
@@ -65,7 +67,7 @@ const useStyles = makeStyles({
     }
 });
 
-type ReportType = 'schedules' | 'members' | 'consistency' | 'progress';
+type ReportType = 'schedules' | 'members' | 'consistency' | 'progress' | 'detalle-unidad';
 
 const ReportsPage: React.FC = () => {
     const styles = useStyles();
@@ -74,6 +76,8 @@ const ReportsPage: React.FC = () => {
     const [reportType, setReportType] = useState<ReportType>('progress');
     const [data, setData] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
+    const [currentPage, setCurrentPage] = useState(1);
+    const itemsPerPage = 50;
 
     const fetchReport = async () => {
         setLoading(true);
@@ -84,9 +88,14 @@ const ReportsPage: React.FC = () => {
                 case 'members': endpoint = '/reports/report-team-members'; break;
                 case 'consistency': endpoint = '/reports/report-smart-vs-teams'; break;
                 case 'progress': endpoint = '/reports/report-sync-progress'; break;
+                case 'detalle-unidad': endpoint = '/reports/dashboard-summary'; break;
             }
             const response = await apiClient.get(endpoint);
-            setData(response.data);
+            if (reportType === 'detalle-unidad') {
+                setData(response.data.rows || []);
+            } else {
+                setData(response.data);
+            }
         } catch (error) {
             console.error("Error fetching report", error);
         } finally {
@@ -96,6 +105,7 @@ const ReportsPage: React.FC = () => {
 
     useEffect(() => {
         fetchReport();
+        setCurrentPage(1);
     }, [reportType]);
 
     const exportToCsv = () => {
@@ -140,8 +150,12 @@ const ReportsPage: React.FC = () => {
         );
 
         const headers = Object.keys(data[0]);
-        return data.map((row, i) => (
-            <TableRow key={i}>
+        const startIndex = (currentPage - 1) * itemsPerPage;
+        const endIndex = startIndex + itemsPerPage;
+        const currentData = data.slice(startIndex, endIndex);
+
+        return currentData.map((row, i) => (
+            <TableRow key={startIndex + i}>
                 {headers.map(h => (
                     <TableCell key={h}>{String(row[h] ?? '')}</TableCell>
                 ))}
@@ -155,6 +169,7 @@ const ReportsPage: React.FC = () => {
             case 'members': return <PersonRegular fontSize={32} color={tokens.colorBrandForeground1} />;
             case 'consistency': return <AlertRegular fontSize={32} color={tokens.colorBrandForeground1} />;
             case 'progress': return <CloudSyncRegular fontSize={32} color={tokens.colorBrandForeground1} />;
+            case 'detalle-unidad': return <HatGraduationRegular fontSize={32} color={tokens.colorBrandForeground1} />;
             default: return <TableRegular fontSize={32} color={tokens.colorBrandForeground1} />;
         }
     };
@@ -183,6 +198,7 @@ const ReportsPage: React.FC = () => {
                         <option value="schedules">Horarios y Sesiones</option>
                         <option value="members">Miembros y Roles por Team</option>
                         <option value="consistency">Consistencia Smart vs Teams</option>
+                        <option value="detalle-unidad">Detalle por Unidad, Programa y Periodo</option>
                     </Select>
                 </div>
                 <div style={{ flexGrow: 1 }} />
@@ -201,6 +217,31 @@ const ReportsPage: React.FC = () => {
                     </TableBody>
                 </Table>
             </div>
+
+            {data.length > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', backgroundColor: tokens.colorNeutralBackground1, borderRadius: tokens.borderRadiusLarge, boxShadow: tokens.shadow2, border: `1px solid ${tokens.colorNeutralStroke2}` }}>
+                    <div style={{ fontSize: '14px', color: tokens.colorNeutralForeground1 }}>
+                        Mostrando {((currentPage - 1) * itemsPerPage) + 1} a {Math.min(currentPage * itemsPerPage, data.length)} de {data.length} registros
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        <Button 
+                            disabled={currentPage === 1} 
+                            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                        >
+                            Anterior
+                        </Button>
+                        <span style={{ fontSize: '14px', margin: '0 8px', fontWeight: 'bold' }}>
+                            Página {currentPage} de {Math.ceil(data.length / itemsPerPage)}
+                        </span>
+                        <Button 
+                            disabled={currentPage === Math.ceil(data.length / itemsPerPage)} 
+                            onClick={() => setCurrentPage(p => Math.min(Math.ceil(data.length / itemsPerPage), p + 1))}
+                        >
+                            Siguiente
+                        </Button>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
