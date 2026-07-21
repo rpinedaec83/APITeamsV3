@@ -10,122 +10,237 @@ import {
     makeStyles,
     shorthands,
     tokens,
-    Select,
     Spinner,
-    Toolbar,
-    ToolbarButton,
     Label,
-    Button
+    Button,
+    Input,
+    Select
 } from '@fluentui/react-components';
 import { 
-    ArrowDownloadRegular, 
-    ArrowClockwiseRegular, 
     TableRegular,
-    AlertRegular,
-    PersonRegular,
-    CalendarAgendaRegular,
-    CloudSyncRegular,
-    HatGraduationRegular
+    SearchRegular,
+    ArrowDownloadRegular
 } from '@fluentui/react-icons';
 import { useApiClient } from '../hooks/useApiClient';
+import { getBaseApiUrl } from '../utils/config';
+import * as XLSX from 'xlsx';
+import Swal from 'sweetalert2';
 
 const useStyles = makeStyles({
     root: {
-        padding: '32px',
+        minHeight: '100%',
+        padding: '28px',
         display: 'flex',
         flexDirection: 'column',
         gap: '24px',
-        maxWidth: '1400px',
-        margin: '0 auto',
-        minHeight: '100vh',
+        background: 'radial-gradient(circle at 10% 20%, rgba(243, 248, 253, 1) 0%, rgba(228, 237, 248, 1) 90%)',
     },
-    header: {
+    panelCard: {
+        backgroundColor: tokens.colorNeutralBackground1,
+        ...shorthands.borderRadius('18px'),
+        boxShadow: tokens.shadow8,
+        border: `1px solid ${tokens.colorNeutralStroke2}`,
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+    },
+    panelHeader: {
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        backgroundColor: tokens.colorNeutralBackground1,
-        ...shorthands.padding('20px', '24px'),
-        ...shorthands.borderRadius(tokens.borderRadiusLarge),
-        boxShadow: tokens.shadow4,
+        gap: '12px',
+        ...shorthands.padding('18px', '20px'),
+        borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+        backgroundColor: '#f7f9fc',
     },
-    controlBar: {
+    panelBody: {
         display: 'flex',
+        flexDirection: 'column',
+        gap: '14px',
+        ...shorthands.padding('18px', '20px', '20px'),
+    },
+    filterBar: {
+        display: 'flex',
+        flexWrap: 'wrap',
         gap: '16px',
         alignItems: 'end',
-        backgroundColor: tokens.colorNeutralBackground1,
-        ...shorthands.padding('20px'),
-        ...shorthands.borderRadius(tokens.borderRadiusLarge),
-        border: `1px solid ${tokens.colorNeutralStroke2}`,
+    },
+    filterItem: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '4px',
+        minWidth: '150px'
     },
     tableContainer: {
-        backgroundColor: tokens.colorNeutralBackground1,
-        ...shorthands.borderRadius(tokens.borderRadiusLarge),
-        border: `1px solid ${tokens.colorNeutralStroke2}`,
         overflow: 'auto',
         maxHeight: 'calc(100vh - 350px)',
-        boxShadow: tokens.shadow2,
+    },
+    tableCell: {
+        padding: '8px 12px',
     }
 });
-
-type ReportType = 'schedules' | 'members' | 'consistency' | 'progress' | 'detalle-unidad';
 
 const ReportsPage: React.FC = () => {
     const styles = useStyles();
     const apiClient = useApiClient();
 
-    const [reportType, setReportType] = useState<ReportType>('progress');
     const [data, setData] = useState<any[]>([]);
+    const [totalRecords, setTotalRecords] = useState(0);
     const [loading, setLoading] = useState(false);
+    const [exporting, setExporting] = useState(false);
+    
+    // Pagination
     const [currentPage, setCurrentPage] = useState(1);
     const itemsPerPage = 50;
+    
+    // Summary Data for Options
+    const [summaryRows, setSummaryRows] = useState<any[]>([]);
 
-    const fetchReport = async () => {
+    // Filters
+    const [filters, setFilters] = useState({
+        smartSearch: '',
+        unidad: '',
+        programa: '',
+        periodo: '',
+        sede: '',
+        docente: '',
+        alumno: ''
+    });
+
+    const handleFilterChange = (field: string, value: string) => {
+        setFilters(prev => ({ ...prev, [field]: value }));
+    };
+
+    const fetchReport = async (page: number = currentPage) => {
         setLoading(true);
         try {
-            let endpoint = '';
-            switch (reportType) {
-                case 'schedules': endpoint = '/reports/report-schedules'; break;
-                case 'members': endpoint = '/reports/report-team-members'; break;
-                case 'consistency': endpoint = '/reports/report-smart-vs-teams'; break;
-                case 'progress': endpoint = '/reports/report-sync-progress'; break;
-                case 'detalle-unidad': endpoint = '/reports/dashboard-summary'; break;
-            }
-            const response = await apiClient.get(endpoint);
-            if (reportType === 'detalle-unidad') {
-                setData(response.data.rows || []);
-            } else {
-                setData(response.data);
-            }
+            const params = new URLSearchParams({
+                PageNumber: page.toString(),
+                PageSize: itemsPerPage.toString()
+            });
+
+            if (filters.smartSearch) params.append('SmartSearch', filters.smartSearch);
+            if (filters.unidad) params.append('Unidad', filters.unidad);
+            if (filters.programa) params.append('Programa', filters.programa);
+            if (filters.periodo) params.append('Periodo', filters.periodo);
+            if (filters.sede) params.append('Sede', filters.sede);
+            if (filters.docente) params.append('Docente', filters.docente);
+            if (filters.alumno) params.append('Alumno', filters.alumno);
+
+            const response = await apiClient.get(`/reports/detailed-report?${params.toString()}`);
+            setData(response.data.data || []);
+            setTotalRecords(response.data.totalRecords || 0);
+            setCurrentPage(page);
         } catch (error) {
             console.error("Error fetching report", error);
+            Swal.fire('Error', 'No se pudo obtener el reporte.', 'error');
         } finally {
             setLoading(false);
         }
     };
 
     useEffect(() => {
-        fetchReport();
-        setCurrentPage(1);
-    }, [reportType]);
+        fetchReport(1);
+        apiClient.get('/reports/dashboard-summary').then(res => {
+            setSummaryRows(res.data.rows || []);
+        }).catch(err => console.error("Error loading summary for options", err));
+    }, []);
 
-    const exportToCsv = () => {
+    const unidadOptions = Array.from(new Set(summaryRows.map(row => row.unidadNegocio as string))).sort();
+    const programaOptions = Array.from(new Set(
+        summaryRows
+            .filter(row => !filters.unidad || row.unidadNegocio === filters.unidad)
+            .map(row => row.programa as string)
+    )).sort();
+    const periodoOptions = Array.from(new Set(
+        summaryRows
+            .filter(row =>
+                (!filters.unidad || row.unidadNegocio === filters.unidad) &&
+                (!filters.programa || row.programa === filters.programa))
+            .map(row => row.periodo as string)
+    )).sort();
+    const sedeOptions = Array.from(new Set(
+        summaryRows
+            .filter(row =>
+                (!filters.unidad || row.unidadNegocio === filters.unidad) &&
+                (!filters.programa || row.programa === filters.programa) &&
+                (!filters.periodo || row.periodo === filters.periodo))
+            .map(row => row.sede as string)
+    )).sort();
+
+    const exportCurrentViewToExcel = () => {
         if (data.length === 0) return;
 
-        const headers = Object.keys(data[0]);
-        const csvContent = [
-            headers.join(','),
-            ...data.map(row => headers.map(header => `"${row[header] ?? ''}"`).join(','))
-        ].join('\n');
+        const worksheet = XLSX.utils.json_to_sheet(data);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, "Reporte");
+        XLSX.writeFile(workbook, `Reporte_${new Date().toISOString().split('T')[0]}.xlsx`);
+    };
 
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.setAttribute('href', url);
-        link.setAttribute('download', `${reportType}_report_${new Date().toISOString().split('T')[0]}.csv`);
-        link.style.visibility = 'hidden';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+    const exportAllToExcel = async () => {
+        try {
+            setExporting(true);
+            const payload = {
+                smartSearch: filters.smartSearch,
+                unidad: filters.unidad,
+                programa: filters.programa,
+                periodo: filters.periodo,
+                sede: filters.sede,
+                docente: filters.docente,
+                alumno: filters.alumno
+            };
+
+            const response = await apiClient.post('/reports/detailed-report/export', payload);
+            const jobId = response.data.jobId;
+
+            Swal.fire({
+                title: 'Exportación iniciada',
+                text: 'El reporte se está generando en segundo plano. Te notificaremos cuando esté listo.',
+                icon: 'info',
+                toast: true,
+                position: 'top-end',
+                showConfirmButton: false,
+                timer: 3000
+            });
+
+            pollExportStatus(jobId);
+        } catch (error) {
+            console.error("Error starting export", error);
+            Swal.fire('Error', 'No se pudo iniciar la exportación masiva.', 'error');
+            setExporting(false);
+        }
+    };
+
+    const pollExportStatus = async (jobId: string) => {
+        const intervalId = setInterval(async () => {
+            try {
+                const res = await apiClient.get(`/reports/detailed-report/export/${jobId}`);
+                if (res.data.status === 'Ready') {
+                    clearInterval(intervalId);
+                    setExporting(false);
+                    
+                    // Add API base url if needed, assuming the URL is relative to the API host
+                    const baseApiUrl = getBaseApiUrl();
+                    const origin = new URL(baseApiUrl).origin;
+                    const downloadUrl = `${origin}${res.data.url}`;
+
+                    Swal.fire({
+                        title: '¡Reporte Listo!',
+                        html: `El reporte masivo ha terminado de generarse.<br><br><a href="${downloadUrl}" download class="swal2-confirm swal2-styled" style="text-decoration: none;">Descargar Excel</a>`,
+                        icon: 'success',
+                        showConfirmButton: false,
+                        showCloseButton: true
+                    });
+                } else if (res.data.status === 'Error') {
+                    clearInterval(intervalId);
+                    setExporting(false);
+                    Swal.fire('Error en Exportación', res.data.message || 'Ocurrió un problema generando el archivo.', 'error');
+                }
+            } catch (err) {
+                console.error("Error polling status", err);
+                // Don't stop polling on network error, but if we do we should setExporting(false)
+            }
+        }, 5000); // Poll every 5 seconds
     };
 
     const renderTableHeader = () => {
@@ -134,81 +249,132 @@ const ReportsPage: React.FC = () => {
         return (
             <TableRow>
                 {headers.map(h => (
-                    <TableHeaderCell key={h}>{h.charAt(0).toUpperCase() + h.slice(1).replace(/([A-Z])/g, ' $1')}</TableHeaderCell>
+                    <TableHeaderCell key={h} className={styles.tableCell}>{h.charAt(0).toUpperCase() + h.slice(1).replace(/([A-Z])/g, ' $1')}</TableHeaderCell>
                 ))}
             </TableRow>
         );
     };
 
     const renderTableBody = () => {
+        if (loading) return (
+            <TableRow>
+                <TableCell colSpan={25} style={{ textAlign: 'center', padding: '40px' }}>
+                    <Spinner label="Cargando datos..." />
+                </TableCell>
+            </TableRow>
+        );
+
         if (data.length === 0) return (
             <TableRow>
-                <TableCell colSpan={10} style={{ textAlign: 'center', padding: '40px' }}>
-                    {loading ? <Spinner label="Cargando datos..." /> : "No se encontraron registros"}
+                <TableCell colSpan={25} style={{ textAlign: 'center', padding: '40px' }}>
+                    No se encontraron registros
                 </TableCell>
             </TableRow>
         );
 
         const headers = Object.keys(data[0]);
-        const startIndex = (currentPage - 1) * itemsPerPage;
-        const endIndex = startIndex + itemsPerPage;
-        const currentData = data.slice(startIndex, endIndex);
-
-        return currentData.map((row, i) => (
-            <TableRow key={startIndex + i}>
-                {headers.map(h => (
-                    <TableCell key={h}>{String(row[h] ?? '')}</TableCell>
-                ))}
+        return data.map((row, i) => (
+            <TableRow key={i}>
+                {headers.map(h => {
+                    let val = row[h];
+                    if (typeof val === 'boolean') val = val ? 'Sí' : 'No';
+                    if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(val)) {
+                        const [datePart, timePart] = val.split('T');
+                        const [year, month, day] = datePart.split('-');
+                        if (h === 'fechaCreacionEquipoTeams' || h === 'FechaCreacionEquipoTeams') {
+                            val = `${day}/${month}/${year} ${timePart.substring(0, 8)}`;
+                        } else {
+                            val = `${day}/${month}/${year}`;
+                        }
+                    }
+                    return (
+                        <TableCell key={h} className={styles.tableCell}>{String(val ?? '')}</TableCell>
+                    );
+                })}
             </TableRow>
         ));
     };
 
-    const getIcon = () => {
-        switch (reportType) {
-            case 'schedules': return <CalendarAgendaRegular fontSize={32} color={tokens.colorBrandForeground1} />;
-            case 'members': return <PersonRegular fontSize={32} color={tokens.colorBrandForeground1} />;
-            case 'consistency': return <AlertRegular fontSize={32} color={tokens.colorBrandForeground1} />;
-            case 'progress': return <CloudSyncRegular fontSize={32} color={tokens.colorBrandForeground1} />;
-            case 'detalle-unidad': return <HatGraduationRegular fontSize={32} color={tokens.colorBrandForeground1} />;
-            default: return <TableRegular fontSize={32} color={tokens.colorBrandForeground1} />;
-        }
-    };
+    const totalPages = Math.ceil(totalRecords / itemsPerPage);
 
     return (
         <div className={styles.root}>
-            <div className={styles.header}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    {getIcon()}
+            <div className={styles.panelCard}>
+                <div className={styles.panelHeader}>
                     <div>
-                        <Title3>Reportes Avanzados</Title3>
-                        <div style={{ fontSize: '12px', color: tokens.colorNeutralForeground2 }}>Inteligencia Operativa y Auditoría</div>
+                        <Title3 style={{ margin: 0 }}>Reporte Detallado</Title3>
+                        <div style={{ fontSize: '12px', color: tokens.colorNeutralForeground2, marginTop: '4px' }}>
+                            Consulta de alumnos, docentes y equipos Teams
+                        </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        <Button onClick={exportAllToExcel} disabled={exporting || loading}>
+                            {exporting ? 'Generando Reporte...' : 'Exportar Todo (Segundo Plano)'}
+                        </Button>
+                        <Button icon={<ArrowDownloadRegular />} onClick={exportCurrentViewToExcel} disabled={loading || data.length === 0}>Exportar Vista Actual</Button>
+                        <TableRegular fontSize={24} color={tokens.colorBrandForeground1} />
                     </div>
                 </div>
-                <Toolbar aria-label="Report actions">
-                    <ToolbarButton icon={<ArrowClockwiseRegular />} onClick={fetchReport} disabled={loading}>Actualizar</ToolbarButton>
-                    <ToolbarButton icon={<ArrowDownloadRegular />} onClick={exportToCsv} disabled={loading || data.length === 0}>Exportar CSV</ToolbarButton>
-                </Toolbar>
-            </div>
 
-            <div className={styles.controlBar}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', minWidth: '300px' }}>
-                    <Label>Seleccionar Reporte</Label>
-                    <Select value={reportType} onChange={(_, data) => setReportType(data.value as ReportType)}>
-                        <option value="progress">Avance de Sincronización</option>
-                        <option value="schedules">Horarios y Sesiones</option>
-                        <option value="members">Miembros y Roles por Team</option>
-                        <option value="consistency">Consistencia Smart vs Teams</option>
-                        <option value="detalle-unidad">Detalle por Unidad, Programa y Periodo</option>
+                <div className={styles.panelBody}>
+                    <div className={styles.filterBar}>
+                        <div className={styles.filterItem}>
+                    <Label>Búsqueda Inteligente</Label>
+                    <Input 
+                        placeholder="U, Prog, Per, Sede..." 
+                        value={filters.smartSearch} 
+                        onChange={(e) => handleFilterChange('smartSearch', e.target.value)}
+                    />
+                </div>
+                <div className={styles.filterItem}>
+                    <Label>Unidad</Label>
+                    <Select value={filters.unidad} onChange={(_: any, data: any) => handleFilterChange('unidad', data.value)}>
+                        <option value="">Todas</option>
+                        {unidadOptions.map(u => <option key={u} value={u}>{u}</option>)}
                     </Select>
                 </div>
-                <div style={{ flexGrow: 1 }} />
-                <div style={{ fontSize: '12px', color: tokens.colorNeutralForeground4 }}>
-                    {data.length} registros encontrados
+                <div className={styles.filterItem}>
+                    <Label>Programa</Label>
+                    <Select value={filters.programa} onChange={(_: any, data: any) => handleFilterChange('programa', data.value)}>
+                        <option value="">Todos</option>
+                        {programaOptions.map(p => <option key={p} value={p}>{p}</option>)}
+                    </Select>
                 </div>
+                <div className={styles.filterItem}>
+                    <Label>Periodo</Label>
+                    <Select value={filters.periodo} onChange={(_: any, data: any) => handleFilterChange('periodo', data.value)}>
+                        <option value="">Todos</option>
+                        {periodoOptions.map(p => <option key={p} value={p}>{p}</option>)}
+                    </Select>
+                </div>
+                <div className={styles.filterItem}>
+                    <Label>Sede</Label>
+                    <Select value={filters.sede} onChange={(_: any, data: any) => handleFilterChange('sede', data.value)}>
+                        <option value="">Todas</option>
+                        {sedeOptions.map(s => <option key={s} value={s}>{s}</option>)}
+                    </Select>
+                </div>
+                <div className={styles.filterItem}>
+                    <Label>Docente</Label>
+                    <Input value={filters.docente} onChange={(e) => handleFilterChange('docente', e.target.value)} />
+                </div>
+                <div className={styles.filterItem}>
+                    <Label>Alumno</Label>
+                    <Input value={filters.alumno} onChange={(e) => handleFilterChange('alumno', e.target.value)} />
+                </div>
+                <Button 
+                    appearance="primary" 
+                    icon={<SearchRegular />} 
+                    onClick={() => fetchReport(1)}
+                    disabled={loading}
+                    style={{ marginBottom: '2px' }}
+                >
+                    Buscar
+                </Button>
             </div>
 
             <div className={styles.tableContainer}>
-                <Table size="extra-small" aria-label="Reporting table">
+                <Table aria-label="Reporting table" style={{ minWidth: 'max-content' }}>
                     <TableHeader>
                         {renderTableHeader()}
                     </TableHeader>
@@ -218,30 +384,32 @@ const ReportsPage: React.FC = () => {
                 </Table>
             </div>
 
-            {data.length > 0 && (
+            {totalRecords > 0 && (
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', backgroundColor: tokens.colorNeutralBackground1, borderRadius: tokens.borderRadiusLarge, boxShadow: tokens.shadow2, border: `1px solid ${tokens.colorNeutralStroke2}` }}>
                     <div style={{ fontSize: '14px', color: tokens.colorNeutralForeground1 }}>
-                        Mostrando {((currentPage - 1) * itemsPerPage) + 1} a {Math.min(currentPage * itemsPerPage, data.length)} de {data.length} registros
+                        Mostrando {((currentPage - 1) * itemsPerPage) + 1} a {Math.min(currentPage * itemsPerPage, totalRecords)} de {totalRecords} registros
                     </div>
                     <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                         <Button 
-                            disabled={currentPage === 1} 
-                            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                            disabled={currentPage === 1 || loading} 
+                            onClick={() => fetchReport(Math.max(1, currentPage - 1))}
                         >
                             Anterior
                         </Button>
                         <span style={{ fontSize: '14px', margin: '0 8px', fontWeight: 'bold' }}>
-                            Página {currentPage} de {Math.ceil(data.length / itemsPerPage)}
+                            Página {currentPage} de {totalPages}
                         </span>
                         <Button 
-                            disabled={currentPage === Math.ceil(data.length / itemsPerPage)} 
-                            onClick={() => setCurrentPage(p => Math.min(Math.ceil(data.length / itemsPerPage), p + 1))}
+                            disabled={currentPage === totalPages || loading} 
+                            onClick={() => fetchReport(Math.min(totalPages, currentPage + 1))}
                         >
                             Siguiente
                         </Button>
                     </div>
                 </div>
             )}
+                </div>
+            </div>
         </div>
     );
 };

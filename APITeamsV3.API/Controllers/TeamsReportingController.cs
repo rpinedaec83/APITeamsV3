@@ -14,6 +14,7 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Hangfire;
 
 namespace APITeamsV3.API.Controllers
 {
@@ -526,6 +527,49 @@ namespace APITeamsV3.API.Controllers
             sql.AppendLine("GROUP BY [EntidadAfectada], [Tipo]");
             command.CommandText = sql.ToString();
             return command;
+        }
+
+        [HttpGet("detailed-report")]
+        public async Task<ActionResult<APITeamsV3.Application.UseCases.Stats.Queries.GetDetailedReport.DetailedReportResultDto>> GetDetailedReport([FromQuery] APITeamsV3.Application.UseCases.Stats.Queries.GetDetailedReport.GetDetailedReportQuery query)
+        {
+            var result = await _mediator.Send(query);
+            return Ok(result);
+        }
+
+        [HttpPost("detailed-report/export")]
+        public async Task<ActionResult> StartDetailedReportExport([FromBody] APITeamsV3.Application.UseCases.Stats.Queries.GetDetailedReport.GetDetailedReportQuery query, [FromServices] APITeamsV3.Infrastructure.Services.TenantHangfireRuntime tenantHangfireRuntime)
+        {
+            var tenant = _tenantProvider.GetCurrentTenant();
+            var jobId = Guid.NewGuid().ToString("N");
+            var executedBy = User.Identity?.Name ?? "Sistema";
+            
+            var storage = await tenantHangfireRuntime.GetStorageAsync(tenant.CompanyKey);
+            var backgroundJobClient = new Hangfire.BackgroundJobClient(storage);
+            
+            backgroundJobClient.Enqueue<APITeamsV3.Application.Common.Interfaces.IReportExportJob>(x => x.ExecuteExportAsync(query, tenant.CompanyKey, jobId, executedBy));
+            return Ok(new { JobId = jobId });
+        }
+
+        [HttpGet("detailed-report/export/{jobId}")]
+        public ActionResult GetDetailedReportExportStatus(string jobId)
+        {
+            var folderPath = System.IO.Path.Combine(System.AppContext.BaseDirectory, "wwwroot", "exports");
+            var readyFile = System.IO.Path.Combine(folderPath, $"{jobId}.ready");
+            var errorFile = System.IO.Path.Combine(folderPath, $"{jobId}.error");
+            
+            if (System.IO.File.Exists(errorFile))
+            {
+                var error = System.IO.File.ReadAllText(errorFile);
+                return BadRequest(new { Status = "Error", Message = error });
+            }
+
+            if (System.IO.File.Exists(readyFile))
+            {
+                var url = $"/exports/{jobId}.xlsx";
+                return Ok(new { Status = "Ready", Url = url });
+            }
+
+            return Ok(new { Status = "Processing" });
         }
 
         private sealed record LogsFilter(

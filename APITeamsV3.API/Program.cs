@@ -118,6 +118,16 @@ if (!app.Environment.IsDevelopment())
     app.UseHsts();
 }
 
+var exportsPath = System.IO.Path.Combine(System.AppContext.BaseDirectory, "wwwroot", "exports");
+if (!System.IO.Directory.Exists(exportsPath))
+{
+    System.IO.Directory.CreateDirectory(exportsPath);
+}
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(exportsPath),
+    RequestPath = "/exports"
+});
 app.UseRouting();
 app.UseCors("AllowAll");
 app.UseMiddleware<APITeamsV3.API.Middleware.ExceptionHandlingMiddleware>();
