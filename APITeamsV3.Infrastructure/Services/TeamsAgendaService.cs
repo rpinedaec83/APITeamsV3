@@ -70,7 +70,51 @@ namespace APITeamsV3.Infrastructure.Services
                     .ToList() ?? new List<Attendee>();
 
                 var timeZoneId = ResolveTimeZoneId();
-                var graphClient = await CreateAgendaGraphClientAsync();
+                var appClient = await _graphFactory.CreateClientAsync();
+
+                var daysOfWeekList = request.RecurrenceDays?
+                    .Distinct()
+                    .Select(ToGraphDayOfWeek)
+                    .Where(d => d.HasValue)
+                    .ToList() ?? new List<Microsoft.Graph.Models.DayOfWeekObject?>();
+
+                if (daysOfWeekList.Count == 0)
+                {
+                    daysOfWeekList.Add(ToGraphDayOfWeek(request.FirstOccurrenceStart.DayOfWeek) ?? Microsoft.Graph.Models.DayOfWeekObject.Monday);
+                }
+
+                string? joinUrl = null;
+
+                try
+                {
+                    var techAccountEmail = "app.teams.idatpe@idat.pe";
+                    var techUser = await appClient.Users[techAccountEmail].GetAsync(
+                        requestConfiguration => requestConfiguration.QueryParameters.Select = ["id"],
+                        cancellationToken: cancellationToken);
+
+                    if (!string.IsNullOrWhiteSpace(techUser?.Id))
+                    {
+                        var onlineMeetingRequest = new Microsoft.Graph.Models.OnlineMeeting
+                        {
+                            Subject = request.Subject,
+                            StartDateTime = startDate,
+                            EndDateTime = endDate
+                        };
+                        var createdMeeting = await appClient.Users[techUser.Id].OnlineMeetings.PostAsync(onlineMeetingRequest, cancellationToken: cancellationToken);
+                        joinUrl = createdMeeting?.JoinWebUrl;
+                        _logger.LogInformation("Successfully created OnlineMeeting under technical account {TechEmail}. JoinUrl: {JoinUrl}", techAccountEmail, joinUrl);
+                    }
+                }
+                catch (Exception meetingEx)
+                {
+                    _logger.LogWarning(meetingEx, "Could not create OnlineMeeting for technical account via App-Only client.");
+                }
+
+                var groupEventBody = request.HtmlContent;
+                if (!string.IsNullOrWhiteSpace(joinUrl))
+                {
+                    groupEventBody = $"<p><a href=\"{joinUrl}\" target=\"_blank\"><b>Unirse a la reunión de Microsoft Teams</b></a></p><br/>" + request.HtmlContent;
+                }
 
                 var newEvent = new Event
                 {
@@ -78,7 +122,7 @@ namespace APITeamsV3.Infrastructure.Services
                     Body = new ItemBody
                     {
                         ContentType = BodyType.Html,
-                        Content = request.HtmlContent
+                        Content = groupEventBody
                     },
                     Start = new DateTimeTimeZone
                     {
@@ -90,63 +134,68 @@ namespace APITeamsV3.Infrastructure.Services
                         DateTime = endDate.ToString("yyyy-MM-ddTHH:mm:ss"),
                         TimeZone = timeZoneId
                     },
-                    IsOnlineMeeting = true,
-                    OnlineMeetingProvider = OnlineMeetingProviderType.TeamsForBusiness,
-                    Attendees = requiredAttendees,
                     Recurrence = new PatternedRecurrence
                     {
-                        AdditionalData = new Dictionary<string, object>
+                        Pattern = new RecurrencePattern
                         {
-                            ["pattern"] = new Dictionary<string, object>
-                            {
-                                ["type"] = "weekly",
-                                ["interval"] = 1,
-                                ["daysOfWeek"] = recurrenceDays
-                            },
-                            ["range"] = new Dictionary<string, object>
-                            {
-                                ["type"] = "endDate",
-                                ["startDate"] = recurrenceStart.ToString("yyyy-MM-dd"),
-                                ["endDate"] = recurrenceEnd.ToString("yyyy-MM-dd")
-                            }
+                            Type = RecurrencePatternType.Weekly,
+                            Interval = 1,
+                            DaysOfWeek = daysOfWeekList
+                        },
+                        Range = new RecurrenceRange
+                        {
+                            Type = RecurrenceRangeType.EndDate,
+                            StartDate = new Date(recurrenceStart.Year, recurrenceStart.Month, recurrenceStart.Day),
+                            EndDate = new Date(recurrenceEnd.Year, recurrenceEnd.Month, recurrenceEnd.Day)
                         }
                     }
                 };
 
                 var createdEvent = await CreateGroupEventWithRetryAsync(
-                    graphClient,
+                    appClient,
                     request.TeamId,
                     newEvent,
+                    request.PresenterEmails,
                     cancellationToken);
 
-                var joinUrl = createdEvent?.OnlineMeeting?.JoinUrl
-                    ?? createdEvent?.OnlineMeetingUrl
-                    ?? createdEvent?.WebLink
-                    ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(joinUrl))
+                {
+                    joinUrl = createdEvent?.OnlineMeeting?.JoinUrl
+                        ?? createdEvent?.OnlineMeetingUrl
+                        ?? createdEvent?.WebLink
+                        ?? string.Empty;
+                }
 
                 if (!string.IsNullOrWhiteSpace(joinUrl))
                 {
                     await TryPromotePresentersAsync(
-                        graphClient,
+                        appClient,
                         joinUrl,
                         request.PresenterEmails,
                         cancellationToken);
 
-                    var chatMessage = new ChatMessage
+                    try
                     {
-                        Body = new ItemBody
+                        var chatMessage = new ChatMessage
                         {
-                            ContentType = BodyType.Html,
-                            Content = $"<p>Se ha programado una nueva sesion de clase: <b>{request.Subject}</b></p><p><a href='{joinUrl}'>Unirse a la reunion de Microsoft Teams</a></p>"
-                        }
-                    };
+                            Body = new ItemBody
+                            {
+                                ContentType = BodyType.Html,
+                                Content = $"<p>Se ha programado una nueva sesion de clase: <b>{request.Subject}</b></p><p><a href='{joinUrl}'>Unirse a la reunion de Microsoft Teams</a></p>"
+                            }
+                        };
 
-                    await PostChannelMessageWithRetryAsync(
-                        graphClient,
-                        request.TeamId,
-                        request.ChannelId,
-                        chatMessage,
-                        cancellationToken);
+                        await PostChannelMessageWithRetryAsync(
+                            appClient,
+                            request.TeamId,
+                            request.ChannelId,
+                            chatMessage,
+                            cancellationToken);
+                    }
+                    catch (Exception msgEx)
+                    {
+                        _logger.LogWarning(msgEx, "Could not post channel message announcement for Team {TeamId}, Channel {ChannelId}. Agenda was created successfully.", request.TeamId, request.ChannelId);
+                    }
                 }
 
                 _logger.LogInformation(
@@ -657,47 +706,27 @@ namespace APITeamsV3.Infrastructure.Services
 
         public async Task<string> GetPrimaryChannelIdAsync(string teamId, CancellationToken cancellationToken = default)
         {
+            // 1. Try App-Only client (Client Credentials with Group.ReadWrite.All) first for highest reliability
             try
             {
-                var graphClient = await CreateAgendaGraphClientAsync();
-                Exception? lastTransient = null;
+                var appGraphClient = await _graphFactory.CreateClientAsync();
 
-                for (var attempt = 1; attempt <= PrimaryChannelMaxAttempts; attempt++)
-                {
-                    try
-                    {
-                        var primaryChannel = await graphClient.Teams[teamId].PrimaryChannel.GetAsync(cancellationToken: cancellationToken);
-                        if (!string.IsNullOrWhiteSpace(primaryChannel?.Id))
-                        {
-                            return primaryChannel.Id;
-                        }
-                    }
-                    catch (Exception ex) when (IsTransientGroupProvisioningError(ex))
-                    {
-                        lastTransient = ex;
-
-                        if (attempt == PrimaryChannelMaxAttempts)
-                        {
-                            break;
-                        }
-
-                        var delay = GetRetryDelay(attempt);
-                        _logger.LogWarning(
-                            ex,
-                            "Primary channel is not ready for Team {TeamId}. Attempt {Attempt}/{MaxAttempts}. Retrying in {Delay}s.",
-                            teamId,
-                            attempt,
-                            PrimaryChannelMaxAttempts,
-                            delay.TotalSeconds);
-
-                        await Task.Delay(delay, cancellationToken);
-                    }
-                }
-
-                // Fallback: query channel list and pick the best candidate.
                 try
                 {
-                    var channelsResponse = await graphClient.Teams[teamId].Channels.GetAsync(cancellationToken: cancellationToken);
+                    var primaryChannel = await appGraphClient.Teams[teamId].PrimaryChannel.GetAsync(cancellationToken: cancellationToken);
+                    if (!string.IsNullOrWhiteSpace(primaryChannel?.Id))
+                    {
+                        return primaryChannel.Id;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "App-Only PrimaryChannel.GetAsync failed for Team {TeamId}. Trying channels list.", teamId);
+                }
+
+                try
+                {
+                    var channelsResponse = await appGraphClient.Teams[teamId].Channels.GetAsync(cancellationToken: cancellationToken);
                     var channels = channelsResponse?.Value ?? new List<Channel>();
 
                     var byName = channels.FirstOrDefault(c =>
@@ -715,22 +744,64 @@ namespace APITeamsV3.Infrastructure.Services
                     }
 
                     var first = channels.FirstOrDefault();
+                    if (!string.IsNullOrWhiteSpace(first?.Id))
+                    {
+                        return first.Id;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "App-Only Channels.GetAsync failed for Team {TeamId}.", teamId);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "App-Only Graph client creation failed for Team {TeamId}.", teamId);
+            }
+
+            // 2. Fallback to Delegated client
+            try
+            {
+                var delegatedClient = await CreateAgendaGraphClientAsync();
+
+                try
+                {
+                    var primaryChannel = await delegatedClient.Teams[teamId].PrimaryChannel.GetAsync(cancellationToken: cancellationToken);
+                    if (!string.IsNullOrWhiteSpace(primaryChannel?.Id))
+                    {
+                        return primaryChannel.Id;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Delegated PrimaryChannel.GetAsync failed for Team {TeamId}.", teamId);
+                }
+
+                try
+                {
+                    var channelsResponse = await delegatedClient.Teams[teamId].Channels.GetAsync(cancellationToken: cancellationToken);
+                    var channels = channelsResponse?.Value ?? new List<Channel>();
+
+                    var byName = channels.FirstOrDefault(c =>
+                        string.Equals(c.DisplayName, "General", StringComparison.OrdinalIgnoreCase));
+
+                    if (!string.IsNullOrWhiteSpace(byName?.Id))
+                    {
+                        return byName.Id;
+                    }
+
+                    var first = channels.FirstOrDefault();
                     return first?.Id ?? string.Empty;
                 }
                 catch (Exception ex)
                 {
-                    if (lastTransient != null)
-                    {
-                        _logger.LogWarning(lastTransient, "Primary channel retries exhausted for Team {TeamId}.", teamId);
-                    }
-
-                    _logger.LogError(ex, "Error fetching channels list for team {TeamId}", teamId);
+                    _logger.LogError(ex, "Delegated Channels.GetAsync failed for Team {TeamId}", teamId);
                     return string.Empty;
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error fetching primary channel for team {TeamId}", teamId);
+                _logger.LogError(ex, "Delegated Graph client creation failed for Team {TeamId}", teamId);
                 return string.Empty;
             }
         }
@@ -739,6 +810,7 @@ namespace APITeamsV3.Infrastructure.Services
             GraphServiceClient graphClient,
             string teamId,
             Event newEvent,
+            IEnumerable<string>? presenterEmails,
             CancellationToken cancellationToken)
         {
             await EnsureGroupCalendarReadyAsync(graphClient, teamId, cancellationToken);
@@ -753,11 +825,40 @@ namespace APITeamsV3.Infrastructure.Services
                 }
                 catch (Exception ex) when (IsAccessDeniedError(ex))
                 {
-                    _logger.LogError(
+                    _logger.LogWarning(
                         ex,
-                        "Access denied while creating agenda event for Team/Group {TeamId}. Verify Graph permissions for group calendar operations.",
+                        "Access denied for group calendar {TeamId}. Attempting App-Only fallback...",
                         teamId);
-                    throw;
+                    try
+                    {
+                        var appClient = await _graphFactory.CreateClientAsync();
+                        return await appClient.Groups[teamId].Events.PostAsync(newEvent, cancellationToken: cancellationToken);
+                    }
+                    catch (Exception appEx) when (IsAccessDeniedError(appEx))
+                    {
+                        _logger.LogWarning(appEx, "App-Only group calendar creation also received Access Denied for Team {TeamId}.", teamId);
+
+                        var teacherEmail = presenterEmails?
+                            .Where(e => !string.IsNullOrWhiteSpace(e))
+                            .Select(e => e.Trim())
+                            .FirstOrDefault();
+
+                        if (!string.IsNullOrWhiteSpace(teacherEmail))
+                        {
+                            try
+                            {
+                                _logger.LogInformation("Attempting fallback to primary teacher user calendar ({TeacherEmail})...", teacherEmail);
+                                var appClient = await _graphFactory.CreateClientAsync();
+                                return await appClient.Users[teacherEmail].Events.PostAsync(newEvent, cancellationToken: cancellationToken);
+                            }
+                            catch (Exception teacherEx)
+                            {
+                                _logger.LogError(teacherEx, "Teacher calendar fallback also failed for {TeacherEmail}.", teacherEmail);
+                            }
+                        }
+
+                        throw;
+                    }
                 }
                 catch (Exception ex) when (IsTransientGroupProvisioningError(ex))
                 {
@@ -839,6 +940,8 @@ namespace APITeamsV3.Infrastructure.Services
             string teamId,
             CancellationToken cancellationToken)
         {
+            await EnsureTechnicalAccountIsGroupOwnerAsync(teamId, cancellationToken);
+
             Exception? lastTransient = null;
 
             for (var attempt = 1; attempt <= GroupCalendarReadyMaxAttempts; attempt++)
@@ -888,17 +991,67 @@ namespace APITeamsV3.Infrastructure.Services
             }
         }
 
+        private async Task EnsureTechnicalAccountIsGroupOwnerAsync(string teamId, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var appClient = await _graphFactory.CreateClientAsync();
+                var techAccountEmail = "app.teams.idatpe@idat.pe";
+
+                var techUser = await appClient.Users[techAccountEmail].GetAsync(
+                    requestConfiguration => requestConfiguration.QueryParameters.Select = ["id"],
+                    cancellationToken: cancellationToken);
+
+                if (!string.IsNullOrWhiteSpace(techUser?.Id))
+                {
+                    var body = new Microsoft.Graph.Models.ReferenceCreate
+                    {
+                        OdataId = $"https://graph.microsoft.com/v1.0/users/{techUser.Id}"
+                    };
+
+                    try
+                    {
+                        await appClient.Groups[teamId].Owners.Ref.PostAsync(body, cancellationToken: cancellationToken);
+                        _logger.LogInformation("Added technical account {Email} as Owner of group {TeamId}.", techAccountEmail, teamId);
+                    }
+                    catch
+                    {
+                        // Already owner or conflict - ignore
+                    }
+
+                    try
+                    {
+                        await appClient.Groups[teamId].Members.Ref.PostAsync(body, cancellationToken: cancellationToken);
+                        _logger.LogInformation("Added technical account {Email} as Member of group {TeamId}.", techAccountEmail, teamId);
+                    }
+                    catch
+                    {
+                        // Already member or conflict - ignore
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not ensure technical account as owner/member of group {TeamId}. Continuing.", teamId);
+            }
+        }
+
         private static bool IsAccessDeniedError(Exception ex)
         {
-            var message = (ex.Message ?? string.Empty).ToLowerInvariant();
+            var fullText = (ex.ToString() ?? string.Empty).ToLowerInvariant();
             var textMatch =
-                message.Contains("access is denied") ||
-                message.Contains("insufficient privileges") ||
-                message.Contains("authorization_requestdenied");
+                fullText.Contains("access is denied") ||
+                fullText.Contains("insufficient privileges") ||
+                fullText.Contains("authorization_requestdenied") ||
+                fullText.Contains("aadsts") ||
+                fullText.Contains("invalid_grant") ||
+                fullText.Contains("usernamepasswordcredential") ||
+                fullText.Contains("multi-factor authentication") ||
+                fullText.Contains("authenticationfailedexception");
 
             if (ex is ApiException apiException)
             {
-                return apiException.ResponseStatusCode == 403 || textMatch;
+                return apiException.ResponseStatusCode is 401 or 403 || textMatch;
             }
 
             return textMatch;
@@ -956,10 +1109,8 @@ namespace APITeamsV3.Infrastructure.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "No se pudo crear cliente Graph delegado para agenda.");
-                throw new InvalidOperationException(
-                    "No se pudo autenticar agenda con cuenta tecnica delegada. Verificar AplicativosTeams activo y permisos delegados en Azure AD.",
-                    ex);
+                _logger.LogWarning(ex, "No se pudo crear cliente Graph delegado para agenda (posible MFA o credenciales). Usando App-Only fallback...");
+                return await _graphFactory.CreateClientAsync();
             }
         }
 
@@ -1034,6 +1185,19 @@ namespace APITeamsV3.Infrastructure.Services
                 return DateTime.SpecifyKind(localDateTime.Value, DateTimeKind.Utc);
             }
         }
+
+        private static Microsoft.Graph.Models.DayOfWeekObject? ToGraphDayOfWeek(System.DayOfWeek day) =>
+            day switch
+            {
+                System.DayOfWeek.Sunday => Microsoft.Graph.Models.DayOfWeekObject.Sunday,
+                System.DayOfWeek.Monday => Microsoft.Graph.Models.DayOfWeekObject.Monday,
+                System.DayOfWeek.Tuesday => Microsoft.Graph.Models.DayOfWeekObject.Tuesday,
+                System.DayOfWeek.Wednesday => Microsoft.Graph.Models.DayOfWeekObject.Wednesday,
+                System.DayOfWeek.Thursday => Microsoft.Graph.Models.DayOfWeekObject.Thursday,
+                System.DayOfWeek.Friday => Microsoft.Graph.Models.DayOfWeekObject.Friday,
+                System.DayOfWeek.Saturday => Microsoft.Graph.Models.DayOfWeekObject.Saturday,
+                _ => Microsoft.Graph.Models.DayOfWeekObject.Monday
+            };
 
         private static string ToGraphDayName(System.DayOfWeek day) =>
             day switch

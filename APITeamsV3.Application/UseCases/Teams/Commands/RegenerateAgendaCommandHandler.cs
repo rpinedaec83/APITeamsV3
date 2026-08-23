@@ -239,10 +239,10 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                             "Warning",
                             "Agenda",
                             sectionInfo.Codigo,
-                            $"Fallo creando bloque {blockLabel}.",
+                            $"Fallo creando bloque {blockLabel}: {ex.Message}",
                             request.JobId,
                             request.ExecutedBy,
-                            ex.Message);
+                            ex.ToString());
                     }
                 }
 

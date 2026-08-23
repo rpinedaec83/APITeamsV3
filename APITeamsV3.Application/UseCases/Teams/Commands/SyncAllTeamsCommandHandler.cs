@@ -18,6 +18,15 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
 
         public async Task<SyncAllTeamsResult> Handle(SyncAllTeamsCommand request, CancellationToken cancellationToken)
         {
+            try
+            {
+                await _mediator.Send(new SyncObsoleteTeamsCommand(), cancellationToken);
+            }
+            catch
+            {
+                // Non-blocking cleanup
+            }
+
             var sectionIds = await _mediator.Send(new GetAllSectionsToSyncQuery(request.Sede), cancellationToken);
             var jobIds = new List<string>();
 

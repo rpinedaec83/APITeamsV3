@@ -494,56 +494,114 @@ WHERE AC.IdSeccion = {{0}}
         {
             try
             {
-                var recipient = _configuration["StorageQuotaAlert:AlertEmailRecipient"];
+                string? recipient = null;
+
+                try
+                {
+                    var setting = await _centralContext.SystemSettings
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(s => s.Key == "RecordingAlertEmails" || s.Key == "AlertEmailRecipient", cancellationToken);
+                    if (setting != null && !string.IsNullOrWhiteSpace(setting.Value))
+                    {
+                        recipient = setting.Value.Trim();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Could not load RecordingAlertEmails from SystemSettings. Trying configuration fallback.");
+                }
+
                 if (string.IsNullOrWhiteSpace(recipient))
                 {
-                    _logger.LogWarning("No AlertEmailRecipient configured. Bypassing Azure AD missing student email alert.");
-                    return;
+                    recipient = _configuration["StorageQuotaAlert:AlertEmailRecipient"] 
+                                 ?? _configuration["AlertEmailRecipient"];
                 }
+
+                if (string.IsNullOrWhiteSpace(recipient))
+                {
+                    recipient = "Teamplataforma@inlearning.pe, rpineda@x-codec.net, miquiroz@inlearning.pe";
+                }
+
+                var tenant = _tenantProvider.GetCurrentTenant();
+                var companyDisplayName = tenant.DisplayName ?? tenant.CompanyKey.ToUpper();
 
                 var organizerKey = await ResolveOrganizerFromAplicativosTeamsAsync(cancellationToken);
                 if (string.IsNullOrWhiteSpace(organizerKey))
                 {
-                    _logger.LogWarning("Could not resolve active technical account to send Azure AD missing student email.");
-                    return;
+                    organizerKey = tenant.CompanyKey.Equals("idat", StringComparison.OrdinalIgnoreCase) 
+                        ? "admin@idat.edu.pe" 
+                        : "admin@zegel.edu.pe";
                 }
 
-                var organizer = await graphClient.Users[organizerKey].GetAsync(
-                    requestConfiguration => requestConfiguration.QueryParameters.Select = ["id", "mail", "userPrincipalName"],
-                    cancellationToken);
-
-                if (organizer == null || string.IsNullOrWhiteSpace(organizer.Id))
+                User? organizer = null;
+                try
                 {
-                    _logger.LogWarning("Technical account user not found in Graph. Bypassing Azure AD missing student email.");
-                    return;
+                    organizer = await graphClient.Users[organizerKey].GetAsync(
+                        requestConfiguration => requestConfiguration.QueryParameters.Select = ["id", "mail", "userPrincipalName"],
+                        cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Could not fetch user info for technical organizer account {OrganizerKey}", organizerKey);
                 }
 
-                var subject = $"[ALERTA] Alumnos no existen en Azure AD - Sección {idSeccion}";
+                var organizerUserId = organizer?.Id ?? organizerKey;
+
+                var subject = $"[ALERTA] Alumnos no existen en Azure AD - {companyDisplayName} (Sección {idSeccion})";
                 
                 var rowsHtml = string.Join("", missingInAzureAd.Select(student => $@"
                     <tr>
-                        <td style='border: 1px solid #ddd; padding: 8px;'>{student.CodigoAlumno}</td>
-                        <td style='border: 1px solid #ddd; padding: 8px; color: #d9534f; font-weight: bold;'>{student.EmailAlumno}</td>
-                        <td style='border: 1px solid #ddd; padding: 8px;'>{student.IdTeamsGroup}</td>
+                        <td style='border: 1px solid #e0e0e0; padding: 10px; font-weight: bold;'>{student.CodigoAlumno}</td>
+                        <td style='border: 1px solid #e0e0e0; padding: 10px;'>{student.NombresAlumno} {student.ApellidosAlumno}</td>
+                        <td style='border: 1px solid #e0e0e0; padding: 10px; color: #d13438; font-weight: bold;'>{student.EmailAlumno}</td>
+                        <td style='border: 1px solid #e0e0e0; padding: 10px; font-family: monospace; font-size: 11px;'>{student.IdTeamsGroup}</td>
                     </tr>"));
 
                 var bodyHtml = $@"
 <html>
-<body style='font-family: Arial, sans-serif; line-height: 1.6; color: #333;'>
-    <h2 style='color: #d9534f;'>Alerta de Alumnos Inexistentes en Azure AD</h2>
-    <p>Se ha detectado que los siguientes alumnos de la sección <b>{idSeccion}</b> no existen en Azure AD durante el proceso de sincronización:</p>
-    <table style='border-collapse: collapse; width: 100%; max-width: 700px; margin-top: 15px;'>
-        <tr style='background-color: #f2f2f2;'>
-            <th style='border: 1px solid #ddd; padding: 8px; text-align: left;'>Código</th>
-            <th style='border: 1px solid #ddd; padding: 8px; text-align: left;'>Correo</th>
-            <th style='border: 1px solid #ddd; padding: 8px; text-align: left;'>Grupo Teams ID</th>
-        </tr>
-        {rowsHtml}
-    </table>
-    <p style='margin-top: 15px;'><b>Acción recomendada:</b> Verifique que las cuentas de estos alumnos estén creadas y activas en Office 365.</p>
-    <p style='margin-top: 20px; font-size: 12px; color: #777;'>
-        Este es un correo automático generado por el sistema APITeamsV3.
-    </p>
+<body style='font-family: Segoe UI, Arial, sans-serif; line-height: 1.6; color: #323130; background-color: #f3f2f1; padding: 20px;'>
+    <div style='max-width: 750px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); border: 1px solid #e1dfdd;'>
+        <div style='background: linear-gradient(135deg, #d13438 0%, #a80000 100%); color: #ffffff; padding: 24px; text-align: left;'>
+            <h2 style='margin: 0; font-size: 20px; font-weight: 700;'>⚠️ Alerta: Alumnos Inexistentes en Azure AD (Entra ID)</h2>
+            <div style='font-size: 13px; margin-top: 6px; opacity: 0.9;'>Sincronización Operativa de Roster - {companyDisplayName}</div>
+        </div>
+
+        <div style='padding: 24px;'>
+            <div style='display: flex; gap: 16px; margin-bottom: 20px; background: #fdf6f6; border-left: 4px solid #d13438; padding: 16px; border-radius: 4px;'>
+                <div>
+                    <div style='font-size: 13px; color: #605e5c;'>Se ha detectado que <b>{missingInAzureAd.Count}</b> {(missingInAzureAd.Count == 1 ? "alumno" : "alumnos")} de la sección <b>{idSeccion}</b> no existen en Microsoft 365 (Azure AD) durante la sincronización del equipo Teams.</div>
+                </div>
+            </div>
+
+            <h3 style='font-size: 15px; color: #323130; margin-bottom: 12px;'>Detalle de Alumnos No Encontrados:</h3>
+            <table style='border-collapse: collapse; width: 100%; font-size: 13px; margin-top: 8px;'>
+                <thead>
+                    <tr style='background-color: #f3f2f1; color: #323130;'>
+                        <th style='border: 1px solid #e0e0e0; padding: 10px; text-align: left;'>Código</th>
+                        <th style='border: 1px solid #e0e0e0; padding: 10px; text-align: left;'>Nombres y Apellidos</th>
+                        <th style='border: 1px solid #e0e0e0; padding: 10px; text-align: left;'>Correo Institucional</th>
+                        <th style='border: 1px solid #e0e0e0; padding: 10px; text-align: left;'>Group ID Teams</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {rowsHtml}
+                </tbody>
+            </table>
+
+            <div style='margin-top: 24px; padding: 16px; background-color: #eff6fc; border-radius: 6px; border: 1px solid #c7e0f4;'>
+                <strong style='color: #005a9e; font-size: 14px;'>💡 Acción Recomendada:</strong>
+                <p style='margin: 6px 0 0 0; font-size: 13px; color: #323130;'>
+                    Verifique que las cuentas de correo institucionales indicadas arriba estén debidamente aprovisionadas y activas en Microsoft 365 (Office 365 / Azure AD) para permitir su enrolamiento automático a la clase de Teams.
+                </p>
+            </div>
+
+            <hr style='border: none; border-top: 1px solid #edebe9; margin: 24px 0;' />
+
+            <div style='font-size: 11px; color: #a19f9d; text-align: center;'>
+                Este es un mensaje automático generado por <b>APITeamsV3</b> | {DateTime.Now:dd/MM/yyyy HH:mm:ss}
+            </div>
+        </div>
+    </div>
 </body>
 </html>";
 
@@ -584,7 +642,7 @@ WHERE AC.IdSeccion = {{0}}
                 _logger.LogInformation("Sending Azure AD missing students email alert via Graph from {Sender} to {Recipient}", organizerKey, recipient);
                 try
                 {
-                    await graphClient.Users[organizer.Id].SendMail.PostAsync(requestBody, cancellationToken: cancellationToken);
+                    await graphClient.Users[organizerUserId].SendMail.PostAsync(requestBody, cancellationToken: cancellationToken);
                     _logger.LogInformation("Azure AD missing students email alert sent successfully.");
                 }
                 catch (Exception ex)

@@ -30,6 +30,7 @@ cTeamsPorSeccion @Opcion = 16, @IdSeccion =468389
 @20 13.03.2026 miquiroz se agrega nueva opcion 48 para la eliminacion del link de teams
 @21 07.04.2026 rpineda exclusion de ids para piloto de APITeams V3 para Zegel e IDAT
 @22 25.05.2026 rpineda tercer piloto - exclusion dinamica por periodo 2026-IIE (Zegel) y 2026-II (IDAT)
+@23 07.08.2026 rpineda exclusion por periodos completos (2026-II, 2026-IIE, 2026-IIIA) para Zegel e IDAT
 */          
         
 CREATE PROCEDURE [dbo].[cTeamsPorSeccion] @Opcion INT = NULL          
@@ -126,87 +127,50 @@ END
 --INI @21
 DECLARE @SeccionesOmitidas TABLE (IdSeccion INT PRIMARY KEY)
 
-IF @Empresa = '00002500'
+IF OBJECT_ID(N'[dbo].[TeamsSeccionesPiloto]', N'U') IS NOT NULL
 BEGIN
 	INSERT INTO @SeccionesOmitidas (IdSeccion)
-	VALUES
-		--primer piloto 14 secciones
-		(414994),
-		(416759),
-		(415002),
-		(415010),
-		(415018),
-		(415026),
-		(415034),
-		(416760),
-		(417429),
-		(416761),
-		(417431),
-		(416756),
-		(416758),
-		(416757),
-		--segundo piloto 16 secciones de captacion
-		(409526),
-		(409538),
-		(409562),
-		(409514),
-		(409550),
-		(409574),
-		(417234),
-		(409586),
-		(409533),
-		(409545),
-		(409569),
-		(409521),
-		(409557),
-		(417238),
-		(417332),
-		(409593);
-
-	--INI @22 tercer piloto - periodo 2026-II (IDAT)
-	INSERT INTO @SeccionesOmitidas (IdSeccion)
-	SELECT s.IdSeccion
-	FROM Seccion s WITH(NOLOCK)
-	INNER JOIN PromocionGrupo pg WITH(NOLOCK) ON s.IdGrupo = pg.IdGrupo AND s.IdPromocion = pg.IdPromocion
-	INNER JOIN Promocion p WITH(NOLOCK) ON pg.IdPromocion = p.IdPromocion
-	INNER JOIN Periodo pe WITH(NOLOCK) ON p.IdPeriodo = pe.IdPeriodo
-	WHERE pe.Codigo = '2026-II'
-	AND NOT EXISTS (SELECT 1 FROM @SeccionesOmitidas x WHERE x.IdSeccion = s.IdSeccion);
-	--FIN @22
+	SELECT DISTINCT IdSeccion
+	FROM dbo.TeamsSeccionesPiloto WITH (NOLOCK)
+	WHERE EsActivo = 1;
 END
-
-IF @Empresa = '00002700'
+ELSE
 BEGIN
-	INSERT INTO @SeccionesOmitidas (IdSeccion)
-	VALUES
-		--segundo piloto 16 secciones de captacion
-		(665220),
-		(665232),
-		(665244),
-		(665172),
-		(665208),
-		(665184),
-		(675068),
-		(665196),
-		(665216),
-		(665228),
-		(665240),
-		(665168),
-		(665204),
-		(665180),
-		(670749),
-		(665192);
+	IF @Empresa = '00002500'
+	BEGIN
+		INSERT INTO @SeccionesOmitidas (IdSeccion)
+		VALUES
+			(414994),(416759),(415002),(415010),(415018),(415026),(415034),(416760),
+			(417429),(416761),(417431),(416756),(416758),(416757),(409526),(409538),
+			(409562),(409514),(409550),(409574),(417234),(409586),(409533),(409545),
+			(409569),(409521),(409557),(417238),(417332),(409593);
 
-	--INI @22 tercer piloto - periodo 2026-IIE (Zegel)
-	INSERT INTO @SeccionesOmitidas (IdSeccion)
-	SELECT s.IdSeccion
-	FROM Seccion s WITH(NOLOCK)
-	INNER JOIN PromocionGrupo pg WITH(NOLOCK) ON s.IdGrupo = pg.IdGrupo AND s.IdPromocion = pg.IdPromocion
-	INNER JOIN Promocion p WITH(NOLOCK) ON pg.IdPromocion = p.IdPromocion
-	INNER JOIN Periodo pe WITH(NOLOCK) ON p.IdPeriodo = pe.IdPeriodo
-	WHERE pe.Codigo = '2026-IIE'
-	AND NOT EXISTS (SELECT 1 FROM @SeccionesOmitidas x WHERE x.IdSeccion = s.IdSeccion);
-	--FIN @22
+		INSERT INTO @SeccionesOmitidas (IdSeccion)
+		SELECT s.IdSeccion
+		FROM Seccion s WITH(NOLOCK)
+		INNER JOIN PromocionGrupo pg WITH(NOLOCK) ON s.IdGrupo = pg.IdGrupo AND s.IdPromocion = pg.IdPromocion
+		INNER JOIN Promocion p WITH(NOLOCK) ON pg.IdPromocion = p.IdPromocion
+		INNER JOIN Periodo pe WITH(NOLOCK) ON p.IdPeriodo = pe.IdPeriodo
+		WHERE pe.Codigo IN ('2026-IIIA') AND pe.EsTeams = 1
+		AND NOT EXISTS (SELECT 1 FROM @SeccionesOmitidas x WHERE x.IdSeccion = s.IdSeccion);
+	END
+
+	IF @Empresa = '00002700'
+	BEGIN
+		INSERT INTO @SeccionesOmitidas (IdSeccion)
+		VALUES
+			(665220),(665232),(665244),(665172),(665208),(665184),(675068),(665196),
+			(665216),(665228),(665240),(665168),(665204),(665180),(670749),(665192);
+
+		INSERT INTO @SeccionesOmitidas (IdSeccion)
+		SELECT s.IdSeccion
+		FROM Seccion s WITH(NOLOCK)
+		INNER JOIN PromocionGrupo pg WITH(NOLOCK) ON s.IdGrupo = pg.IdGrupo AND s.IdPromocion = pg.IdPromocion
+		INNER JOIN Promocion p WITH(NOLOCK) ON pg.IdPromocion = p.IdPromocion
+		INNER JOIN Periodo pe WITH(NOLOCK) ON p.IdPeriodo = pe.IdPeriodo
+		WHERE pe.Codigo IN ('2026-IIIA') AND pe.EsTeams = 1
+		AND NOT EXISTS (SELECT 1 FROM @SeccionesOmitidas x WHERE x.IdSeccion = s.IdSeccion);
+	END
 END
 
 DECLARE @IdSeccionOmitida INT = COALESCE(@IdSeccion, @idSeccionSmart)

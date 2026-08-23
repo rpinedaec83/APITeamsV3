@@ -180,8 +180,9 @@ const getJobStateBadgeColor = (state: string) => {
         case 'enqueued':
         case 'scheduled':
         case 'awaiting':
-        case 'unknown':
             return 'warning' as const;
+        case 'expirado':
+        case 'unknown':
         default:
             return 'informative' as const;
     }

@@ -60,18 +60,8 @@ namespace APITeamsV3.Application.UseCases.Stats.Queries
                         INNER JOIN Producto PO WITH (NOLOCK) ON PR.IdProducto = PO.IdProducto
                         LEFT JOIN TeamsEquipos TE WITH (NOLOCK) ON SE.IdSeccion = TE.IdSeccionSmart AND TE.EstadoTeam = 'A'
                     WHERE PE.EsTeams = 1
-                      AND (
-                        (
-                          (PR.TipoServicio = 'P' OR PR.TipoServicio = 'L')
-                          AND CONVERT(VARCHAR, GETDATE(), 112) >= CONVERT(VARCHAR, DATEADD(DAY, @FechaIniDias * - 1, SE.FechaInicio), 112)
-                          AND CONVERT(VARCHAR, GETDATE(), 112) <= CONVERT(VARCHAR, DATEADD(DAY, @FechaFinDias, SE.FechaFin), 112)
-                        )
-                        OR (
-                          PR.TipoServicio = 'C'
-                          AND CONVERT(VARCHAR, GETDATE(), 112) >= CONVERT(VARCHAR, DATEADD(DAY, @FechaIniDias * - 1, PE.Inicio), 112)
-                          AND CONVERT(VARCHAR, GETDATE(), 112) <= CONVERT(VARCHAR, DATEADD(DAY, @FechaFinDias, PE.Fin), 112)
-                        )
-                      )
+                      AND PE.Inicio >= DATEADD(month, -18, GETDATE())
+                      AND CONVERT(VARCHAR, GETDATE(), 112) <= CONVERT(VARCHAR, DATEADD(DAY, @FechaFinDias, CASE WHEN PR.TipoServicio = 'C' THEN PE.Fin ELSE SE.FechaFin END), 112)
                       AND ({0} IS NULL OR SD.Codigo IN (
                         SELECT value
                         FROM STRING_SPLIT({0}, ',')

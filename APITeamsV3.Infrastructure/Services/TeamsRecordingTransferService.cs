@@ -722,14 +722,17 @@ namespace APITeamsV3.Infrastructure.Services
             if (channelFolder == null)
             {
                 channel ??= await ResolveChannelAsync(graphClient, request.TeamGroupId, requestedChannel, cancellationToken);
-                channelFolder = await TryGetChannelFolderAsync(graphClient, request.TeamGroupId, channel.Id!, cancellationToken);
+                if (!string.IsNullOrWhiteSpace(channel?.Id))
+                {
+                    channelFolder = await TryGetChannelFolderAsync(graphClient, request.TeamGroupId, channel.Id, cancellationToken);
+                }
 
                 if (channelFolder == null && !string.IsNullOrWhiteSpace(groupDrive?.Id))
                 {
                     channelFolder = await TryGetStandardChannelFolderByNameAsync(
                         graphClient,
                         groupDrive.Id!,
-                        channel.DisplayName ?? requestedChannel,
+                        channel?.DisplayName ?? requestedChannel,
                         cancellationToken);
                 }
             }
@@ -959,25 +962,48 @@ namespace APITeamsV3.Infrastructure.Services
                     teamGroupId);
             }
 
-            var channelsResponse = await graphClient.Teams[teamGroupId]
-                .Channels
-                .GetAsync(
-                    requestConfiguration =>
-                    {
-                        requestConfiguration.QueryParameters.Select = ["id", "displayName"];
-                    },
-                    cancellationToken);
-
-            var channels = channelsResponse?.Value ?? [];
-            var matchedChannel = channels.FirstOrDefault(c =>
-                string.Equals(c.DisplayName, requestedChannel, StringComparison.OrdinalIgnoreCase));
-
-            if (matchedChannel == null || string.IsNullOrWhiteSpace(matchedChannel.Id))
+            try
             {
-                throw new InvalidOperationException($"No se encontro el canal '{requestedChannel}' en el Team.");
+                var channelsResponse = await graphClient.Teams[teamGroupId]
+                    .Channels
+                    .GetAsync(
+                        requestConfiguration =>
+                        {
+                            requestConfiguration.QueryParameters.Select = ["id", "displayName"];
+                        },
+                        cancellationToken);
+
+                var channels = channelsResponse?.Value ?? [];
+                var matchedChannel = channels.FirstOrDefault(c =>
+                    string.Equals(c.DisplayName, requestedChannel, StringComparison.OrdinalIgnoreCase));
+
+                if (matchedChannel != null && !string.IsNullOrWhiteSpace(matchedChannel.Id))
+                {
+                    return matchedChannel;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Could not list channels for Team {TeamId} ({Message}). Returning fallback channel context for '{RequestedChannel}'.",
+                    teamGroupId,
+                    ex.Message,
+                    requestedChannel);
+
+                _ = Task.Run(() => SendFallbackNotificationEmailAsync(
+                    graphClient,
+                    organizerUserId: string.Empty,
+                    teamGroupId: teamGroupId,
+                    requestedChannel: requestedChannel,
+                    reasonMessage: ex.Message,
+                    cancellationToken: CancellationToken.None));
             }
 
-            return matchedChannel;
+            return new Channel
+            {
+                DisplayName = requestedChannel
+            };
         }
 
         private static bool IsPrimaryChannelName(string requestedChannel)
@@ -1896,10 +1922,10 @@ namespace APITeamsV3.Infrastructure.Services
                         return;
                     }
 
-                    var recipient = _configuration["StorageQuotaAlert:AlertEmailRecipient"];
+                    var recipient = await GetConfiguredAlertEmailsAsync(cancellationToken);
                     if (string.IsNullOrWhiteSpace(recipient))
                     {
-                        _logger.LogWarning("Storage alert threshold reached, but no AlertEmailRecipient is configured.");
+                        _logger.LogWarning("Storage alert threshold reached, but no AlertEmailRecipient is configured in SystemSettings or appsettings.");
                         return;
                     }
 
@@ -1911,6 +1937,152 @@ namespace APITeamsV3.Infrastructure.Services
             {
                 _logger.LogError(ex, "Error checking storage quota threshold or sending alert email.");
                 throw;
+            }
+        }
+
+        private async Task<string> GetConfiguredAlertEmailsAsync(CancellationToken cancellationToken)
+        {
+            try
+            {
+                var setting = await _centralContext.SystemSettings
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(s => s.Key == "RecordingAlertEmails", cancellationToken);
+
+                if (setting != null && !string.IsNullOrWhiteSpace(setting.Value))
+                {
+                    return setting.Value;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not load RecordingAlertEmails from SystemSettings. Falling back to appsettings.");
+            }
+
+            return _configuration["StorageQuotaAlert:AlertEmailRecipient"] ?? string.Empty;
+        }
+
+        private async Task SendFallbackNotificationEmailAsync(
+            GraphServiceClient graphClient,
+            string organizerUserId,
+            string teamGroupId,
+            string requestedChannel,
+            string reasonMessage,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                string alertKey = $"{teamGroupId}:{requestedChannel}";
+                if (_lastTeamAlertSentUtc.TryGetValue(alertKey, out var lastSent) && DateTime.UtcNow < lastSent.AddHours(12))
+                {
+                    return;
+                }
+
+                var recipient = await GetConfiguredAlertEmailsAsync(cancellationToken);
+                if (string.IsNullOrWhiteSpace(recipient))
+                {
+                    _logger.LogWarning("Fallback alert triggered for Team {TeamId}, but no alert emails are configured in SystemSettings or appsettings.", teamGroupId);
+                    return;
+                }
+
+                var recipientsList = recipient
+                    .Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Select(r => r.Trim())
+                    .Where(r => !string.IsNullOrEmpty(r))
+                    .Select(r => new Recipient
+                    {
+                        EmailAddress = new EmailAddress { Address = r }
+                    })
+                    .ToList();
+
+                if (recipientsList.Count == 0) return;
+
+                var tenant = _tenantProvider.GetCurrentTenant();
+                string tenantName = tenant.CompanyKey?.ToUpperInvariant() ?? "GENERAL";
+                string subject = $"[ALERTA REGISTRO / TEAMS] {tenantName} - Observación de Hilo de Equipos: {teamGroupId}";
+
+                string bodyHtml = $@"
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: 'Segoe UI', Arial, sans-serif; background-color: #f4f6f9; margin: 0; padding: 20px; color: #333; }}
+        .card {{ background: #ffffff; border-radius: 8px; max-width: 650px; margin: 0 auto; box-shadow: 0 4px 12px rgba(0,0,0,0.1); border-top: 5px solid #f39c12; padding: 25px; }}
+        .header {{ display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #eeeeee; padding-bottom: 15px; margin-bottom: 20px; }}
+        .header h2 {{ color: #d35400; margin: 0; font-size: 18px; }}
+        .badge {{ background: #fff3cd; color: #856404; font-weight: bold; padding: 4px 10px; border-radius: 12px; font-size: 12px; border: 1px solid #ffeeba; }}
+        .table {{ width: 100%; border-collapse: collapse; margin-top: 15px; }}
+        .table th {{ background: #f8f9fa; border: 1px solid #e9ecef; padding: 10px; text-align: left; font-size: 13px; color: #495057; }}
+        .table td {{ border: 1px solid #e9ecef; padding: 10px; font-size: 13px; font-weight: 500; }}
+        .alert-box {{ background-color: #fff8e1; border-left: 4px solid #ffb300; padding: 12px; border-radius: 4px; margin-top: 20px; font-size: 13px; color: #5c3c00; }}
+        .footer {{ margin-top: 25px; text-align: center; font-size: 12px; color: #888888; border-top: 1px solid #eeeeee; padding-top: 15px; }}
+    </style>
+</head>
+<body>
+    <div class='card'>
+        <div class='header'>
+            <h2>⚠️ Notificación de Alerta - Transferencia de Grabaciones</h2>
+            <span class='badge'>OBSERVACIÓN DE EQUIPO</span>
+        </div>
+        <p>Estimado equipo de soporte / administración,</p>
+        <p>Se ha detectado una observación durante la resolución de equipos de Teams para el aprovisionamiento de grabaciones. El sistema aplicó automáticamente una redirección de respaldo a <b>SharePoint Drive</b> para asegurar el guardado de la clase.</p>
+
+        <table class='table'>
+            <tr><th>Institución / Tenant</th><td>{tenantName}</td></tr>
+            <tr><th>ID de Grupo M365 (TeamId)</th><td><code>{teamGroupId}</code></td></tr>
+            <tr><th>Canal Solicitado</th><td>{requestedChannel}</td></tr>
+            <tr><th>Detalle Técnico</th><td>{reasonMessage}</td></tr>
+            <tr><th>Acción Automática</th><td>Resuelto a través del almacenamiento de SharePoint (Carpeta del Canal 'General')</td></tr>
+            <tr><th>Fecha y Hora</th><td>{DateTime.Now:dd/MM/yyyy HH:mm:ss}</td></tr>
+        </table>
+
+        <div class='alert-box'>
+            <b>📌 Recomendación para el personal:</b><br/>
+            Por favor verificar si el grupo de Microsoft 365 <code>{teamGroupId}</code> requiere que se reaplique la creación/sincronización del equipo de Teams en Azure AD para habilitar el canal de conversaciones nativo.
+        </div>
+
+        <div class='footer'>
+            Este es un correo automático generado por APITeamsV3 (Módulo de Transferencia de Grabaciones).
+        </div>
+    </div>
+</body>
+</html>";
+
+                var requestBody = new Microsoft.Graph.Users.Item.SendMail.SendMailPostRequestBody
+                {
+                    Message = new Message
+                    {
+                        Subject = subject,
+                        Body = new ItemBody
+                        {
+                            ContentType = BodyType.Html,
+                            Content = bodyHtml
+                        },
+                        ToRecipients = recipientsList
+                    },
+                    SaveToSentItems = true
+                };
+
+                if (!string.IsNullOrWhiteSpace(organizerUserId))
+                {
+                    await graphClient.Users[organizerUserId].SendMail.PostAsync(requestBody, cancellationToken: cancellationToken);
+                }
+                else
+                {
+                    var delegatedClient = await _graphFactory.CreateDelegatedClientAsync();
+                    var delegatedRequestBody = new Microsoft.Graph.Me.SendMail.SendMailPostRequestBody
+                    {
+                        Message = requestBody.Message,
+                        SaveToSentItems = true
+                    };
+                    await delegatedClient.Me.SendMail.PostAsync(delegatedRequestBody, cancellationToken: cancellationToken);
+                }
+
+                _lastTeamAlertSentUtc[alertKey] = DateTime.UtcNow;
+                _logger.LogInformation("Fallback alert email sent for Team {TeamId} to {Recipients}", teamGroupId, recipient);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to send fallback alert email for Team {TeamId}.", teamGroupId);
             }
         }
 

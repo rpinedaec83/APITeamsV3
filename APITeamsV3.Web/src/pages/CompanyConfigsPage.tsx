@@ -24,8 +24,8 @@ import {
     Spinner,
     Tooltip
 } from '@fluentui/react-components';
-import { DeleteRegular, EditRegular, AddRegular, BuildingRegular, ArrowSyncRegular, WrenchRegular, WarningRegular } from '@fluentui/react-icons';
-import { showError, showConfirm } from '../utils/alerts';
+import { DeleteRegular, EditRegular, AddRegular, BuildingRegular, ArrowSyncRegular, WrenchRegular, WarningRegular, MailRegular } from '@fluentui/react-icons';
+import { showError, showConfirm, showSuccess } from '../utils/alerts';
 
 type ConnectionValidationResult = {
     id: number;
@@ -53,6 +53,10 @@ const CompanyConfigsPage: React.FC = () => {
     const [globalMaintenance, setGlobalMaintenance] = useState(false);
     const [globalLoading, setGlobalLoading] = useState(false);
 
+    // Alert Emails state
+    const [alertEmails, setAlertEmails] = useState('');
+    const [alertEmailsLoading, setAlertEmailsLoading] = useState(false);
+
     useEffect(() => {
         loadConfigs();
         loadSystemSettings();
@@ -65,8 +69,29 @@ const CompanyConfigsPage: React.FC = () => {
             if (maintenance) {
                 setGlobalMaintenance(maintenance.value.toLowerCase() === 'true');
             }
+
+            const alertEmailsSetting = response.data.find((s: any) => s.key === 'RecordingAlertEmails');
+            if (alertEmailsSetting) {
+                setAlertEmails(alertEmailsSetting.value || '');
+            }
         } catch (error) {
             console.error('Failed to load system settings', error);
+        }
+    };
+
+    const handleSaveAlertEmails = async () => {
+        setAlertEmailsLoading(true);
+        try {
+            await api.put('/admin/system-settings/RecordingAlertEmails', {
+                value: alertEmails.trim(),
+                description: 'Correos destinatarios para alertas de transferencias de grabaciones y observaciones de Teams.'
+            });
+            showSuccess('Listado de correos de alerta actualizado correctamente.');
+        } catch (error) {
+            console.error(error);
+            showError('No se pudo guardar el listado de correos de alerta.');
+        } finally {
+            setAlertEmailsLoading(false);
         }
     };
 
@@ -316,6 +341,60 @@ const CompanyConfigsPage: React.FC = () => {
                         onChange={(_, d) => handleToggleGlobalMaintenance(d.checked)}
                         disabled={globalLoading}
                     />
+                </div>
+            </div>
+
+            {/* Card de Configuración de Alertas por Correo */}
+            <div style={{
+                background: 'white',
+                borderRadius: '12px',
+                boxShadow: '0 4px 16px rgba(0,0,0,0.06)',
+                padding: '24px',
+                marginBottom: '24px',
+                border: '1px solid #e1dfdd'
+            }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '16px' }}>
+                    <div style={{
+                        width: '44px',
+                        height: '44px',
+                        borderRadius: '12px',
+                        background: '#eef4ff',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: '#005a9e',
+                        flexShrink: 0
+                    }}>
+                        <MailRegular style={{ fontSize: '24px' }} />
+                    </div>
+                    <div style={{ flexGrow: 1 }}>
+                        <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 700, color: '#1b1a19' }}>
+                            Correos Destinatarios para Alertas de Transferencia & Observaciones
+                        </h3>
+                        <p style={{ margin: '4px 0 16px', color: '#605e5c', fontSize: '13px', lineHeight: '1.5' }}>
+                            Ingresa los correos electrónicos del personal que recibirá alertas automáticas por email cuando ocurra una observación de aprovisionamiento de Teams (ej. <i>No threadId found</i> / fallback a SharePoint) o fallos en transferencias de grabaciones.
+                        </p>
+                        
+                        <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                            <Input
+                                style={{ flexGrow: 1 }}
+                                value={alertEmails}
+                                onChange={(_, data) => setAlertEmails(data.value)}
+                                placeholder="ej. rpineda@zegel.edu.pe, soporte.ti@zegel.edu.pe, ayuda@idat.edu.pe"
+                            />
+                            <Button
+                                appearance="primary"
+                                icon={alertEmailsLoading ? <Spinner size="tiny" /> : <MailRegular />}
+                                onClick={handleSaveAlertEmails}
+                                disabled={alertEmailsLoading}
+                            >
+                                {alertEmailsLoading ? 'Guardando...' : 'Guardar Destinatarios'}
+                            </Button>
+                        </div>
+                        <span style={{ fontSize: '12px', color: '#8a8886', marginTop: '8px', display: 'block' }}>
+                            * Separa múltiples direcciones de correo con comas (<code>,</code>) o puntos y comas (<code>;</code>).
+                        </span>
+                    </div>
                 </div>
             </div>
 

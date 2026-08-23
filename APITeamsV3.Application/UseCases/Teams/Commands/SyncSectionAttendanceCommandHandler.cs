@@ -189,13 +189,38 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                 }
 
                 // 5. Retrieve Attendance Reports
-                var reportsCollection = isDelegated
-                    ? await graphClient.Me.OnlineMeetings[meetingId].AttendanceReports.GetAsync(cancellationToken: cancellationToken)
-                    : (!string.IsNullOrEmpty(organizerId)
-                        ? await graphClient.Users[organizerId].OnlineMeetings[meetingId].AttendanceReports.GetAsync(cancellationToken: cancellationToken)
-                        : await graphClient.Communications.OnlineMeetings[meetingId].AttendanceReports.GetAsync(cancellationToken: cancellationToken));
+                Microsoft.Graph.Models.MeetingAttendanceReportCollectionResponse? reportsCollection = null;
+                try
+                {
+                    if (isDelegated)
+                    {
+                        reportsCollection = await graphClient.Me.OnlineMeetings[meetingId].AttendanceReports.GetAsync(cancellationToken: cancellationToken);
+                    }
+                    else
+                    {
+                        try
+                        {
+                            reportsCollection = await graphClient.Communications.OnlineMeetings[meetingId].AttendanceReports.GetAsync(cancellationToken: cancellationToken);
+                        }
+                        catch (Exception commEx)
+                        {
+                            _logger.LogWarning(commEx, "Could not fetch attendance report via Communications endpoint for meeting {MeetingId}. Retrying via User endpoint.", meetingId);
+                            if (!string.IsNullOrEmpty(organizerId))
+                            {
+                                reportsCollection = await graphClient.Users[organizerId].OnlineMeetings[meetingId].AttendanceReports.GetAsync(cancellationToken: cancellationToken);
+                            }
+                        }
+                    }
+                }
+                catch (Exception attEx)
+                {
+                    _logger.LogWarning(attEx, "Could not retrieve attendance report for meeting {MeetingId} in section {IdSeccion}. Attendance sync completed gracefully.", meetingId, request.IdSeccion);
+                    result.Success = true;
+                    result.Message = "No se pudieron obtener reportes de asistencia en Microsoft Graph para esta reunión (la clase aún no ha sido realizada o no hay asistentes).";
+                    return result;
+                }
 
-                if (reportsCollection?.Value == null || reportsCollection.Value.Count == 0)
+                if (reportsCollection?.Value == null || !reportsCollection.Value.Any())
                 {
                     result.Success = true;
                     result.Message = "No se encontraron reportes de asistencia en Microsoft Graph para esta reunión.";

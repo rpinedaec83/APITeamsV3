@@ -27,7 +27,7 @@ Write-Host "  SDK encontrado: $sdks" -ForegroundColor Green
 Write-Host ""
 Write-Host "[2/5] Publicando la aplicacion..." -ForegroundColor Cyan
 if (Test-Path $publishDir) { Remove-Item $publishDir -Recurse -Force }
-& $dotnet publish $projectPath -c Release -r win-x64 --self-contained false -o $publishDir
+& $dotnet publish $projectPath -c Release --self-contained false -o $publishDir
 if ($LASTEXITCODE -ne 0) { Write-Host "Error en publish." -ForegroundColor Red; exit 1 }
 Write-Host "  Publicacion completada en: $publishDir" -ForegroundColor Green
 

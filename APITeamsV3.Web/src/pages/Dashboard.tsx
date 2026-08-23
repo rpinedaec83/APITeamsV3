@@ -5,6 +5,12 @@ import {
     Badge,
     Button,
     Card,
+    Dialog,
+    DialogActions,
+    DialogBody,
+    DialogContent,
+    DialogSurface,
+    DialogTitle,
     Input,
     Select,
     Spinner,
@@ -17,6 +23,7 @@ import {
     Text,
     Title1,
     Title3,
+    Tooltip,
     makeStyles,
     shorthands,
     tokens,
@@ -25,6 +32,7 @@ import {
     ArrowTrendingRegular,
     BoardRegular,
     BranchCompareRegular,
+    DismissRegular,
     GroupRegular,
     HatGraduationRegular,
     PeopleRegular,
@@ -33,6 +41,17 @@ import {
     WarningRegular,
 } from '@fluentui/react-icons';
 import { useNavigate } from 'react-router-dom';
+
+interface PendingSectionItem {
+    idSeccion: number;
+    nombreCurso: string;
+    codigoSeccion: string;
+    sede: string;
+    programa: string;
+    emailFacilitador: string;
+    nombreFacilitador: string;
+    hasMetadata: boolean;
+}
 
 const useStyles = makeStyles({
     root: {
@@ -349,6 +368,19 @@ interface TenancyStatsRow {
     porAlumnos: number;
 }
 
+interface PilotScheduleItem {
+    codigoPeriodo: string;
+    fechaInicioCreacion: string;
+    fechaInicioClases: string;
+    fechaFinSincronizacion: string;
+    totalSecciones: number;
+    creados: number;
+    pendientes: number;
+    enVentanaHoy: boolean;
+    estadoGestion: string;
+    esPiloto?: boolean;
+}
+
 interface DashboardSummary {
     companyKey: string;
     displayName: string;
@@ -358,6 +390,7 @@ interface DashboardSummary {
     meetingPolicyMode: string;
     timeZoneId: string;
     rows: TenancyStatsRow[];
+    pilotSchedule?: PilotScheduleItem[];
 }
 
 interface AggregateStats {
@@ -392,8 +425,56 @@ const Dashboard: React.FC = () => {
     const [selectedUnidad, setSelectedUnidad] = useState('all');
     const [selectedPrograma, setSelectedPrograma] = useState('all');
     const [selectedCoverage, setSelectedCoverage] = useState('all');
+    const [scheduleSearchTerm, setScheduleSearchTerm] = useState('');
+    const [selectedSchedulePeriodo, setSelectedSchedulePeriodo] = useState('all');
+    const [selectedScheduleEstado, setSelectedScheduleEstado] = useState('all');
     const [ultimaActualizacion, setUltimaActualizacion] = useState<Date | null>(null);
     const [proximaActualizacion, setProximaActualizacion] = useState<Date | null>(null);
+
+    // Estado del modal de Secciones Pendientes
+    const [isPendingModalOpen, setIsPendingModalOpen] = useState(false);
+    const [selectedPendingPeriodo, setSelectedPendingPeriodo] = useState<string | null>(null);
+    const [selectedPendingFechaClases, setSelectedPendingFechaClases] = useState<string | null>(null);
+    const [pendingSections, setPendingSections] = useState<PendingSectionItem[]>([]);
+    const [loadingPendingSections, setLoadingPendingSections] = useState(false);
+    const [syncingSectionId, setSyncingSectionId] = useState<number | null>(null);
+    const [syncSuccessMsg, setSyncSuccessMsg] = useState<string | null>(null);
+
+    const openPendingModal = async (codigoPeriodo: string, fechaInicioClases?: string) => {
+        setSelectedPendingPeriodo(codigoPeriodo);
+        setSelectedPendingFechaClases(fechaInicioClases ?? null);
+        setIsPendingModalOpen(true);
+        setLoadingPendingSections(true);
+        setPendingSections([]);
+        setSyncSuccessMsg(null);
+        try {
+            const queryParams = fechaInicioClases ? `?fechaInicioClases=${encodeURIComponent(fechaInicioClases)}` : '';
+            const res = await api.get(`/reports/pending-sections-by-period/${encodeURIComponent(codigoPeriodo)}${queryParams}`);
+            setPendingSections(res.data as PendingSectionItem[]);
+        } catch (err) {
+            console.error(err);
+        } finally {
+            setLoadingPendingSections(false);
+        }
+    };
+
+    const handleSyncSection = async (idSeccion: number) => {
+        setSyncingSectionId(idSeccion);
+        setSyncSuccessMsg(null);
+        try {
+            await api.post(`/jobs/sync-section-team/${idSeccion}`);
+            setSyncSuccessMsg(`Job de sincronización encolado exitosamente para la Sección ${idSeccion}.`);
+            if (selectedPendingPeriodo) {
+                const queryParams = selectedPendingFechaClases ? `?fechaInicioClases=${encodeURIComponent(selectedPendingFechaClases)}` : '';
+                const res = await api.get(`/reports/pending-sections-by-period/${encodeURIComponent(selectedPendingPeriodo)}${queryParams}`);
+                setPendingSections(res.data as PendingSectionItem[]);
+            }
+        } catch (err: any) {
+            alert(err.response?.data?.message || 'Error al lanzar sincronización de la sección');
+        } finally {
+            setSyncingSectionId(null);
+        }
+    };
 
     useEffect(() => {
         let mounted = true;
@@ -506,6 +587,33 @@ const Dashboard: React.FC = () => {
             (selectedCoverage === 'all' || coverageBucket === selectedCoverage) &&
             (!normalizedSearch || text.includes(normalizedSearch));
     });
+
+    const scheduleItems = summary?.pilotSchedule ?? [];
+    const schedulePeriodoOptions = Array.from(new Set(scheduleItems.map(item => item.codigoPeriodo))).filter(Boolean).sort();
+
+    const filteredScheduleItems = scheduleItems.filter(item => {
+        const dateCreacionStr = new Date(item.fechaInicioCreacion).toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        const dateClasesStr = new Date(item.fechaInicioClases).toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        const search = scheduleSearchTerm.trim().toLowerCase();
+
+        const matchesSearch = !search ||
+            (item.codigoPeriodo && item.codigoPeriodo.toLowerCase().includes(search)) ||
+            dateCreacionStr.includes(search) ||
+            dateClasesStr.includes(search);
+
+        const matchesPeriodo = selectedSchedulePeriodo === 'all' || item.codigoPeriodo === selectedSchedulePeriodo;
+        const matchesEstado = selectedScheduleEstado === 'all' || item.estadoGestion === selectedScheduleEstado;
+
+        return matchesSearch && matchesPeriodo && matchesEstado;
+    });
+
+    const scheduleSummary = scheduleItems.reduce((acc, curr) => ({
+        totalSecciones: acc.totalSecciones + curr.totalSecciones,
+        creados: acc.creados + curr.creados,
+        pendientes: acc.pendientes + curr.pendientes,
+        enVentanaCount: acc.enVentanaCount + (curr.enVentanaHoy ? curr.totalSecciones : 0),
+        proximaCount: acc.proximaCount + (curr.estadoGestion === 'PROXIMA_GESTION' ? curr.totalSecciones : 0),
+    }), { totalSecciones: 0, creados: 0, pendientes: 0, enVentanaCount: 0, proximaCount: 0 });
 
     const renderProgress = (label: string, value: number, color: string, meta: string) => (
         <div className={styles.progressGroup}>
@@ -727,6 +835,248 @@ const Dashboard: React.FC = () => {
                         </div>
                     </div>
 
+                    {/* Panel de Cronograma de Creación de Equipos (Cuándo van a empezar a crearse) */}
+                    {scheduleItems.length > 0 && (
+                        <div className={styles.panelCard} style={{ marginBottom: '25px', borderLeft: '5px solid #00c0ef' }}>
+                            <div className={styles.panelHeader}>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                    <Title3 style={{ margin: 0 }}>📅 Cronograma de Inicio de Creación de Equipos (Piloto)</Title3>
+                                    <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
+                                        Programación por lotes según restricción SQL (<code style={{ background: '#eef', padding: '2px 6px', borderRadius: '4px', color: '#005a9e' }}>GETDATE() &ge; FechaInicio - 14 días</code>)
+                                    </Text>
+                                </div>
+                                <Badge color="informative" appearance="filled" size="large">
+                                    {numberFormatter.format(scheduleSummary.totalSecciones)} Secciones Programadas
+                                </Badge>
+                            </div>
+                            <div className={styles.panelBody}>
+                                {/* Tabla Resumen / Banner de Métricas del Piloto */}
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+                                    <div style={{ background: 'linear-gradient(135deg, #02b3df 0%, #0089a8 100%)', padding: '14px 18px', borderRadius: '10px', color: '#fff', boxShadow: '0 4px 12px rgba(2, 179, 223, 0.2)' }}>
+                                        <Text size={200} style={{ color: 'rgba(255,255,255,0.85)' }}>Total Secciones Piloto</Text>
+                                        <div style={{ fontSize: '24px', fontWeight: 'bold', marginTop: '4px' }}>{numberFormatter.format(scheduleSummary.totalSecciones)}</div>
+                                        <Text size={100} style={{ color: 'rgba(255,255,255,0.75)' }}>Whitelist configurado</Text>
+                                    </div>
+                                    <div style={{ background: 'linear-gradient(135deg, #27ae60 0%, #1e8449 100%)', padding: '14px 18px', borderRadius: '10px', color: '#fff', boxShadow: '0 4px 12px rgba(39, 174, 96, 0.2)' }}>
+                                        <Text size={200} style={{ color: 'rgba(255,255,255,0.85)' }}>⚡ En Ventana Activa Hoy</Text>
+                                        <div style={{ fontSize: '24px', fontWeight: 'bold', marginTop: '4px' }}>{numberFormatter.format(scheduleSummary.enVentanaCount)}</div>
+                                        <Text size={100} style={{ color: 'rgba(255,255,255,0.75)' }}>Sincronizándose ahora</Text>
+                                    </div>
+                                    <div style={{ background: 'linear-gradient(135deg, #f39c12 0%, #e67e22 100%)', padding: '14px 18px', borderRadius: '10px', color: '#fff', boxShadow: '0 4px 12px rgba(243, 156, 18, 0.2)' }}>
+                                        <Text size={200} style={{ color: 'rgba(255,255,255,0.85)' }}>⏳ Próximos por Iniciar</Text>
+                                        <div style={{ fontSize: '24px', fontWeight: 'bold', marginTop: '4px' }}>{numberFormatter.format(scheduleSummary.proximaCount)}</div>
+                                        <Text size={100} style={{ color: 'rgba(255,255,255,0.75)' }}>Inicia a futuro (Fecha -14d)</Text>
+                                    </div>
+                                    <div style={{ background: 'linear-gradient(135deg, #8e44ad 0%, #6c3483 100%)', padding: '14px 18px', borderRadius: '10px', color: '#fff', boxShadow: '0 4px 12px rgba(142, 68, 173, 0.2)' }}>
+                                        <Text size={200} style={{ color: 'rgba(255,255,255,0.85)' }}>✅ Equipos Creados en Teams</Text>
+                                        <div style={{ fontSize: '24px', fontWeight: 'bold', marginTop: '4px' }}>{numberFormatter.format(scheduleSummary.creados)}</div>
+                                        <Text size={100} style={{ color: 'rgba(255,255,255,0.75)' }}>Teams activos</Text>
+                                    </div>
+                                </div>
+
+                                {/* Barra de Filtros y Búsqueda Inteligente */}
+                                <div className={styles.filterBar} style={{ marginBottom: '16px', gridTemplateColumns: 'minmax(220px, 1.4fr) repeat(5, minmax(130px, 1fr))' }}>
+                                    <div className={styles.filterField}>
+                                        <Text size={200} weight="semibold">🔍 Búsqueda inteligente</Text>
+                                        <Input
+                                            value={scheduleSearchTerm}
+                                            onChange={(_, data) => setScheduleSearchTerm(data.value)}
+                                            placeholder="Unidad, programa, periodo o sede"
+                                        />
+                                    </div>
+                                    <div className={styles.filterField}>
+                                        <Text size={200} weight="semibold">Unidad</Text>
+                                        <Select value={selectedUnidad} onChange={(_, data) => {
+                                            setSelectedUnidad(data.value);
+                                            setSelectedPrograma('all');
+                                            setSelectedPeriodo('all');
+                                            setSelectedSede('all');
+                                        }}>
+                                            <option value="all">Todas</option>
+                                            {unidadOptions.map(option => <option key={option} value={option}>{option}</option>)}
+                                        </Select>
+                                    </div>
+                                    <div className={styles.filterField}>
+                                        <Text size={200} weight="semibold">Programa</Text>
+                                        <Select value={selectedPrograma} onChange={(_, data) => {
+                                            setSelectedPrograma(data.value);
+                                            setSelectedPeriodo('all');
+                                            setSelectedSede('all');
+                                        }}>
+                                            <option value="all">Todos</option>
+                                            {programaOptions.map(option => <option key={option} value={option}>{option}</option>)}
+                                        </Select>
+                                    </div>
+                                    <div className={styles.filterField}>
+                                        <Text size={200} weight="semibold">Periodo</Text>
+                                        <Select value={selectedSchedulePeriodo} onChange={(_, data) => {
+                                            setSelectedSchedulePeriodo(data.value);
+                                            setSelectedPeriodo(data.value);
+                                        }}>
+                                            <option value="all">Todos</option>
+                                            {schedulePeriodoOptions.map(p => <option key={p} value={p}>{p}</option>)}
+                                        </Select>
+                                    </div>
+                                    <div className={styles.filterField}>
+                                        <Text size={200} weight="semibold">Sede</Text>
+                                        <Select value={selectedSede} onChange={(_, data) => setSelectedSede(data.value)}>
+                                            <option value="all">Todas</option>
+                                            {sedeOptions.map(option => <option key={option} value={option}>{option}</option>)}
+                                        </Select>
+                                    </div>
+                                    <div className={styles.filterField}>
+                                        <Text size={200} weight="semibold">Estado de Gestión</Text>
+                                        <Select value={selectedScheduleEstado} onChange={(_, data) => setSelectedScheduleEstado(data.value)}>
+                                            <option value="all">Todos los Estados</option>
+                                            <option value="EN_VENTANA_ACTIVA">⚡ Equipos Activos (En Ventana)</option>
+                                            <option value="PROXIMA_GESTION">⏳ Próximos por Iniciar</option>
+                                            <option value="COMPLETADO">✅ Completados</option>
+                                        </Select>
+                                    </div>
+                                </div>
+
+                                <div className={styles.badgeRow} style={{ marginBottom: '12px' }}>
+                                    <Badge appearance="outline">Lotes visibles: {numberFormatter.format(filteredScheduleItems.length)}</Badge>
+                                    {selectedUnidad !== 'all' ? <Badge appearance="outline" color="informative">Unidad: {selectedUnidad}</Badge> : null}
+                                    {selectedPrograma !== 'all' ? <Badge appearance="outline" color="informative">Programa: {selectedPrograma}</Badge> : null}
+                                    {selectedSchedulePeriodo !== 'all' ? <Badge appearance="outline" color="brand">Periodo: {selectedSchedulePeriodo}</Badge> : null}
+                                    {selectedSede !== 'all' ? <Badge appearance="outline" color="informative">Sede: {selectedSede}</Badge> : null}
+                                    {selectedScheduleEstado !== 'all' ? <Badge appearance="outline" color="warning">Estado: {selectedScheduleEstado}</Badge> : null}
+                                </div>
+
+                                <Table aria-label="cronograma de creacion">
+                                    <TableHeader>
+                                        <TableRow>
+                                            <TableHeaderCell>📌 Código Periodo</TableHeaderCell>
+                                            <TableHeaderCell style={{ textAlign: 'center' }}>🛡️ En Piloto</TableHeaderCell>
+                                            <TableHeaderCell>🚀 Inicio Creación de Equipos</TableHeaderCell>
+                                            <TableHeaderCell>🎓 Inicio Clases Oficial</TableHeaderCell>
+                                            <TableHeaderCell style={{ textAlign: 'center' }}>Total Secciones</TableHeaderCell>
+                                            <TableHeaderCell style={{ textAlign: 'center' }}>Equipos Creados</TableHeaderCell>
+                                            <TableHeaderCell style={{ textAlign: 'center' }}>Pendientes</TableHeaderCell>
+                                            <TableHeaderCell style={{ textAlign: 'center' }}>Estado de Gestión</TableHeaderCell>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {filteredScheduleItems.map((item, idx) => {
+                                            const dateCreacion = new Date(item.fechaInicioCreacion).toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                                            const dateClases = new Date(item.fechaInicioClases).toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+                                            let badgeColor: 'success' | 'warning' | 'informative' | 'important' = 'warning';
+                                            let badgeLabel = '⏳ Próximo por Iniciar';
+                                            let badgeSubtext = 'Inicia a futuro';
+
+                                            if (item.estadoGestion === 'EN_VENTANA_ACTIVA' || item.enVentanaHoy) {
+                                                badgeColor = 'success';
+                                                badgeLabel = '⚡ Equipo Activo';
+                                                badgeSubtext = 'En Ventana Hoy';
+                                            } else if (item.estadoGestion === 'COMPLETADO') {
+                                                badgeColor = 'informative';
+                                                badgeLabel = '✅ 100% Creados';
+                                                badgeSubtext = 'Completado';
+                                            } else if (item.estadoGestion === 'FINALIZADO') {
+                                                badgeColor = 'important';
+                                                badgeLabel = '🏁 Ventana Finalizada';
+                                                badgeSubtext = 'Fuera de rango';
+                                            }
+
+                                            return (
+                                                <TableRow key={idx}>
+                                                    <TableCell>
+                                                        <Badge color="brand" appearance="filled" style={{ fontWeight: 'bold' }}>
+                                                            {item.codigoPeriodo || 'N/A'}
+                                                        </Badge>
+                                                    </TableCell>
+                                                    <TableCell style={{ textAlign: 'center' }}>
+                                                        {item.esPiloto !== false ? (
+                                                            <Badge color="success" appearance="filled" style={{ fontWeight: 'bold', fontSize: '11px', padding: '3px 8px' }}>
+                                                                🚀 En Piloto
+                                                            </Badge>
+                                                        ) : (
+                                                            <Badge color="subtle" appearance="tint" style={{ fontSize: '11px', padding: '3px 8px' }}>
+                                                                ⚪ No Piloto
+                                                            </Badge>
+                                                        )}
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                            <Text weight="bold" style={{ color: '#0089a8', fontSize: '14px' }}>{dateCreacion}</Text>
+                                                            <Badge size="small" appearance="tint" color="brand">Fecha -14d</Badge>
+                                                        </div>
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        <Text weight="semibold">{dateClases}</Text>
+                                                    </TableCell>
+                                                    <TableCell style={{ textAlign: 'center' }}>
+                                                        <Text weight="bold">{numberFormatter.format(item.totalSecciones)}</Text>
+                                                    </TableCell>
+                                                    <TableCell style={{ textAlign: 'center' }}>
+                                                        <Badge color={item.creados > 0 ? 'success' : 'subtle'} appearance="filled">
+                                                            {numberFormatter.format(item.creados)}
+                                                        </Badge>
+                                                    </TableCell>
+                                                    <TableCell style={{ textAlign: 'center' }}>
+                                                        {item.pendientes > 0 ? (
+                                                            <Tooltip content={`Hacer clic para ver las ${item.pendientes} secciones pendientes del periodo ${item.codigoPeriodo}`} relationship="label">
+                                                                <Button
+                                                                    size="small"
+                                                                    onClick={() => openPendingModal(item.codigoPeriodo, item.fechaInicioClases)}
+                                                                    style={{
+                                                                        backgroundColor: '#fff3cd',
+                                                                        color: '#856404',
+                                                                        border: '1px solid #ffeeba',
+                                                                        fontWeight: 'bold',
+                                                                        borderRadius: '16px',
+                                                                        padding: '4px 12px',
+                                                                        cursor: 'pointer',
+                                                                        boxShadow: '0 2px 6px rgba(243, 156, 18, 0.25)',
+                                                                        transition: 'all 0.2s ease',
+                                                                    }}
+                                                                >
+                                                                    ⚠️ {numberFormatter.format(item.pendientes)} pendientes
+                                                                </Button>
+                                                            </Tooltip>
+                                                        ) : (
+                                                            <Badge color="subtle" appearance="tint" style={{ fontWeight: 'normal' }}>
+                                                                0
+                                                            </Badge>
+                                                        )}
+                                                    </TableCell>
+                                                    <TableCell style={{ textAlign: 'center' }}>
+                                                        <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
+                                                            <Badge
+                                                                color={badgeColor}
+                                                                appearance="filled"
+                                                                style={{
+                                                                    whiteSpace: 'nowrap',
+                                                                    fontWeight: '600',
+                                                                    fontSize: '12px',
+                                                                    padding: '4px 10px'
+                                                                }}
+                                                            >
+                                                                {badgeLabel}
+                                                            </Badge>
+                                                            <Text size={100} style={{ color: tokens.colorNeutralForeground3, whiteSpace: 'nowrap' }}>
+                                                                {badgeSubtext}
+                                                            </Text>
+                                                        </div>
+                                                    </TableCell>
+                                                </TableRow>
+                                            );
+                                        })}
+                                        {filteredScheduleItems.length === 0 && (
+                                            <TableRow>
+                                                <TableCell colSpan={7} style={{ textAlign: 'center', padding: '20px' }}>
+                                                    <Text style={{ color: tokens.colorNeutralForeground3 }}>No se encontraron lotes de creación que coincidan con los filtros seleccionados.</Text>
+                                                </TableCell>
+                                            </TableRow>
+                                        )}
+                                    </TableBody>
+                                </Table>
+                            </div>
+                        </div>
+                    )}
+
                     <div className={styles.panelCard}>
                         <div className={styles.panelHeader}>
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
@@ -848,6 +1198,130 @@ const Dashboard: React.FC = () => {
                     </div>
                 </>
             )}
+            {/* Modal de Detalle de Secciones Pendientes */}
+            <Dialog open={isPendingModalOpen} onOpenChange={(_, data) => setIsPendingModalOpen(data.open)}>
+                <DialogSurface style={{ minWidth: '820px', maxWidth: '1000px', borderRadius: '16px', padding: '24px' }}>
+                    <DialogBody>
+                        <DialogTitle
+                            action={
+                                <Button
+                                    appearance="subtle"
+                                    aria-label="Cerrar"
+                                    icon={<DismissRegular />}
+                                    onClick={() => setIsPendingModalOpen(false)}
+                                />
+                            }
+                        >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                <Badge color="warning" appearance="filled" size="large">
+                                    ⚠️ Secciones Pendientes
+                                </Badge>
+                                <Title3 style={{ margin: 0 }}>Periodo {selectedPendingPeriodo}</Title3>
+                            </div>
+                        </DialogTitle>
+
+                        <DialogContent style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '16px' }}>
+                            <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
+                                Las siguientes secciones corresponden al periodo <strong>{selectedPendingPeriodo}</strong> y aún no cuentan con un equipo activo en Microsoft Teams.
+                            </Text>
+
+                            {syncSuccessMsg && (
+                                <div style={{ background: '#d4edda', color: '#155724', padding: '10px 14px', borderRadius: '8px', border: '1px solid #c3e6cb', fontWeight: 500 }}>
+                                    ✅ {syncSuccessMsg}
+                                </div>
+                            )}
+
+                            {loadingPendingSections ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 0', gap: '12px' }}>
+                                    <Spinner size="large" />
+                                    <Text size={200}>Cargando secciones pendientes...</Text>
+                                </div>
+                            ) : pendingSections.length === 0 ? (
+                                <div style={{ textAlign: 'center', padding: '30px 0', background: '#f8f9fa', borderRadius: '10px' }}>
+                                    <Text weight="bold" size={300} style={{ color: tokens.colorPaletteGreenForeground1 }}>
+                                        🎉 ¡No hay secciones pendientes para este periodo!
+                                    </Text>
+                                </div>
+                            ) : (
+                                <div style={{ maxHeight: '450px', overflowY: 'auto', border: '1px solid #e1dfdd', borderRadius: '10px' }}>
+                                    <Table aria-label="tabla secciones pendientes">
+                                        <TableHeader>
+                                            <TableRow>
+                                                <TableHeaderCell>ID Sección</TableHeaderCell>
+                                                <TableHeaderCell>Curso</TableHeaderCell>
+                                                <TableHeaderCell>Sede / Programa</TableHeaderCell>
+                                                <TableHeaderCell>Docente / Facilitador</TableHeaderCell>
+                                                <TableHeaderCell style={{ textAlign: 'center' }}>Metadatos</TableHeaderCell>
+                                                <TableHeaderCell style={{ textAlign: 'center' }}>Acción</TableHeaderCell>
+                                            </TableRow>
+                                        </TableHeader>
+                                        <TableBody>
+                                            {pendingSections.map((sec) => (
+                                                <TableRow key={sec.idSeccion}>
+                                                    <TableCell>
+                                                        <Badge appearance="outline" color="brand" style={{ fontWeight: 'bold' }}>
+                                                            {sec.idSeccion}
+                                                        </Badge>
+                                                        <Text size={100} style={{ display: 'block', color: tokens.colorNeutralForeground3 }}>
+                                                            {sec.codigoSeccion}
+                                                        </Text>
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        <Text weight="semibold" style={{ fontSize: '13px' }}>{sec.nombreCurso}</Text>
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        <Text size={200} style={{ display: 'block', fontWeight: 500 }}>{sec.sede}</Text>
+                                                        <Text size={100} style={{ color: tokens.colorNeutralForeground3 }}>{sec.programa}</Text>
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        <Text size={200} style={{ display: 'block', fontWeight: 500 }}>{sec.nombreFacilitador}</Text>
+                                                        {sec.emailFacilitador ? (
+                                                            <Text size={100} style={{ color: '#0089a8' }}>{sec.emailFacilitador}</Text>
+                                                        ) : (
+                                                            <Badge size="small" appearance="tint" color="danger">Sin email</Badge>
+                                                        )}
+                                                    </TableCell>
+                                                    <TableCell style={{ textAlign: 'center' }}>
+                                                        {sec.hasMetadata ? (
+                                                            <Badge color="success" appearance="tint">OK</Badge>
+                                                        ) : (
+                                                            <Tooltip content="Se autogenerará la programación al sincronizar" relationship="label">
+                                                                <Badge color="warning" appearance="filled">Falta Metadato</Badge>
+                                                            </Tooltip>
+                                                        )}
+                                                    </TableCell>
+                                                    <TableCell style={{ textAlign: 'center' }}>
+                                                        <Button
+                                                            size="small"
+                                                            appearance="primary"
+                                                            disabled={syncingSectionId === sec.idSeccion}
+                                                            onClick={() => handleSyncSection(sec.idSeccion)}
+                                                            style={{
+                                                                backgroundColor: '#0089a8',
+                                                                fontSize: '12px',
+                                                                padding: '4px 10px',
+                                                                borderRadius: '8px'
+                                                            }}
+                                                        >
+                                                            {syncingSectionId === sec.idSeccion ? <Spinner size="tiny" /> : '⚡ Sincronizar'}
+                                                        </Button>
+                                                    </TableCell>
+                                                </TableRow>
+                                            ))}
+                                        </TableBody>
+                                    </Table>
+                                </div>
+                            )}
+                        </DialogContent>
+
+                        <DialogActions style={{ marginTop: '16px' }}>
+                            <Button appearance="secondary" onClick={() => setIsPendingModalOpen(false)}>
+                                Cerrar
+                            </Button>
+                        </DialogActions>
+                    </DialogBody>
+                </DialogSurface>
+            </Dialog>
         </div>
     );
 };

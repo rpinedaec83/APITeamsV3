@@ -104,6 +104,20 @@ namespace APITeamsV3.Application.UseCases.Teams.DTOs
         public decimal PorAlumnos { get; set; }
     }
 
+    public class PilotScheduleItemDto
+    {
+        public string CodigoPeriodo { get; set; } = string.Empty;
+        public DateTime FechaInicioCreacion { get; set; }
+        public DateTime FechaInicioClases { get; set; }
+        public DateTime FechaFinSincronizacion { get; set; }
+        public int TotalSecciones { get; set; }
+        public int Creados { get; set; }
+        public int Pendientes { get; set; }
+        public bool EnVentanaHoy { get; set; }
+        public string EstadoGestion { get; set; } = string.Empty;
+        public bool EsPiloto { get; set; } = true;
+    }
+
     public class DashboardSummaryDto
     {
         public string CompanyKey { get; set; } = string.Empty;
@@ -114,6 +128,7 @@ namespace APITeamsV3.Application.UseCases.Teams.DTOs
         public string MeetingPolicyMode { get; set; } = string.Empty;
         public string TimeZoneId { get; set; } = string.Empty;
         public List<TenancyStatsDto> Rows { get; set; } = [];
+        public List<PilotScheduleItemDto> PilotSchedule { get; set; } = [];
     }
 
     public class TeamsLogOperativoDto

@@ -2,7 +2,9 @@ using APITeamsV3.Application.Common.Interfaces;
 using Microsoft.Extensions.Logging;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
+using Microsoft.Graph.Models.ODataErrors;
 using System;
+using System.Collections.Concurrent;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -12,6 +14,7 @@ namespace APITeamsV3.Infrastructure.Services
     public class GraphUserLookupService : IGraphUserLookupService
     {
         private readonly ILogger<GraphUserLookupService> _logger;
+        private static readonly ConcurrentDictionary<string, (User? user, DateTime timestamp)> _userCache = new();
 
         public GraphUserLookupService(ILogger<GraphUserLookupService> logger)
         {
@@ -22,6 +25,15 @@ namespace APITeamsV3.Infrastructure.Services
         {
             if (string.IsNullOrWhiteSpace(emailOrNickname)) return null;
 
+            string key = emailOrNickname.Trim().ToLower();
+            string cacheKey = $"{key}_{altDomain?.Trim().ToLower()}";
+
+            if (_userCache.TryGetValue(cacheKey, out var cached) && (DateTime.UtcNow - cached.timestamp).TotalMinutes < 15)
+            {
+                _logger.LogDebug("User '{Email}' resolved from GraphUserLookupService in-memory cache.", emailOrNickname);
+                return cached.user;
+            }
+
             User? foundUser = null;
             string localPart = emailOrNickname.Split('@')[0];
 
@@ -30,7 +42,11 @@ namespace APITeamsV3.Infrastructure.Services
             {
                 _logger.LogDebug($"Lookup Stage 1: Attempting direct lookup for '{emailOrNickname}'");
                 foundUser = await client.Users[emailOrNickname].GetAsync(cancellationToken: cancellationToken);
-                if (foundUser?.Id != null) return foundUser;
+                if (foundUser?.Id != null)
+                {
+                    _userCache[cacheKey] = (foundUser, DateTime.UtcNow);
+                    return foundUser;
+                }
             }
             catch (Exception ex) when (IsNotFoundError(ex)) { /* Expected if not found */ }
             catch (Exception ex)
@@ -52,6 +68,7 @@ namespace APITeamsV3.Infrastructure.Services
                 if (foundUser?.Id != null)
                 {
                     _logger.LogInformation($"User {emailOrNickname} found via mailNickname fallback ({foundUser.UserPrincipalName}).");
+                    _userCache[cacheKey] = (foundUser, DateTime.UtcNow);
                     return foundUser;
                 }
             }
@@ -89,6 +106,7 @@ namespace APITeamsV3.Infrastructure.Services
                     if (foundUser?.Id != null)
                     {
                         _logger.LogInformation($"User {emailOrNickname} found via Alternative Domain fallback ({foundUser.UserPrincipalName}).");
+                        _userCache[cacheKey] = (foundUser, DateTime.UtcNow);
                         return foundUser;
                     }
                 }
@@ -110,11 +128,10 @@ namespace APITeamsV3.Infrastructure.Services
                 }, cancellationToken: cancellationToken);
 
                 foundUser = usersByLegacyEmail?.Value?.FirstOrDefault();
-                
-                // If not found by mail, try direct Get:
+
                 if (foundUser == null)
                 {
-                    try 
+                    try
                     {
                         var u = await client.Users[legacyEmail].GetAsync(cancellationToken: cancellationToken);
                         if (u?.Id != null) foundUser = u;
@@ -125,6 +142,7 @@ namespace APITeamsV3.Infrastructure.Services
                 if (foundUser?.Id != null)
                 {
                     _logger.LogInformation($"User {emailOrNickname} found via Legacy Domain fallback ({foundUser.UserPrincipalName}).");
+                    _userCache[cacheKey] = (foundUser, DateTime.UtcNow);
                     return foundUser;
                 }
             }
@@ -133,16 +151,19 @@ namespace APITeamsV3.Infrastructure.Services
                 _logger.LogWarning($"Legacy domain lookup error for {legacyEmail}: {ex.Message}");
             }
 
-            // Not found
-            _logger.LogWarning($"User lookup exhausted all stages for '{emailOrNickname}'. User not found.");
+            _logger.LogWarning($"User '{emailOrNickname}' could not be resolved in Graph across all fallback stages.");
+            _userCache[cacheKey] = (null, DateTime.UtcNow);
             return null;
         }
 
-        private bool IsNotFoundError(Exception ex)
+        private static bool IsNotFoundError(Exception ex)
         {
-            return ex.Message.Contains("does not exist", StringComparison.OrdinalIgnoreCase) ||
-                   ex.Message.Contains("404", StringComparison.OrdinalIgnoreCase) ||
-                   ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase);
+            if (ex is ODataError odataError && odataError.Error?.Code == "Request_ResourceNotFound")
+            {
+                return true;
+            }
+            return ex.Message.Contains("ResourceNotFound", StringComparison.OrdinalIgnoreCase) ||
+                   ex.Message.Contains("404", StringComparison.OrdinalIgnoreCase);
         }
     }
 }

@@ -300,16 +300,27 @@ namespace APITeamsV3.API.Controllers
                 var storage = await _tenantHangfireRuntime.GetStorageAsync(tenant.CompanyKey, HttpContext.RequestAborted);
                 var client = new BackgroundJobClient(storage);
                 
-                // BackgroundJob.Delete cancels executing jobs (throws OperationCanceledException if the job uses the token)
-                // and removes them from the enqueued/processing list, placing them in Deleted state.
                 var deleted = client.Delete(jobId);
-                
-                if (!deleted)
+
+                // Purga física directa del job en SQL Server para removerlo de la base de datos
+                if (long.TryParse(jobId, out var jobIdLong))
                 {
-                    return Conflict(new
+                    try
                     {
-                        Message = $"No se pudo detener el job {jobId}. Es posible que ya haya finalizado o no exista."
-                    });
+                        var sqlConnectionString = await ResolveTenantSqlConnectionStringAsync(tenant.CompanyKey, HttpContext.RequestAborted);
+                        await using var sqlConnection = new SqlConnection(sqlConnectionString);
+                        await sqlConnection.OpenAsync(HttpContext.RequestAborted);
+                        await using var command = sqlConnection.CreateCommand();
+                        command.CommandText = @"
+                            DELETE FROM [HangFire].[JobParameter] WHERE JobId = @JobId;
+                            DELETE FROM [HangFire].[State] WHERE JobId = @JobId;
+                            DELETE FROM [HangFire].[Job] WHERE Id = @JobId;";
+                        command.Parameters.Add(new SqlParameter("@JobId", System.Data.SqlDbType.BigInt) { Value = jobIdLong });
+                        await command.ExecuteNonQueryAsync(HttpContext.RequestAborted);
+                    }
+                    catch (Exception)
+                    {
+                    }
                 }
 
                 return Ok(new
@@ -365,12 +376,24 @@ namespace APITeamsV3.API.Controllers
                 deletedRecurringJobs = 0;
                 foreach (var recurringJobId in recurringIds)
                 {
-                    recurringManager.RemoveIfExists(recurringJobId);
-                    deletedRecurringJobs++;
+                    try
+                    {
+                        recurringManager.RemoveIfExists(recurringJobId);
+                        deletedRecurringJobs++;
+                    }
+                    catch { }
                 }
 
-                var jobIds = await QueryHangfireJobIdsAsync(sqlConnection, 5000, HttpContext.RequestAborted);
-                deletedJobs = DeleteJobsBatch(jobIds, client);
+                // Purga física de todas las tablas de registros de Hangfire en SQL Server
+                await using var purgeCommand = sqlConnection.CreateCommand();
+                purgeCommand.CommandText = @"
+                    DELETE FROM [HangFire].[JobParameter];
+                    DELETE FROM [HangFire].[State];
+                    DELETE FROM [HangFire].[Set];
+                    DELETE FROM [HangFire].[List];
+                    DELETE FROM [HangFire].[Hash];
+                    DELETE FROM [HangFire].[Job];";
+                deletedJobs = await purgeCommand.ExecuteNonQueryAsync(HttpContext.RequestAborted);
             }
             catch (Exception ex)
             {
@@ -857,6 +880,7 @@ namespace APITeamsV3.API.Controllers
                         WHERE st.JobId = j.Id
                         ORDER BY st.Id DESC
                     ) AS s
+                    WHERE COALESCE(s.Name, j.StateName, 'Unknown') <> 'Deleted'
                     ORDER BY COALESCE(s.CreatedAt, j.CreatedAt) DESC, j.Id DESC;
                     """;
                 command.Parameters.Add(new SqlParameter("@take", System.Data.SqlDbType.Int) { Value = take });
@@ -901,6 +925,7 @@ namespace APITeamsV3.API.Controllers
                         WHERE st.JobId = j.Id
                         ORDER BY st.Id DESC
                     ) AS s
+                    WHERE COALESCE(s.Name, j.StateName, ''Unknown'') <> ''Deleted''
                     ORDER BY COALESCE(s.CreatedAt, j.CreatedAt) DESC, j.Id DESC;
                 END
                 ');

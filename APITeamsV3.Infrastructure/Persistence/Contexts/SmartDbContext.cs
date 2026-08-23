@@ -19,6 +19,7 @@ namespace APITeamsV3.Infrastructure.Persistence.Contexts
         public DbSet<APITeamsV3.Domain.Entities.ReunionAsistencia> TeamsReunionAsistencia { get; set; }
         public DbSet<APITeamsV3.Domain.Entities.ReunionAsistenciaDetalle> TeamsReunionAsistenciaDetalle { get; set; }
         public DbSet<APITeamsV3.Domain.Entities.ReunionAsistenciaIntervalo> TeamsReunionAsistenciaIntervalo { get; set; }
+        public DbSet<APITeamsV3.Domain.Entities.TeamsSeccionesPiloto> TeamsSeccionesPiloto { get; set; }
         private readonly ITenantProvider _tenantProvider;
         private readonly ICurrentUserService _currentUserService;
 
@@ -226,6 +227,14 @@ namespace APITeamsV3.Infrastructure.Persistence.Contexts
                 entity.HasKey(e => e.IdAplicativo);
             });
 
+            // TeamsSeccionesPiloto
+            modelBuilder.Entity<APITeamsV3.Domain.Entities.TeamsSeccionesPiloto>(entity =>
+            {
+                entity.ToTable("TeamsSeccionesPiloto");
+                entity.HasKey(e => e.IdSeccion);
+                entity.Property(e => e.IdSeccion).ValueGeneratedNever();
+            });
+
             // SmartSedeImport (Keyless for Raw SQL)
             modelBuilder.Entity<APITeamsV3.Domain.Entities.SmartSedeImport>(entity =>
             {
@@ -234,6 +243,12 @@ namespace APITeamsV3.Infrastructure.Persistence.Contexts
 
             // SmartPilotSectionImport (Keyless for Raw SQL — pilot candidate sections query)
             modelBuilder.Entity<APITeamsV3.Domain.Entities.SmartPilotSectionImport>(entity =>
+            {
+                entity.HasNoKey();
+            });
+
+            // SmartPilotPeriodImport (Keyless for Raw SQL — pilot available periods query)
+            modelBuilder.Entity<APITeamsV3.Domain.Entities.SmartPilotPeriodImport>(entity =>
             {
                 entity.HasNoKey();
             });

@@ -81,6 +81,24 @@ namespace APITeamsV3.API.Controllers
         }
 
         /// <summary>
+        /// Identifies teams whose section no longer exists in Smart table Seccion,
+        /// soft-deletes them in database (EstadoTeam='I') and deletes them from Microsoft Teams via Graph.
+        /// </summary>
+        [HttpPost("obsolete-teams")]
+        public async Task<ActionResult<SyncObsoleteTeamsResult>> SyncObsoleteTeams()
+        {
+            var result = await _mediator.Send(new SyncObsoleteTeamsCommand());
+            return Ok(result);
+        }
+
+        [HttpPost("obsolete-teams/{idSeccion}")]
+        public async Task<ActionResult<SyncObsoleteTeamsResult>> SyncObsoleteTeamBySection(int idSeccion)
+        {
+            var result = await _mediator.Send(new SyncObsoleteTeamsCommand(idSeccion));
+            return Ok(result);
+        }
+
+        /// <summary>
         /// Triggers full synchronization of all teams across all sections.
         /// Fetches all section IDs using Option 19 logic (filtered by SEDE),
         /// then enqueues chained Hangfire jobs per section to sync teams,
@@ -254,22 +272,30 @@ namespace APITeamsV3.API.Controllers
         [HttpGet("automatic-status")]
         public async Task<IActionResult> GetAutomaticSyncStatus()
         {
-            var tenant = _tenantProvider.GetCurrentTenant();
-            var normalizedCompanyKey = (tenant.CompanyKey ?? string.Empty).Trim().ToLowerInvariant();
-
-            if (string.IsNullOrWhiteSpace(normalizedCompanyKey))
+            try
             {
+                var tenant = _tenantProvider.GetCurrentTenant();
+                var normalizedCompanyKey = (tenant.CompanyKey ?? string.Empty).Trim().ToLowerInvariant();
+
+                if (string.IsNullOrWhiteSpace(normalizedCompanyKey))
+                {
+                    return Ok(new { IsAutomaticSyncRunning = false });
+                }
+
+                var isRunning = await TryGetAutomaticSyncStatusFromStoredProcedureAsync(normalizedCompanyKey, HttpContext.RequestAborted);
+                if (isRunning.HasValue)
+                {
+                    return Ok(new { IsAutomaticSyncRunning = isRunning.Value });
+                }
+
+                var fallback = await GetAutomaticSyncStatusWithEfAsync(normalizedCompanyKey, HttpContext.RequestAborted);
+                return Ok(new { IsAutomaticSyncRunning = fallback });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error al consultar el estado de sincronización automática.");
                 return Ok(new { IsAutomaticSyncRunning = false });
             }
-
-            var isRunning = await TryGetAutomaticSyncStatusFromStoredProcedureAsync(normalizedCompanyKey, HttpContext.RequestAborted);
-            if (isRunning.HasValue)
-            {
-                return Ok(new { IsAutomaticSyncRunning = isRunning.Value });
-            }
-
-            var fallback = await GetAutomaticSyncStatusWithEfAsync(normalizedCompanyKey, HttpContext.RequestAborted);
-            return Ok(new { IsAutomaticSyncRunning = fallback });
         }
 
         private string GetManualExecutorName()
@@ -374,12 +400,12 @@ namespace APITeamsV3.API.Controllers
                 .AsNoTracking()
                 .AnyAsync(
                     e => e.CompanyConfigId == companyConfigId
-                         && string.Equals(e.TriggerSource, "SchedulerService", StringComparison.OrdinalIgnoreCase)
+                         && e.TriggerSource.ToLower() == "schedulerservice"
                          && e.CompletedAtUtc == null
                          && (
-                             string.Equals(e.Status, "Started", StringComparison.OrdinalIgnoreCase)
-                             || string.Equals(e.Status, "Processing", StringComparison.OrdinalIgnoreCase)
-                             || string.Equals(e.Status, "Running", StringComparison.OrdinalIgnoreCase)
+                             e.Status.ToLower() == "started"
+                             || e.Status.ToLower() == "processing"
+                             || e.Status.ToLower() == "running"
                          ),
                     cancellationToken);
         }

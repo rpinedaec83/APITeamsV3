@@ -84,3 +84,19 @@ dotnet build /p:CodeSignEnable=false
 ```
 
 For environments with Smart App Control/WDAC, use a signer trusted by enterprise policy.
+
+
+Por cada empresa se debe ejecutar los siguientes comandos:
+
+# 1. Conectarse a Microsoft Teams especificando el TenantId de IDAT
+Connect-MicrosoftTeams -TenantId "be6becf1-4fef-4388-a21c-7184584d38cb"
+
+# 2. Crear la política de acceso con el AppId de IDAT
+New-CsApplicationAccessPolicy -Identity "APITeamsAttendanceAccess" -AppIds "b1339c3e-4e8d-48a9-9822-853ead7dd91b" -Description "Permitir a APITeams leer reportes de asistencia de reuniones"
+
+# 3. Asignar la política de forma Global
+Grant-CsApplicationAccessPolicy -PolicyName "APITeamsAttendanceAccess" -Global
+
+# 4. Verificar la política
+Get-CsApplicationAccessPolicy -Identity "APITeamsAttendanceAccess"
+

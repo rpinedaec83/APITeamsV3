@@ -50,7 +50,11 @@ namespace APITeamsV3.Infrastructure.Services
 
             var scopes = new[] { "https://graph.microsoft.com/.default" };
 
-            var graphClient = new GraphServiceClient(clientSecretCredential, scopes);
+            var handlers = Microsoft.Graph.GraphClientFactory.CreateDefaultHandlers();
+            handlers.Insert(0, new GraphThrottlingHandler());
+            var httpClient = Microsoft.Graph.GraphClientFactory.Create(handlers);
+
+            var graphClient = new GraphServiceClient(httpClient, clientSecretCredential, scopes);
 
             return Task.FromResult(graphClient);
         }
@@ -106,7 +110,12 @@ namespace APITeamsV3.Infrastructure.Services
 #pragma warning restore CS0618
 
             var scopes = new[] { "https://graph.microsoft.com/.default" };
-            var graphClient = new GraphServiceClient(delegatedCredential, scopes);
+
+            var handlers = Microsoft.Graph.GraphClientFactory.CreateDefaultHandlers();
+            handlers.Insert(0, new GraphThrottlingHandler());
+            var httpClient = Microsoft.Graph.GraphClientFactory.Create(handlers);
+
+            var graphClient = new GraphServiceClient(httpClient, delegatedCredential, scopes);
 
             _logger.LogInformation(
                 "Created delegated Graph client with technical account {Username} for tenant {TenantId}.",

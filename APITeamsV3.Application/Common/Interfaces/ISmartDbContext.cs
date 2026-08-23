@@ -21,6 +21,7 @@ namespace APITeamsV3.Application.Common.Interfaces
         DbSet<ReunionAsistencia> TeamsReunionAsistencia { get; }
         DbSet<ReunionAsistenciaDetalle> TeamsReunionAsistenciaDetalle { get; }
         DbSet<ReunionAsistenciaIntervalo> TeamsReunionAsistenciaIntervalo { get; }
+        DbSet<TeamsSeccionesPiloto> TeamsSeccionesPiloto { get; }
         Task<int> SaveChangesAsync(CancellationToken cancellationToken);
     }
 }

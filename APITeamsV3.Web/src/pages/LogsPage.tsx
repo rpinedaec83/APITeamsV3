@@ -48,8 +48,10 @@ import {
     CheckmarkCircleFilled,
     ErrorCircleFilled,
     WarningFilled,
-    InfoFilled
+    InfoFilled,
+    DeleteRegular
 } from '@fluentui/react-icons';
+import Swal from 'sweetalert2';
 import { useMsal } from '@azure/msal-react';
 import { useApiClient } from '../hooks/useApiClient';
 
@@ -456,11 +458,48 @@ const LogsPage: React.FC = () => {
         return Array.from(values).sort((a, b) => a.localeCompare(b));
     }, [logs]);
 
+    const [clearingLogs, setClearingLogs] = useState(false);
+
     const handleRefresh = () => setReloadTick(current => current + 1);
     const handleClearFilters = () => {
         setTipoFiltro(''); setSeveridadFiltro(''); setEntidadFiltro(''); setReferenciaFiltro('');
         setJobIdFiltro(''); setSearchInput(''); setFechaDesde(''); setCompanyFiltro('');
         setPage(1); setReloadTick(current => current + 1);
+    };
+
+    const handleClearLogsFromDb = async () => {
+        const confirm = await Swal.fire({
+            title: '¿Borrar Historial de Logs?',
+            text: 'Se eliminarán los registros de logs operativos del sistema de forma permanente.',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#d33',
+            cancelButtonColor: '#3085d6',
+            confirmButtonText: 'Sí, borrar logs',
+            cancelButtonText: 'Cancelar'
+        });
+
+        if (!confirm.isConfirmed) return;
+
+        setClearingLogs(true);
+        try {
+            const params: Record<string, string> = {};
+            if (tipoFiltro) params.tipo = tipoFiltro;
+            if (severidadFiltro) params.severidad = severidadFiltro;
+            if (entidadFiltro) params.entidad = entidadFiltro;
+            if (isIt) {
+                params.scope = scopeFiltro;
+                if (scopeFiltro === 'all' && companyFiltro) params.companyKey = companyFiltro;
+            }
+
+            const res = await apiClient.delete('/reports/logs', { params });
+            await Swal.fire('¡Borrado!', res.data?.message || 'Registros eliminados correctamente.', 'success');
+            setReloadTick(c => c + 1);
+        } catch (err: any) {
+            await Swal.fire('Error', err?.response?.data?.message || 'No se pudieron borrar los logs.', 'error');
+        } finally {
+            setClearingLogs(false);
+        }
     };
 
     const renderFriendlyLogs = () => (
@@ -654,6 +693,9 @@ const LogsPage: React.FC = () => {
                     </div>
                     <Button icon={<ArrowClockwiseRegular />} appearance="primary" onClick={handleRefresh} disabled={loading}>
                         Refrescar
+                    </Button>
+                    <Button icon={<DeleteRegular />} appearance="outline" style={{ color: '#d13438', borderColor: '#d13438' }} onClick={handleClearLogsFromDb} disabled={clearingLogs || loading}>
+                        Borrar Logs
                     </Button>
                 </div>
             </div>

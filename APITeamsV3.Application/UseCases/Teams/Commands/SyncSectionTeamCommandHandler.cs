@@ -9,6 +9,7 @@ using APITeamsV3.Domain.Entities;
 using System;
 using System.Linq;
 using APITeamsV3.Application.Common.Graph;
+using APITeamsV3.Application.UseCases.Provisioning.Commands;
 
 namespace APITeamsV3.Application.UseCases.Teams.Commands
 {
@@ -70,6 +71,34 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     // Flujo 1: Crear Team desde cero
                     _logger.LogInformation($"No existing team found for section {request.IdSeccion}. Provisioning new Microsoft 365 Group.");
                     
+                    // Verify if metadata exists in TeamsProgramacionGeneral before provisioning
+                    var hasMetadata = await _context.TeamsProgramacionGeneral
+                        .AnyAsync(p => p.IdCurso == request.IdSeccion, cancellationToken);
+
+                    if (!hasMetadata)
+                    {
+                        _logger.LogInformation($"Metadata (TeamsProgramacionGeneral) missing for section {request.IdSeccion}. Auto-generating schedule before provisioning.");
+                        await _mediator.Send(new GenerateSectionScheduleCommand(request.IdSeccion) { Force = true }, cancellationToken);
+
+                        // Re-check after generation
+                        hasMetadata = await _context.TeamsProgramacionGeneral
+                            .AnyAsync(p => p.IdCurso == request.IdSeccion, cancellationToken);
+
+                        if (!hasMetadata)
+                        {
+                            _logger.LogWarning($"Section {request.IdSeccion} still has no metadata in TeamsProgramacionGeneral after auto-generation attempt.");
+                            await LogOperativoAsync(
+                                "Warning",
+                                "Seccion",
+                                request.IdSeccion.ToString(),
+                                $"Advertencia: No se pudo generar la programación para la sección {request.IdSeccion}. Verifique que tenga datos de curso/docente asignado.",
+                                request.JobId,
+                                request.ExecutedBy);
+                            result.Failure++;
+                            return result;
+                        }
+                    }
+
                     var newGraphId = await _provisioningService.ProvisionTeamAsync(section);
                     
                     if (string.IsNullOrEmpty(newGraphId)) 

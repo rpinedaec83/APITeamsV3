@@ -112,7 +112,8 @@ namespace APITeamsV3.API.Controllers
             var succeeded = jobs.Count(job => string.Equals(job.State, "Succeeded", StringComparison.OrdinalIgnoreCase));
             var failed = jobs.Count(job => string.Equals(job.State, "Failed", StringComparison.OrdinalIgnoreCase));
             var pending = jobs.Count(job => IsPendingState(job.State));
-            var summary = BuildExecutionSummary(execution, jobs, succeeded, failed, pending);
+            var expired = jobs.Count(job => string.Equals(job.State, "Expirado", StringComparison.OrdinalIgnoreCase));
+            var summary = BuildExecutionSummary(execution, jobs, succeeded, failed, pending, expired);
 
             return execution with
             {
@@ -129,7 +130,7 @@ namespace APITeamsV3.API.Controllers
             var details = monitoring.JobDetails(jobId);
             if (details == null)
             {
-                return new SyncScheduleExecutionJobDto(jobId, "Unknown", "Unknown", null, "Job data no longer available", string.Empty, null);
+                return new SyncScheduleExecutionJobDto(jobId, "Expirado", "Desconocido", null, "Los detalles del job ya no están disponibles en la retención de Hangfire (24h)", string.Empty, null);
             }
 
             var state = details.History?.OrderByDescending(h => h.CreatedAt).Select(h => h.StateName).FirstOrDefault() ?? "Unknown";
@@ -178,7 +179,8 @@ namespace APITeamsV3.API.Controllers
             List<SyncScheduleExecutionJobDto> jobs,
             int succeeded,
             int failed,
-            int pending)
+            int pending,
+            int expired)
         {
             if (!string.IsNullOrWhiteSpace(execution.ErrorMessage))
             {
@@ -194,6 +196,11 @@ namespace APITeamsV3.API.Controllers
                     "Failed" => "La ejecución falló antes de encolar jobs.",
                     _ => "No hay detalle de jobs para esta ejecución."
                 };
+            }
+
+            if (expired > 0 && (succeeded + failed + pending == 0))
+            {
+                return $"Ejecución completada. Los detalles técnicos de los {expired} job(s) han sido purgados por la política de retención de Hangfire (24h).";
             }
 
             if (failed > 0)
@@ -217,8 +224,7 @@ namespace APITeamsV3.API.Controllers
             return string.Equals(state, "Enqueued", StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(state, "Processing", StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(state, "Scheduled", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(state, "Awaiting", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(state, "Unknown", StringComparison.OrdinalIgnoreCase);
+                   string.Equals(state, "Awaiting", StringComparison.OrdinalIgnoreCase);
         }
 
         private static string? TryGetStateValue(Hangfire.Storage.StateData? stateData, string key)
