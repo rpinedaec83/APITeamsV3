@@ -10,6 +10,10 @@ import {
     Input,
     Label,
     Title3,
+    Caption1,
+    Text as FluentText,
+    Card,
+    CardHeader,
     Divider,
     Table,
     TableHeader,
@@ -37,6 +41,7 @@ import {
     TriangleDownRegular,
     CopyRegular,
     VideoRegular,
+    PersonAddRegular,
 } from '@fluentui/react-icons';
 import { useMsal } from '@azure/msal-react';
 import { useApiClient } from '../hooks/useApiClient';
@@ -97,7 +102,7 @@ interface StudentData {
     enrolledSections: EnrolledSection[];
 }
 
-type TeamActionProgress = 'refresh-members' | 'regenerate-agenda' | 'recreate-team' | 'transfer-recordings' | null;
+type TeamActionProgress = 'refresh-members' | 'regenerate-agenda' | 'recreate-team' | 'transfer-recordings' | 'regenerate-pilot' | null;
 
 const useStyles = makeStyles({
     root: {
@@ -318,6 +323,7 @@ const OperationsPage: React.FC = () => {
     }, []);
     const [teamActionInProgress, setTeamActionInProgress] = useState<TeamActionProgress>(null);
     const [error, setError] = useState('');
+    const [addingCoorganizer, setAddingCoorganizer] = useState(false);
 
     // State for Top Tabs
     const [selectedTab, setSelectedTab] = useState<TabValue>('seccion');
@@ -353,6 +359,25 @@ const OperationsPage: React.FC = () => {
     const [seccionCodigo, setSeccionCodigo] = useState('');
     const [seccionData, setSeccionData] = useState<SectionData | null>(null);
     const [recentRecreate, setRecentRecreate] = useState<{ idSeccion: number; at: number } | null>(null);
+
+    const handleAddCoorganizer = async () => {
+        if (!seccionData?.idSeccion) return;
+        setAddingCoorganizer(true);
+        try {
+            const response = await apiClient.post(`/sections/${seccionData.idSeccion}/add-coorganizer`, {});
+            if (response.data?.success) {
+                showSuccess(response.data.message || 'Docente agregado como Co-Organizador exitosamente.');
+            } else {
+                showError(response.data?.message || 'No se pudo agregar al docente como Co-Organizador.');
+            }
+        } catch (err: any) {
+            console.error('Error adding co-organizer:', err);
+            const errMsg = err.response?.data?.message || 'Error al intentar asignar al docente como Co-Organizador.';
+            showError(errMsg);
+        } finally {
+            setAddingCoorganizer(false);
+        }
+    };
 
     // Form State (Alumno)
     const [alumnoCodigo, setAlumnoCodigo] = useState('');
@@ -500,6 +525,7 @@ const OperationsPage: React.FC = () => {
     }, [accounts]);
 
     const canUseAdminItTeamActions = roles.includes('ADMIN') || roles.includes('IT');
+    const isSuperAdminIT = roles.includes('IT');
     const isGestor = roles.some(r => r.includes('GESTION') || r.includes('GESTOR'));
 
     const ensureCanUseAdminItTeamActions = async () => {
@@ -637,7 +663,11 @@ const OperationsPage: React.FC = () => {
         try {
             const companyKey = getCompanyKey();
             const response = await apiClient.post(`/sync/agenda/regenerate/${seccionData.idSeccion}?companyKey=${companyKey}`);
-            showSuccess(response.data.summary, 'Agenda regenerada');
+            if (response.data?.isValid) {
+                showSuccess(response.data.summary, 'Agenda regenerada');
+            } else {
+                showError(response.data?.summary || 'Error al regenerar agenda.', 'Agenda fallida');
+            }
         } catch (err: unknown) {
             showError('Error al regenerar agenda.');
         } finally {
@@ -730,6 +760,83 @@ const OperationsPage: React.FC = () => {
         } catch (err: unknown) {
             const errorMessage = err instanceof Error ? err.message : 'Error al encolar transferencia de grabaciones.';
             showError(errorMessage);
+        } finally {
+            setTeamActionInProgress(null);
+            setLoading(false);
+        }
+    };
+
+    const handleRegeneratePilotAgendasNuclear = async () => {
+        if (!isSuperAdminIT) {
+            await showWarning('Esta opción nuclear requiere permisos exclusivos del rol IT (Superadministrador).');
+            return;
+        }
+        if (!await ensureAutomaticSyncNotRunning()) return;
+
+        // Step 1: Initial warning
+        const step1 = await Swal.fire({
+            icon: 'warning',
+            title: '☢️ OPCIÓN NUCLEAR: REGENERAR TODO EL PILOTO',
+            html: `
+                <div style="text-align: left; font-size: 14px;">
+                    <p style="color: #d9534f; font-weight: bold;">⚠️ ATENCIÓN SUPERADMINISTRADOR (IT):</p>
+                    <p>Esta acción es <b>DESTRUCTIVA A NIVEL DE PILOTO</b>.</p>
+                    <ul style="color: #666; margin-top: 8px;">
+                        <li>Se eliminarán y recrearán en Microsoft Graph las reuniones de canal de <b>TODAS las secciones activas del piloto</b>.</li>
+                        <li>Invalidará los enlaces de clases virtuales pasadas para todos los equipos.</li>
+                    </ul>
+                    <p><b>¿Está completamente seguro de proceder?</b></p>
+                </div>
+            `,
+            showCancelButton: true,
+            confirmButtonColor: '#d9534f',
+            cancelButtonColor: '#6c757d',
+            confirmButtonText: 'Sí, entiendo los riesgos y deseo continuar',
+            cancelButtonText: 'Cancelar'
+        });
+
+        if (!step1.isConfirmed) return;
+
+        // Step 2: Type confirmation phrase
+        const securityPhrase = 'REGENERAR PILOTO';
+        const step2 = await Swal.fire({
+            icon: 'error',
+            title: '🔒 Confirmación Final de Seguridad',
+            html: `
+                <p>Para confirmar la regeneración masiva de agendas de <b>TODO EL PILOTO</b>, escriba exactamente:</p>
+                <p style="font-family: monospace; font-size: 18px; font-weight: bold; background: #fff0f0; padding: 8px; border: 1px solid #f5c6cb; color: #721c24; border-radius: 4px;">${securityPhrase}</p>
+            `,
+            input: 'text',
+            inputPlaceholder: securityPhrase,
+            showCancelButton: true,
+            confirmButtonColor: '#d9534f',
+            cancelButtonColor: '#6c757d',
+            confirmButtonText: 'EJECUTAR REGENERACIÓN NUCLEAR',
+            cancelButtonText: 'Cancelar',
+            preConfirm: (inputValue) => {
+                if (!inputValue || inputValue.trim().toUpperCase() !== securityPhrase) {
+                    Swal.showValidationMessage(`Debe escribir exactamente "${securityPhrase}" para confirmar.`);
+                    return false;
+                }
+                return true;
+            }
+        });
+
+        if (!step2.isConfirmed) return;
+
+        setTeamActionInProgress('regenerate-pilot');
+        setLoading(true);
+        try {
+            const companyKey = getCompanyKey();
+            const response = await apiClient.post(`/sync/agenda/regenerate-pilot?companyKey=${companyKey}`);
+            if (response.data?.isValid) {
+                showSuccess(response.data.summary, '☢️ Regeneración Masiva de Piloto Exitosa');
+            } else {
+                showError(response.data?.summary || 'Ocurrieron fallas al regenerar agendas de algunas secciones.', 'Atención en Regeneración de Piloto');
+            }
+        } catch (err: unknown) {
+            const errorMsg = err instanceof Error ? err.message : 'Error desconocido al regenerar agendas del piloto';
+            showError(errorMsg, 'Error Nuclear');
         } finally {
             setTeamActionInProgress(null);
             setLoading(false);
@@ -991,6 +1098,8 @@ const OperationsPage: React.FC = () => {
                                     sharePointUrl={seccionData.linkSharePoint}
                                     onCopy={handleCopyLinkGrabacion}
                                     hideSharePoint={isGestor}
+                                    onAddCoorganizer={handleAddCoorganizer}
+                                    addingCoorganizer={addingCoorganizer}
                                 />
                             </div>
                         )}
@@ -1494,6 +1603,34 @@ const OperationsPage: React.FC = () => {
                     )}
                 </div>
             </div>
+            {false && isSuperAdminIT && (
+                <Card style={{ marginTop: '24px', border: `1px solid ${tokens.colorPaletteRedBorderActive}`, background: '#fff0f0' }}>
+                    <CardHeader
+                        image={<span style={{ fontSize: '24px' }}>☢️</span>}
+                        header={<Title3 style={{ color: tokens.colorPaletteRedForeground1 }}>Zona Nuclear: Agendas del Piloto (Solo Superadministrador IT)</Title3>}
+                        description={<Caption1>Operación masiva de alto impacto para reiniciar las agendas de todas las secciones activas.</Caption1>}
+                    />
+                    <div style={{ padding: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
+                        <div style={{ maxWidth: '700px' }}>
+                            <FluentText weight="semibold" style={{ color: tokens.colorPaletteRedForeground1, fontSize: '15px' }}>
+                                Regenerar Agendas de Todo el Piloto
+                            </FluentText>
+                            <div style={{ fontSize: '13px', color: tokens.colorNeutralForeground2, marginTop: '4px' }}>
+                                Eliminará y recreará en Microsoft Graph la agenda de canal para <b>TODOS los equipos activos del piloto</b> de la institución. Requiere doble confirmación con clave de seguridad.
+                            </div>
+                        </div>
+                        <Button
+                            appearance="primary"
+                            size="large"
+                            style={{ backgroundColor: '#d9534f', borderColor: '#d43f3a', color: '#ffffff', fontWeight: 'bold' }}
+                            onClick={handleRegeneratePilotAgendasNuclear}
+                            disabled={loading}
+                        >
+                            ☢️ Regenerar Agendas de Todo el Piloto
+                        </Button>
+                    </div>
+                </Card>
+            )}
         </div>
     );
 };
@@ -1516,7 +1653,9 @@ const CopyDetailItem: React.FC<{
     sharePointUrl?: string | null;
     onCopy: (value?: string | null, source?: 'class' | 'sharepoint') => void;
     hideSharePoint?: boolean;
-}> = ({ label, value, sharePointUrl, onCopy, hideSharePoint }) => {
+    onAddCoorganizer?: () => void;
+    addingCoorganizer?: boolean;
+}> = ({ label, value, sharePointUrl, onCopy, hideSharePoint, onAddCoorganizer, addingCoorganizer }) => {
     const styles = useStyles();
     if (!value || value === 'N/A') return null;
 
@@ -1541,6 +1680,17 @@ const CopyDetailItem: React.FC<{
                         style={{ width: 'fit-content' }}
                     >
                         Ir a SharePoint
+                    </Button>
+                )}
+                {onAddCoorganizer && (
+                    <Button
+                        appearance="outline"
+                        icon={<PersonAddRegular />}
+                        onClick={onAddCoorganizer}
+                        disabled={addingCoorganizer}
+                        style={{ width: 'fit-content' }}
+                    >
+                        {addingCoorganizer ? 'Agregando...' : 'Agregar Co-Organizador'}
                     </Button>
                 )}
             </div>

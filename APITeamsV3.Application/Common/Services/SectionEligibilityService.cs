@@ -35,8 +35,12 @@ namespace APITeamsV3.Application.Common.Services
                 
             if (companyConfig != null && companyConfig.IsPilotMode)
             {
-                var isInPilot = companyConfig.PilotSections.Any(ps => ps.IdSeccion == seccion.IdSeccion);
-                if (!isInPilot) 
+                var isInCentralPilot = companyConfig.PilotSections.Any(ps => ps.IdSeccion == seccion.IdSeccion);
+                var isInSmartPilot = await _smartContext.TeamsSeccionesPiloto
+                    .AsNoTracking()
+                    .AnyAsync(ps => ps.IdSeccion == seccion.IdSeccion && ps.EsActivo);
+
+                if (!isInCentralPilot && !isInSmartPilot) 
                     return SectionEligibilityResult.Ineligible($"El tenant está en Modo Piloto y la sección {seccion.IdSeccion} no está en la lista blanca.");
             }
 

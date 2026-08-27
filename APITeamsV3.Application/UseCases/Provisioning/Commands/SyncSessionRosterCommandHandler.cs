@@ -10,33 +10,24 @@ namespace APITeamsV3.Application.UseCases.Provisioning.Commands
     {
         private readonly ISmartDbContext _context;
         private readonly ICurrentUserService _currentUserService;
+        private readonly ITeamsAgendaService _agendaService;
 
-        public SyncSessionRosterCommandHandler(ISmartDbContext context, ICurrentUserService currentUserService)
+        public SyncSessionRosterCommandHandler(
+            ISmartDbContext context,
+            ICurrentUserService currentUserService,
+            ITeamsAgendaService agendaService)
         {
             _context = context;
             _currentUserService = currentUserService;
+            _agendaService = agendaService;
         }
 
         public async Task Handle(SyncSessionRosterCommand request, CancellationToken cancellationToken)
         {
-            if (request.Mode == SessionRosterSyncType.FullSync)
+            if (request.IdSeccion > 0)
             {
-                // Logic to manage individual students in TeamsHorarios was removed
-                // as per new requirement: 'en teamshorario solo debe grabar los bloques no por cada alumno/docente'.
-                await Task.CompletedTask;
-
-                // Logic to manage individual students in TeamsHorarios was removed
-                // as per new requirement: 'en teamshorario solo debe grabar los bloques no por cada alumno/docente'.
-                await Task.CompletedTask;
+                await _agendaService.EnsureTeacherCoorganizerForSectionAsync(request.IdSeccion, cancellationToken);
             }
-            else if (request.Mode == SessionRosterSyncType.EventSync)
-            {
-                // Logic to manage individual students in TeamsHorarios was removed
-                // as per new requirement: 'en teamshorario solo debe grabar los bloques no por cada alumno/docente'.
-                await Task.CompletedTask;
-            }
-
-            return;
         }
     }
 }

@@ -69,34 +69,28 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                 {
 
                     // Flujo 1: Crear Team desde cero
-                    _logger.LogInformation($"No existing team found for section {request.IdSeccion}. Provisioning new Microsoft 365 Group.");
+                    _logger.LogInformation($"No existing team found for section {request.IdSeccion}. Auto-generating/refreshing schedule metadata before provisioning.");
                     
-                    // Verify if metadata exists in TeamsProgramacionGeneral before provisioning
-                    var hasMetadata = await _context.TeamsProgramacionGeneral
-                        .AnyAsync(p => p.IdCurso == request.IdSeccion, cancellationToken);
+                    // Replicate legacy @Opcion = 0 / @Opcion = 1 behavior from cTeamsPorSeccion.sql:
+                    // Always refresh schedule metadata (TeamsProgramacionGeneral & TeamsProgramacionAlumnos) with current ERP data before provisioning.
+                    await _mediator.Send(new GenerateSectionScheduleCommand(request.IdSeccion) { Force = true }, cancellationToken);
 
-                    if (!hasMetadata)
+                    var progGeneral = await _context.TeamsProgramacionGeneral
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(p => p.IdCurso == request.IdSeccion, cancellationToken);
+
+                    if (progGeneral == null || string.IsNullOrWhiteSpace(progGeneral.EmailFacilitador))
                     {
-                        _logger.LogInformation($"Metadata (TeamsProgramacionGeneral) missing for section {request.IdSeccion}. Auto-generating schedule before provisioning.");
-                        await _mediator.Send(new GenerateSectionScheduleCommand(request.IdSeccion) { Force = true }, cancellationToken);
-
-                        // Re-check after generation
-                        hasMetadata = await _context.TeamsProgramacionGeneral
-                            .AnyAsync(p => p.IdCurso == request.IdSeccion, cancellationToken);
-
-                        if (!hasMetadata)
-                        {
-                            _logger.LogWarning($"Section {request.IdSeccion} still has no metadata in TeamsProgramacionGeneral after auto-generation attempt.");
-                            await LogOperativoAsync(
-                                "Warning",
-                                "Seccion",
-                                request.IdSeccion.ToString(),
-                                $"Advertencia: No se pudo generar la programación para la sección {request.IdSeccion}. Verifique que tenga datos de curso/docente asignado.",
-                                request.JobId,
-                                request.ExecutedBy);
-                            result.Failure++;
-                            return result;
-                        }
+                        _logger.LogWarning($"Section {request.IdSeccion} has no metadata or missing EmailFacilitador in TeamsProgramacionGeneral.");
+                        await LogOperativoAsync(
+                            "Warning",
+                            "Seccion",
+                            request.IdSeccion.ToString(),
+                            $"Advertencia: No se pudo aprovisionar la sección {request.IdSeccion}. Verifique que tenga docente asignado con correo institucional.",
+                            request.JobId,
+                            request.ExecutedBy);
+                        result.Failure++;
+                        return result;
                     }
 
                     var newGraphId = await _provisioningService.ProvisionTeamAsync(section);

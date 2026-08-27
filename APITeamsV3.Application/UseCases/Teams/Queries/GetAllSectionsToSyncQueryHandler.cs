@@ -174,6 +174,17 @@ namespace APITeamsV3.Application.UseCases.Teams.Queries
                 .Select(ps => ps.IdSeccion)
                 .ToHashSet();
 
+            var smartPilotSections = await _context.TeamsSeccionesPiloto
+                .AsNoTracking()
+                .Where(ps => ps.EsActivo)
+                .Select(ps => ps.IdSeccion)
+                .ToListAsync(cancellationToken);
+
+            foreach (var id in smartPilotSections)
+            {
+                allowedSections.Add(id);
+            }
+
             var filteredSections = sectionIds
                 .Where(id => allowedSections.Contains(id))
                 .ToList();

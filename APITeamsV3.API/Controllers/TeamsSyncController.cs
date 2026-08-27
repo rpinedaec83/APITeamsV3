@@ -239,6 +239,35 @@ namespace APITeamsV3.API.Controllers
         }
 
         /// <summary>
+        /// Nuclear Option: Bulk regenerates agendas for all active sections in the pilot.
+        /// Restricted exclusively to IT superadministrators.
+        /// </summary>
+        [HttpPost("agenda/regenerate-pilot")]
+        [Microsoft.AspNetCore.Authorization.Authorize(Roles = "IT")]
+        public async Task<IActionResult> RegeneratePilotAgendas([FromQuery] string companyKey = "idat")
+        {
+            var executedByName = GetManualExecutorName();
+            _logger.LogWarning(
+                "NuclearSyncRequest Action={Action} CompanyKey={CompanyKey} ExecutedByName={ExecutedByName}",
+                "RegeneratePilotAgendas",
+                companyKey,
+                executedByName);
+
+            var startedAtUtc = DateTime.UtcNow;
+            var success = false;
+            try
+            {
+                var result = await _mediator.Send(new RegeneratePilotAgendasCommand(companyKey, executedByName));
+                success = result.IsValid;
+                return Ok(result);
+            }
+            finally
+            {
+                LogManualSyncFinished("RegeneratePilotAgendas", executedByName, startedAtUtc, success);
+            }
+        }
+
+        /// <summary>
         /// Recreates a team: deletes from Graph, soft-deletes local records,
         /// provisions a brand new team, and syncs students.
         /// </summary>

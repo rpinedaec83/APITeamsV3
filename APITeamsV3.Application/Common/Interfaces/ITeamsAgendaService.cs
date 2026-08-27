@@ -43,5 +43,7 @@ namespace APITeamsV3.Application.Common.Interfaces
         Task<TeamsMeetingResult> UpdateMeetingAsync(TeamsMeetingUpdateRequest request, CancellationToken cancellationToken = default);
         Task DeleteMeetingAsync(string teamId, string eventId);
         Task<string> GetPrimaryChannelIdAsync(string teamId, CancellationToken cancellationToken = default);
+        Task AddCoorganizerAsync(string joinUrl, IReadOnlyCollection<string> teacherEmails, CancellationToken cancellationToken = default);
+        Task EnsureTeacherCoorganizerForSectionAsync(int idSeccion, CancellationToken cancellationToken = default);
     }
 }

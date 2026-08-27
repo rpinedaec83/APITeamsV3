@@ -124,6 +124,8 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                 var failedBlocks = new List<string>();
                 var hasMultipleBlocks = groupedSchedules.Count > 1;
 
+                await DeleteAndDeactivatePreviousAgendasAsync(team.IdTeamsGroup, request.IdSeccion, request.JobId, request.ExecutedBy, sectionInfo.Codigo, cancellationToken);
+
                 foreach (var scheduleBlock in groupedSchedules)
                 {
                     var blockSessions = scheduleBlock
@@ -255,8 +257,6 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     await LogOperativoAsync("Warning", "Agenda", sectionInfo.Codigo, result.Summary, request.JobId, request.ExecutedBy);
                     return result;
                 }
-
-                await DeleteAndDeactivatePreviousAgendasAsync(team.IdTeamsGroup, request.IdSeccion, request.JobId, request.ExecutedBy, sectionInfo.Codigo, cancellationToken);
 
                 await PersistTeamsHorariosAsync(
                     team.IdTeamsGroup,
@@ -408,21 +408,47 @@ WHERE TU.IdTeams = {0}
         {
             const string selectSql = @"
 SELECT DISTINCT IdEvento FROM TeamsHorarios WITH (NOLOCK)
-WHERE IdTeams = {0} AND IdCurso = {1} AND Estado = 'A' AND ISNULL(IdEvento, '') <> ''";
+WHERE IdTeams = {0} AND IdCurso = {1} AND ISNULL(IdEvento, '') <> ''
+UNION
+SELECT DISTINCT IdEvento FROM SeccionHorario WITH (NOLOCK)
+WHERE IdSeccion = {1} AND ISNULL(IdEvento, '') <> '';";
 
-            var events = await _context.Database.SqlQueryRaw<EventIdRow>(selectSql, teamId, sectionId).ToListAsync(cancellationToken);
+            var dbEvents = await _context.Database.SqlQueryRaw<EventIdRow>(selectSql, teamId, sectionId).ToListAsync(cancellationToken);
+            var eventIdsToDelete = new HashSet<string>(dbEvents.Select(e => e.IdEvento).Where(id => !string.IsNullOrWhiteSpace(id)), StringComparer.OrdinalIgnoreCase);
 
-            foreach (var eventRow in events)
+            try
+            {
+                var graphClient = await _graphClientFactory.CreateClientAsync();
+                var currentGraphEvents = await graphClient.Groups[teamId].Events.GetAsync(
+                    rc => rc.QueryParameters.Select = ["id", "subject"],
+                    cancellationToken: cancellationToken);
+
+                if (currentGraphEvents?.Value != null)
+                {
+                    foreach (var graphEvt in currentGraphEvents.Value)
+                    {
+                        if (!string.IsNullOrWhiteSpace(graphEvt.Id))
+                        {
+                            eventIdsToDelete.Add(graphEvt.Id);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not list Graph group events for cleanup in team {TeamId}. Proceeding with DB event IDs.", teamId);
+            }
+
+            foreach (var eventId in eventIdsToDelete)
             {
                 try
                 {
-                    await _agendaService.DeleteMeetingAsync(teamId, eventRow.IdEvento);
-                    await LogOperativoAsync("Info", "Agenda", sectionCode, $"Reunion anterior eliminada en Graph (Evento: {eventRow.IdEvento}).", jobId, executedBy);
+                    await _agendaService.DeleteMeetingAsync(teamId, eventId);
+                    await LogOperativoAsync("Info", "Agenda", sectionCode, $"Reunion anterior eliminada en Graph (Evento: {eventId}).", jobId, executedBy);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Failed to delete meeting {EventId} in Graph.", eventRow.IdEvento);
-                    await LogOperativoAsync("Warning", "Agenda", sectionCode, $"No se pudo eliminar reunion previa en Graph (Evento: {eventRow.IdEvento}). Se desactiva en BD.", jobId, executedBy, ex.Message);
+                    _logger.LogWarning(ex, "Failed to delete meeting {EventId} in Graph.", eventId);
                 }
             }
 

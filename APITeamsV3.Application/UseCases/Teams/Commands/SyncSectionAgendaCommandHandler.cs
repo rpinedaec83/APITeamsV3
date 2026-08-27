@@ -825,7 +825,12 @@ END;";
                 return true;
             }
 
-            return companyConfig.PilotSections.Any(ps => ps.IdSeccion == sectionId);
+            var isInCentralPilot = companyConfig.PilotSections.Any(ps => ps.IdSeccion == sectionId);
+            if (isInCentralPilot) return true;
+
+            return await _context.TeamsSeccionesPiloto
+                .AsNoTracking()
+                .AnyAsync(ps => ps.IdSeccion == sectionId && ps.EsActivo, cancellationToken);
         }
 
         private async Task UpdateSeccionHorarioLinkAsync(

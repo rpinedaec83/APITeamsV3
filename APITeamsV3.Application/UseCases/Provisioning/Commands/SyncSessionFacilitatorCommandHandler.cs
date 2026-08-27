@@ -10,11 +10,16 @@ namespace APITeamsV3.Application.UseCases.Provisioning.Commands
     {
         private readonly ISmartDbContext _context;
         private readonly ICurrentUserService _currentUserService;
+        private readonly ITeamsAgendaService _agendaService;
 
-        public SyncSessionFacilitatorCommandHandler(ISmartDbContext context, ICurrentUserService currentUserService)
+        public SyncSessionFacilitatorCommandHandler(
+            ISmartDbContext context,
+            ICurrentUserService currentUserService,
+            ITeamsAgendaService agendaService)
         {
             _context = context;
             _currentUserService = currentUserService;
+            _agendaService = agendaService;
         }
 
         public async Task Handle(SyncSessionFacilitatorCommand request, CancellationToken cancellationToken)
@@ -79,6 +84,8 @@ SET TARGET.CodigoFacilitador = SOURCE.CodigoAnterior,
             ";
 
             await _context.Database.ExecuteSqlRawAsync(sql, request.IdSeccion, _currentUserService.UserIdInt ?? 99);
+
+            await _agendaService.EnsureTeacherCoorganizerForSectionAsync(request.IdSeccion, cancellationToken);
 
             return;
         }

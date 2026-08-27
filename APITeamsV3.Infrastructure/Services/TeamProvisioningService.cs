@@ -52,6 +52,7 @@ namespace APITeamsV3.Infrastructure.Services
 
             // 1. Fetch Programacion General for metadata
             var progGeneral = await _smartContext.TeamsProgramacionGeneral
+                .AsNoTracking()
                 .FirstOrDefaultAsync(p => p.IdCurso == seccion.IdSeccion);
 
             if (progGeneral == null)

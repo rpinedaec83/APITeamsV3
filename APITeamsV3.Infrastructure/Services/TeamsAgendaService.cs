@@ -1,4 +1,6 @@
 using APITeamsV3.Application.Common.Interfaces;
+using APITeamsV3.Domain.Entities;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
@@ -20,15 +22,18 @@ namespace APITeamsV3.Infrastructure.Services
 
         private readonly IGraphClientFactory _graphFactory;
         private readonly ITenantProvider _tenantProvider;
+        private readonly ISmartDbContext _smartContext;
         private readonly ILogger<TeamsAgendaService> _logger;
 
         public TeamsAgendaService(
             IGraphClientFactory graphFactory,
             ITenantProvider tenantProvider,
+            ISmartDbContext smartContext,
             ILogger<TeamsAgendaService> logger)
         {
             _graphFactory = graphFactory;
             _tenantProvider = tenantProvider;
+            _smartContext = smartContext;
             _logger = logger;
         }
 
@@ -70,7 +75,7 @@ namespace APITeamsV3.Infrastructure.Services
                     .ToList() ?? new List<Attendee>();
 
                 var timeZoneId = ResolveTimeZoneId();
-                var appClient = await _graphFactory.CreateClientAsync();
+                var graphClient = await CreateAgendaGraphClientAsync();
 
                 var daysOfWeekList = request.RecurrenceDays?
                     .Distinct()
@@ -83,46 +88,13 @@ namespace APITeamsV3.Infrastructure.Services
                     daysOfWeekList.Add(ToGraphDayOfWeek(request.FirstOccurrenceStart.DayOfWeek) ?? Microsoft.Graph.Models.DayOfWeekObject.Monday);
                 }
 
-                string? joinUrl = null;
-
-                try
-                {
-                    var techAccountEmail = "app.teams.idatpe@idat.pe";
-                    var techUser = await appClient.Users[techAccountEmail].GetAsync(
-                        requestConfiguration => requestConfiguration.QueryParameters.Select = ["id"],
-                        cancellationToken: cancellationToken);
-
-                    if (!string.IsNullOrWhiteSpace(techUser?.Id))
-                    {
-                        var onlineMeetingRequest = new Microsoft.Graph.Models.OnlineMeeting
-                        {
-                            Subject = request.Subject,
-                            StartDateTime = startDate,
-                            EndDateTime = endDate
-                        };
-                        var createdMeeting = await appClient.Users[techUser.Id].OnlineMeetings.PostAsync(onlineMeetingRequest, cancellationToken: cancellationToken);
-                        joinUrl = createdMeeting?.JoinWebUrl;
-                        _logger.LogInformation("Successfully created OnlineMeeting under technical account {TechEmail}. JoinUrl: {JoinUrl}", techAccountEmail, joinUrl);
-                    }
-                }
-                catch (Exception meetingEx)
-                {
-                    _logger.LogWarning(meetingEx, "Could not create OnlineMeeting for technical account via App-Only client.");
-                }
-
-                var groupEventBody = request.HtmlContent;
-                if (!string.IsNullOrWhiteSpace(joinUrl))
-                {
-                    groupEventBody = $"<p><a href=\"{joinUrl}\" target=\"_blank\"><b>Unirse a la reunión de Microsoft Teams</b></a></p><br/>" + request.HtmlContent;
-                }
-
                 var newEvent = new Event
                 {
                     Subject = request.Subject,
                     Body = new ItemBody
                     {
                         ContentType = BodyType.Html,
-                        Content = groupEventBody
+                        Content = request.HtmlContent
                     },
                     Start = new DateTimeTimeZone
                     {
@@ -148,28 +120,33 @@ namespace APITeamsV3.Infrastructure.Services
                             StartDate = new Date(recurrenceStart.Year, recurrenceStart.Month, recurrenceStart.Day),
                             EndDate = new Date(recurrenceEnd.Year, recurrenceEnd.Month, recurrenceEnd.Day)
                         }
+                    },
+                    Attendees = requiredAttendees,
+                    IsOnlineMeeting = true,
+                    OnlineMeetingProvider = OnlineMeetingProviderType.TeamsForBusiness,
+                    Location = new Location
+                    {
+                        DisplayName = "Reunión de Microsoft Teams",
+                        LocationType = LocationType.Default
                     }
                 };
 
                 var createdEvent = await CreateGroupEventWithRetryAsync(
-                    appClient,
+                    graphClient,
                     request.TeamId,
                     newEvent,
                     request.PresenterEmails,
                     cancellationToken);
 
-                if (string.IsNullOrWhiteSpace(joinUrl))
-                {
-                    joinUrl = createdEvent?.OnlineMeeting?.JoinUrl
-                        ?? createdEvent?.OnlineMeetingUrl
-                        ?? createdEvent?.WebLink
-                        ?? string.Empty;
-                }
+                var joinUrl = createdEvent?.OnlineMeeting?.JoinUrl
+                    ?? createdEvent?.OnlineMeetingUrl
+                    ?? createdEvent?.WebLink
+                    ?? string.Empty;
 
                 if (!string.IsNullOrWhiteSpace(joinUrl))
                 {
                     await TryPromotePresentersAsync(
-                        appClient,
+                        graphClient,
                         joinUrl,
                         request.PresenterEmails,
                         cancellationToken);
@@ -181,12 +158,12 @@ namespace APITeamsV3.Infrastructure.Services
                             Body = new ItemBody
                             {
                                 ContentType = BodyType.Html,
-                                Content = $"<p>Se ha programado una nueva sesion de clase: <b>{request.Subject}</b></p><p><a href='{joinUrl}'>Unirse a la reunion de Microsoft Teams</a></p>"
+                                Content = $"<p>Se ha programado una nueva sesión de clase: <b>{request.Subject}</b></p><p><a href='{joinUrl}'>Unirse a la reunión de Microsoft Teams</a></p>"
                             }
                         };
 
                         await PostChannelMessageWithRetryAsync(
-                            appClient,
+                            graphClient,
                             request.TeamId,
                             request.ChannelId,
                             chatMessage,
@@ -508,6 +485,7 @@ namespace APITeamsV3.Infrastructure.Services
                         attendees.Add(new MeetingParticipantInfo
                         {
                             Role = OnlineMeetingRole.Coorganizer,
+                            Upn = user.UserPrincipalName ?? user.Mail ?? email,
                             Identity = new IdentitySet
                             {
                                 User = new Identity
@@ -519,9 +497,10 @@ namespace APITeamsV3.Infrastructure.Services
                         });
                         changed = true;
                     }
-                    else if (existing.Role != OnlineMeetingRole.Coorganizer)
+                    else if (existing.Role != OnlineMeetingRole.Coorganizer || string.IsNullOrWhiteSpace(existing.Upn))
                     {
                         existing.Role = OnlineMeetingRole.Coorganizer;
+                        existing.Upn = user.UserPrincipalName ?? user.Mail ?? email;
                         changed = true;
                     }
                 }
@@ -531,11 +510,13 @@ namespace APITeamsV3.Infrastructure.Services
                     var needsSettingsPatch = onlineMeeting.AllowedPresenters != OnlineMeetingPresenters.RoleIsPresenter ||
                                              onlineMeeting.AllowRecording != true;
 
+                    var organizerId = ExtractOidFromJoinUrl(joinUrl);
                     if (needsSettingsPatch)
                     {
                         await PatchOnlineMeetingWithFallbackAsync(
                             graphClient,
                             onlineMeeting.Id,
+                            organizerId,
                             new OnlineMeeting
                             {
                                 AllowedPresenters = OnlineMeetingPresenters.RoleIsPresenter,
@@ -556,11 +537,13 @@ namespace APITeamsV3.Infrastructure.Services
                     return;
                 }
 
+                var targetOrganizerId = ExtractOidFromJoinUrl(joinUrl);
                 try
                 {
                     await PatchOnlineMeetingWithFallbackAsync(
                         graphClient,
                         onlineMeeting.Id,
+                        targetOrganizerId,
                         new OnlineMeeting
                         {
                             AllowedPresenters = OnlineMeetingPresenters.RoleIsPresenter,
@@ -597,6 +580,7 @@ namespace APITeamsV3.Infrastructure.Services
                     await PatchOnlineMeetingWithFallbackAsync(
                         graphClient,
                         onlineMeeting.Id,
+                        targetOrganizerId,
                         new OnlineMeeting
                         {
                             AllowedPresenters = OnlineMeetingPresenters.RoleIsPresenter,
@@ -619,12 +603,61 @@ namespace APITeamsV3.Infrastructure.Services
             }
         }
 
+        private static string ExtractOidFromJoinUrl(string joinUrl)
+        {
+            try
+            {
+                var decoded = System.Uri.UnescapeDataString(joinUrl);
+                int oidKeyIdx = decoded.IndexOf("\"Oid\"", StringComparison.OrdinalIgnoreCase);
+                if (oidKeyIdx == -1) return "";
+
+                int colonIdx = decoded.IndexOf(":", oidKeyIdx);
+                if (colonIdx == -1) return "";
+
+                int startQuote = decoded.IndexOf("\"", colonIdx);
+                if (startQuote == -1) return "";
+
+                int endQuote = decoded.IndexOf("\"", startQuote + 1);
+                if (endQuote == -1) return "";
+
+                return decoded.Substring(startQuote + 1, endQuote - startQuote - 1);
+            }
+            catch
+            {
+                return "";
+            }
+        }
+
         private async Task<OnlineMeeting?> FindOnlineMeetingByJoinUrlAsync(
             GraphServiceClient graphClient,
             string joinUrl,
             CancellationToken cancellationToken)
         {
             var escapedJoinUrl = joinUrl.Replace("'", "''");
+            var organizerId = ExtractOidFromJoinUrl(joinUrl);
+
+            if (!string.IsNullOrWhiteSpace(organizerId))
+            {
+                try
+                {
+                    var meetingResponse = await graphClient.Users[organizerId].OnlineMeetings.GetAsync(
+                        requestConfiguration =>
+                        {
+                            requestConfiguration.QueryParameters.Filter = $"JoinWebUrl eq '{escapedJoinUrl}'";
+                        },
+                        cancellationToken);
+
+                    var meeting = meetingResponse?.Value?.FirstOrDefault();
+                    if (meeting?.Id != null)
+                    {
+                        return meeting;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to query meeting by JoinWebUrl via /users/{OrganizerId}/onlineMeetings.", organizerId);
+                }
+            }
 
             try
             {
@@ -667,9 +700,29 @@ namespace APITeamsV3.Infrastructure.Services
         private async Task PatchOnlineMeetingWithFallbackAsync(
             GraphServiceClient graphClient,
             string meetingId,
+            string? organizerId,
             OnlineMeeting patch,
             CancellationToken cancellationToken)
         {
+            if (!string.IsNullOrWhiteSpace(organizerId))
+            {
+                try
+                {
+                    await graphClient.Users[organizerId].OnlineMeetings[meetingId].PatchAsync(
+                        patch,
+                        cancellationToken: cancellationToken);
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Failed to patch meeting {MeetingId} via /users/{OrganizerId}/onlineMeetings. Trying fallbacks.",
+                        meetingId,
+                        organizerId);
+                }
+            }
+
             try
             {
                 await graphClient.Me.OnlineMeetings[meetingId].PatchAsync(
@@ -691,6 +744,11 @@ namespace APITeamsV3.Infrastructure.Services
 
         public async Task DeleteMeetingAsync(string teamId, string eventId)
         {
+            if (string.IsNullOrWhiteSpace(teamId) || string.IsNullOrWhiteSpace(eventId))
+            {
+                return;
+            }
+
             try
             {
                 var graphClient = await CreateAgendaGraphClientAsync();
@@ -699,8 +757,185 @@ namespace APITeamsV3.Infrastructure.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error deleting meeting {EventId} in team {TeamId}", eventId, teamId);
-                throw;
+                var msg = ex.ToString().ToLowerInvariant();
+                if (msg.Contains("itemnotfound") || msg.Contains("not found") || msg.Contains("404"))
+                {
+                    _logger.LogInformation("Meeting {EventId} was already removed from Team {TeamId}.", eventId, teamId);
+                    return;
+                }
+
+                _logger.LogWarning(ex, "Could not delete meeting {EventId} via delegated client. Retrying via App-Only client...", eventId, teamId);
+                try
+                {
+                    var appClient = await _graphFactory.CreateClientAsync();
+                    await appClient.Groups[teamId].Events[eventId].DeleteAsync();
+                    _logger.LogInformation("Deleted meeting {EventId} from Team {TeamId} via App-Only client.", eventId, teamId);
+                }
+                catch (Exception appEx)
+                {
+                    var appMsg = appEx.ToString().ToLowerInvariant();
+                    if (appMsg.Contains("itemnotfound") || appMsg.Contains("not found") || appMsg.Contains("404"))
+                    {
+                        _logger.LogInformation("Meeting {EventId} was already removed from Team {TeamId}.", eventId, teamId);
+                        return;
+                    }
+                    _logger.LogWarning(appEx, "App-Only client also failed to delete meeting {EventId} from Team {TeamId}.", eventId, teamId);
+                    throw;
+                }
+            }
+        }
+
+        public async Task AddCoorganizerAsync(string joinUrl, IReadOnlyCollection<string> teacherEmails, CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(joinUrl) || teacherEmails == null || teacherEmails.Count == 0)
+            {
+                return;
+            }
+
+            var graphClient = await CreateAgendaGraphClientAsync();
+            await TryPromotePresentersAsync(graphClient, joinUrl, teacherEmails, cancellationToken);
+        }
+
+        public async Task EnsureTeacherCoorganizerForSectionAsync(int idSeccion, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                var seccion = await _smartContext.Set<Seccion>()
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(s => s.IdSeccion == idSeccion, cancellationToken);
+
+                if (seccion == null) return;
+
+                var seccionHorarios = await _smartContext.Set<SeccionHorario>()
+                    .AsNoTracking()
+                    .Where(sh => sh.IdSeccion == idSeccion && !string.IsNullOrEmpty(sh.UrlClaseVirtual))
+                    .ToListAsync(cancellationToken);
+
+                if (seccionHorarios.Count == 0) return;
+
+                var teacherEmails = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                if (!string.IsNullOrWhiteSpace(seccion.EmailFacilitador))
+                {
+                    teacherEmails.Add(seccion.EmailFacilitador.Trim());
+                }
+
+                try
+                {
+                    var horariosEmails = await _smartContext.Database
+                        .SqlQueryRaw<string>("SELECT DISTINCT CorreoFacilitador FROM TeamsHorarios WITH (NOLOCK) WHERE IdCurso = {0} AND CorreoFacilitador IS NOT NULL AND CorreoFacilitador <> ''", idSeccion)
+                        .ToListAsync(cancellationToken);
+
+                    foreach (var email in horariosEmails)
+                    {
+                        if (!string.IsNullOrWhiteSpace(email))
+                        {
+                            teacherEmails.Add(email.Trim());
+                        }
+                    }
+                }
+                catch
+                {
+                    // Fallback to seccion.EmailFacilitador if TeamsHorarios query is unavailable
+                }
+
+                if (teacherEmails.Count == 0) return;
+
+                // 1. Sync Team Group Owners & Calendar Event Attendees if Team exists
+                var team = await _smartContext.Set<TeamEntity>()
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(t => t.IdSeccionSmart == idSeccion && t.EstadoTeam == "A", cancellationToken);
+
+                if (team != null && !string.IsNullOrWhiteSpace(team.IdTeamsGroup))
+                {
+                    try
+                    {
+                        var graphClient = await _graphFactory.CreateClientAsync();
+
+                        // Add teacher(s) as Team Group Owners
+                        foreach (var email in teacherEmails)
+                        {
+                            try
+                            {
+                                var user = await graphClient.Users[email].GetAsync(cancellationToken: cancellationToken);
+                                if (user?.Id != null)
+                                {
+                                    var ownerRef = new ReferenceCreate
+                                    {
+                                        OdataId = $"https://graph.microsoft.com/v1.0/users/{user.Id}"
+                                    };
+                                    await graphClient.Groups[team.IdTeamsGroup].Owners.Ref.PostAsync(ownerRef, cancellationToken: cancellationToken);
+                                }
+                            }
+                            catch
+                            {
+                                // User may already be an owner or member
+                            }
+                        }
+
+                        // Add teacher(s) as Required Attendees in Calendar Events
+                        foreach (var sh in seccionHorarios)
+                        {
+                            if (!string.IsNullOrWhiteSpace(sh.IdEvento))
+                            {
+                                try
+                                {
+                                    var currentEvent = await graphClient.Groups[team.IdTeamsGroup].Events[sh.IdEvento].GetAsync(cancellationToken: cancellationToken);
+                                    if (currentEvent != null)
+                                    {
+                                        var attendeesList = currentEvent.Attendees?.ToList() ?? new List<Attendee>();
+                                        bool attendeeAdded = false;
+
+                                        foreach (var email in teacherEmails)
+                                        {
+                                            if (!attendeesList.Any(a => string.Equals(a.EmailAddress?.Address, email, StringComparison.OrdinalIgnoreCase)))
+                                            {
+                                                attendeesList.Add(new Attendee
+                                                {
+                                                    EmailAddress = new EmailAddress { Address = email },
+                                                    Type = AttendeeType.Required
+                                                });
+                                                attendeeAdded = true;
+                                            }
+                                        }
+
+                                        if (attendeeAdded)
+                                        {
+                                            await graphClient.Groups[team.IdTeamsGroup].Events[sh.IdEvento].PatchAsync(new Event
+                                            {
+                                                Attendees = attendeesList
+                                            }, cancellationToken: cancellationToken);
+                                        }
+                                    }
+                                }
+                                catch
+                                {
+                                    // Ignore individual event patch failures
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to sync Group Owners or Calendar Event Attendees for section {SectionId}.", idSeccion);
+                    }
+                }
+
+                // 2. Promote Co-Organizers in OnlineMeeting
+                var joinUrls = seccionHorarios
+                    .Select(sh => sh.UrlClaseVirtual!)
+                    .Where(url => !string.IsNullOrWhiteSpace(url))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                foreach (var joinUrl in joinUrls)
+                {
+                    await AddCoorganizerAsync(joinUrl, teacherEmails.ToList(), cancellationToken);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error ensuring teacher co-organizer for section {SectionId}.", idSeccion);
             }
         }
 
@@ -814,6 +1049,7 @@ namespace APITeamsV3.Infrastructure.Services
             CancellationToken cancellationToken)
         {
             await EnsureGroupCalendarReadyAsync(graphClient, teamId, cancellationToken);
+            await EnsureTechnicalAccountIsGroupOwnerAsync(teamId, cancellationToken);
 
             Exception? lastException = null;
 
@@ -827,36 +1063,17 @@ namespace APITeamsV3.Infrastructure.Services
                 {
                     _logger.LogWarning(
                         ex,
-                        "Access denied for group calendar {TeamId}. Attempting App-Only fallback...",
+                        "Access denied for group calendar {TeamId}. Delegated permissions or group owner membership required for technical account.",
                         teamId);
+                    
                     try
                     {
-                        var appClient = await _graphFactory.CreateClientAsync();
-                        return await appClient.Groups[teamId].Events.PostAsync(newEvent, cancellationToken: cancellationToken);
+                        var delegatedClient = await _graphFactory.CreateDelegatedClientAsync();
+                        return await delegatedClient.Groups[teamId].Events.PostAsync(newEvent, cancellationToken: cancellationToken);
                     }
-                    catch (Exception appEx) when (IsAccessDeniedError(appEx))
+                    catch (Exception delEx)
                     {
-                        _logger.LogWarning(appEx, "App-Only group calendar creation also received Access Denied for Team {TeamId}.", teamId);
-
-                        var teacherEmail = presenterEmails?
-                            .Where(e => !string.IsNullOrWhiteSpace(e))
-                            .Select(e => e.Trim())
-                            .FirstOrDefault();
-
-                        if (!string.IsNullOrWhiteSpace(teacherEmail))
-                        {
-                            try
-                            {
-                                _logger.LogInformation("Attempting fallback to primary teacher user calendar ({TeacherEmail})...", teacherEmail);
-                                var appClient = await _graphFactory.CreateClientAsync();
-                                return await appClient.Users[teacherEmail].Events.PostAsync(newEvent, cancellationToken: cancellationToken);
-                            }
-                            catch (Exception teacherEx)
-                            {
-                                _logger.LogError(teacherEx, "Teacher calendar fallback also failed for {TeacherEmail}.", teacherEmail);
-                            }
-                        }
-
+                        _logger.LogError(delEx, "Delegated client failed to post event to group calendar {TeamId}.", teamId);
                         throw;
                     }
                 }
@@ -996,7 +1213,13 @@ namespace APITeamsV3.Infrastructure.Services
             try
             {
                 var appClient = await _graphFactory.CreateClientAsync();
-                var techAccountEmail = "app.teams.idatpe@idat.pe";
+                var techAccountEmail = await GetTechnicalAccountEmailAsync(cancellationToken);
+
+                if (string.IsNullOrWhiteSpace(techAccountEmail))
+                {
+                    _logger.LogWarning("No technical account email found in AplicativosTeams to ensure ownership for team {TeamId}.", teamId);
+                    return;
+                }
 
                 var techUser = await appClient.Users[techAccountEmail].GetAsync(
                     requestConfiguration => requestConfiguration.QueryParameters.Select = ["id"],
@@ -1211,5 +1434,41 @@ namespace APITeamsV3.Infrastructure.Services
                 System.DayOfWeek.Saturday => "saturday",
                 _ => "monday"
             };
+        private async Task<string?> GetTechnicalAccountEmailAsync(CancellationToken cancellationToken)
+        {
+            try
+            {
+                var tenant = _tenantProvider.GetCurrentTenant();
+                var graphTenantId = (tenant.GraphTenantId ?? string.Empty).Trim();
+
+                var appAccount = await _smartContext.AplicativosTeams
+                    .AsNoTracking()
+                    .Where(a => a.Activo == "A" && (string.IsNullOrEmpty(graphTenantId) || a.TenantId == graphTenantId))
+                    .OrderBy(a => a.IdAplicativo)
+                    .FirstOrDefaultAsync(cancellationToken);
+
+                if (appAccount != null && !string.IsNullOrWhiteSpace(appAccount.UsernameApp))
+                {
+                    return appAccount.UsernameApp.Trim();
+                }
+
+                var fallbackAccount = await _smartContext.AplicativosTeams
+                    .AsNoTracking()
+                    .Where(a => a.Activo == "A")
+                    .OrderBy(a => a.IdAplicativo)
+                    .FirstOrDefaultAsync(cancellationToken);
+
+                if (fallbackAccount != null && !string.IsNullOrWhiteSpace(fallbackAccount.UsernameApp))
+                {
+                    return fallbackAccount.UsernameApp.Trim();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to resolve technical account email from AplicativosTeams.");
+            }
+
+            return null;
+        }
     }
 }

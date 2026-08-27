@@ -445,10 +445,48 @@ namespace APITeamsV3.API.Controllers
                  Total = 100 // Mock total for now
              });
         }
+
+        [HttpPost("{idSeccion}/add-coorganizer")]
+        public async Task<IActionResult> AddCoorganizer(
+            int idSeccion,
+            [FromBody] AddCoorganizerRequest? request,
+            [FromServices] ITeamsAgendaService agendaService,
+            [FromServices] ISmartDbContext context,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                var seccion = await context.Set<Seccion>()
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(s => s.IdSeccion == idSeccion, cancellationToken);
+
+                if (seccion == null)
+                {
+                    return NotFound(new { message = $"Sección {idSeccion} no encontrada." });
+                }
+
+                await agendaService.EnsureTeacherCoorganizerForSectionAsync(idSeccion, cancellationToken);
+
+                return Ok(new
+                {
+                    success = true,
+                    message = $"Docente(s) de la sección {idSeccion} asignado(s) exitosamente como Co-Organizador en sus reuniones de Teams."
+                });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = $"Error al asignar docente como co-organizador: {ex.Message}" });
+            }
+        }
     }
 
     public class ProvisionTeamRequest
     {
         public string OwnerEmail { get; set; } = string.Empty;
+    }
+
+    public class AddCoorganizerRequest
+    {
+        public string? TeacherEmail { get; set; }
     }
 }

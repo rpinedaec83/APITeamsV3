@@ -71,20 +71,29 @@ namespace APITeamsV3.Infrastructure.Services
 
             var appAccount = await _smartContext.AplicativosTeams
                 .AsNoTracking()
-                .Where(a => a.Activo == "A" && a.TenantId == graphTenantId)
+                .Where(a => a.Activo == "A" && (string.IsNullOrEmpty(graphTenantId) || a.TenantId == graphTenantId))
                 .OrderBy(a => a.IdAplicativo)
                 .FirstOrDefaultAsync();
 
             if (appAccount == null)
             {
+                appAccount = await _smartContext.AplicativosTeams
+                    .AsNoTracking()
+                    .Where(a => a.Activo == "A")
+                    .OrderBy(a => a.IdAplicativo)
+                    .FirstOrDefaultAsync();
+            }
+
+            if (appAccount == null)
+            {
                 throw new System.InvalidOperationException(
-                    $"No existe cuenta tecnica activa en AplicativosTeams para tenant {graphTenantId}.");
+                    $"No existe cuenta tecnica activa en AplicativosTeams para tenant {tenant.CompanyKey}.");
             }
 
             var username = (appAccount.UsernameApp ?? string.Empty).Trim();
             var password = (appAccount.PasswordApp ?? string.Empty).Trim();
-            var clientId = (appAccount.AppClientId ?? string.Empty).Trim();
-            var tenantId = (appAccount.TenantId ?? graphTenantId).Trim();
+            var clientId = !string.IsNullOrWhiteSpace(tenant.GraphClientId) ? tenant.GraphClientId.Trim() : (appAccount.AppClientId ?? string.Empty).Trim();
+            var tenantId = !string.IsNullOrWhiteSpace(tenant.GraphTenantId) ? tenant.GraphTenantId.Trim() : (appAccount.TenantId ?? graphTenantId).Trim();
 
             if (string.IsNullOrWhiteSpace(username) ||
                 string.IsNullOrWhiteSpace(password) ||
@@ -92,7 +101,7 @@ namespace APITeamsV3.Infrastructure.Services
                 string.IsNullOrWhiteSpace(tenantId))
             {
                 throw new System.InvalidOperationException(
-                    "La cuenta tecnica activa no tiene UsernameApp/PasswordApp/AppClientId/TenantId completos para token delegado.");
+                    $"La cuenta tecnica activa ({username}) no tiene UsernameApp/PasswordApp/AppClientId/TenantId completos para el tenant {tenant.CompanyKey}.");
             }
 
 #pragma warning disable CS0618
