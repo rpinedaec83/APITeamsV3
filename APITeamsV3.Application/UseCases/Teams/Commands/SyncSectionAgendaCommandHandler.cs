@@ -242,10 +242,22 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                         .Distinct(StringComparer.OrdinalIgnoreCase)
                         .ToList();
 
+                    const int MaxAttendeesThreshold = 500;
                     var attendeeEmails = teacherEmails
                         .Concat(studentEmails)
                         .Distinct(StringComparer.OrdinalIgnoreCase)
                         .ToList();
+
+                    if (attendeeEmails.Count > MaxAttendeesThreshold)
+                    {
+                        _logger.LogWarning(
+                            "Section {SectionId} has {Count} total attendees (>{Threshold}). Restricting agenda meeting attendees to teachers/facilitators only to avoid Exchange timeout.",
+                            section.IdSeccion,
+                            attendeeEmails.Count,
+                            MaxAttendeesThreshold);
+
+                        attendeeEmails = teacherEmails.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                    }
 
                     var firstDate = blockSessions.Min(s => s.Fecha.Date);
                     var firstStart = ComposeDateTime(firstDate, scheduleBlock.Key.Inicio);
@@ -517,10 +529,22 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToList();
 
+                const int MaxAttendeesThreshold = 500;
                 var attendeeEmails = teacherEmails
                     .Concat(studentEmails)
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToList();
+
+                if (attendeeEmails.Count > MaxAttendeesThreshold)
+                {
+                    _logger.LogWarning(
+                        "Section {SectionId} has {Count} total attendees (>{Threshold}). Restricting agenda meeting attendees to teachers/facilitators only to avoid Exchange timeout.",
+                        section.IdSeccion,
+                        attendeeEmails.Count,
+                        MaxAttendeesThreshold);
+
+                    attendeeEmails = teacherEmails.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                }
 
                 createdBlocks.Add(await CreateMissingBlockAsync(
                     teamId,

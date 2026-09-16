@@ -1,6 +1,7 @@
 using APITeamsV3.Application.UseCases.Teams.Commands;
 using APITeamsV3.Application.UseCases.Teams.DTOs;
 using APITeamsV3.Application.Common.Interfaces;
+using APITeamsV3.Infrastructure.Services;
 using MediatR;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -23,17 +24,20 @@ namespace APITeamsV3.API.Controllers
         private readonly IMediator _mediator;
         private readonly ITenantProvider _tenantProvider;
         private readonly ICentralDbContext _centralDbContext;
+        private readonly TenantHangfireRuntime _tenantHangfireRuntime;
         private readonly ILogger<TeamsSyncController> _logger;
 
         public TeamsSyncController(
             IMediator mediator,
             ITenantProvider tenantProvider,
             ICentralDbContext centralDbContext,
+            TenantHangfireRuntime tenantHangfireRuntime,
             ILogger<TeamsSyncController> logger)
         {
             _mediator = mediator;
             _tenantProvider = tenantProvider;
             _centralDbContext = centralDbContext;
+            _tenantHangfireRuntime = tenantHangfireRuntime;
             _logger = logger;
         }
 
@@ -311,20 +315,170 @@ namespace APITeamsV3.API.Controllers
                     return Ok(new { IsAutomaticSyncRunning = false });
                 }
 
-                var isRunning = await TryGetAutomaticSyncStatusFromStoredProcedureAsync(normalizedCompanyKey, HttpContext.RequestAborted);
-                if (isRunning.HasValue)
-                {
-                    return Ok(new { IsAutomaticSyncRunning = isRunning.Value });
-                }
+                await CleanupStaleAutomaticSyncExecutionsAsync(normalizedCompanyKey, HttpContext.RequestAborted);
 
-                var fallback = await GetAutomaticSyncStatusWithEfAsync(normalizedCompanyKey, HttpContext.RequestAborted);
-                return Ok(new { IsAutomaticSyncRunning = fallback });
+                var isRunning = await GetAutomaticSyncStatusWithEfAsync(normalizedCompanyKey, HttpContext.RequestAborted);
+                return Ok(new { IsAutomaticSyncRunning = isRunning });
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Error al consultar el estado de sincronización automática.");
                 return Ok(new { IsAutomaticSyncRunning = false });
             }
+        }
+
+        [HttpPost("unlock-automatic-sync")]
+        public async Task<IActionResult> UnlockAutomaticSync()
+        {
+            try
+            {
+                var tenant = _tenantProvider.GetCurrentTenant();
+                var normalizedCompanyKey = (tenant.CompanyKey ?? string.Empty).Trim().ToLowerInvariant();
+
+                if (string.IsNullOrWhiteSpace(normalizedCompanyKey))
+                {
+                    return Ok(new { Success = true, Message = "Sin tenant asignado." });
+                }
+
+                var companyConfigId = await _centralDbContext.CompanyConfigs
+                    .AsNoTracking()
+                    .Where(c => c.IsActive && c.CompanyKey.ToLower() == normalizedCompanyKey)
+                    .Select(c => c.Id)
+                    .FirstOrDefaultAsync(HttpContext.RequestAborted);
+
+                if (companyConfigId != 0)
+                {
+                    var uncompletedExecutions = await _centralDbContext.SyncScheduleExecutions
+                        .Where(e => e.CompanyConfigId == companyConfigId
+                                    && e.CompletedAtUtc == null)
+                        .ToListAsync(HttpContext.RequestAborted);
+
+                    if (uncompletedExecutions.Any())
+                    {
+                        var nowUtc = DateTime.UtcNow;
+                        foreach (var exec in uncompletedExecutions)
+                        {
+                            exec.CompletedAtUtc = nowUtc;
+                            exec.Status = "Unlocked";
+                            exec.ErrorMessage = "Desbloqueado manualmente por usuario.";
+                        }
+                        await _centralDbContext.SaveChangesAsync(HttpContext.RequestAborted);
+                    }
+                }
+
+                return Ok(new { Success = true, Message = "Sincronización automática desbloqueada exitosamente." });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al desbloquear la sincronización automática.");
+                return BadRequest(new { Success = false, Message = ex.Message });
+            }
+        }
+
+        private async Task CleanupStaleAutomaticSyncExecutionsAsync(string normalizedCompanyKey, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var companyConfigId = await _centralDbContext.CompanyConfigs
+                    .AsNoTracking()
+                    .Where(c => c.IsActive && c.CompanyKey.ToLower() == normalizedCompanyKey)
+                    .Select(c => c.Id)
+                    .FirstOrDefaultAsync(cancellationToken);
+
+                if (companyConfigId == 0) return;
+
+                var uncompletedExecutions = await _centralDbContext.SyncScheduleExecutions
+                    .Where(e => e.CompanyConfigId == companyConfigId
+                                && e.TriggerSource.ToLower() == "schedulerservice"
+                                && e.CompletedAtUtc == null)
+                    .ToListAsync(cancellationToken);
+
+                if (!uncompletedExecutions.Any()) return;
+
+                Hangfire.JobStorage? storage = null;
+                try
+                {
+                    storage = await _tenantHangfireRuntime.GetStorageAsync(normalizedCompanyKey, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "No se pudo obtener el storage de Hangfire para el tenant '{CompanyKey}'.", normalizedCompanyKey);
+                }
+
+                var nowUtc = DateTime.UtcNow;
+                var cutoffOldUtc = nowUtc.AddMinutes(-30);
+                var cutoffNoJobsUtc = nowUtc.AddMinutes(-2);
+                bool updatedAny = false;
+
+                foreach (var exec in uncompletedExecutions)
+                {
+                    if (exec.TriggeredAtUtc < cutoffOldUtc)
+                    {
+                        exec.CompletedAtUtc = nowUtc;
+                        exec.Status = "TimedOut";
+                        exec.ErrorMessage = "Ejecución marcada como expirada por inactividad (>30 min).";
+                        updatedAny = true;
+                        continue;
+                    }
+
+                    if (storage != null && !string.IsNullOrWhiteSpace(exec.JobIds))
+                    {
+                        var monitoring = storage.GetMonitoringApi();
+                        var jobIds = exec.JobIds.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                        bool isAnyJobPending = false;
+
+                        foreach (var jobId in jobIds)
+                        {
+                            var details = monitoring.JobDetails(jobId);
+                            if (details != null)
+                            {
+                                var lastState = details.History?.OrderByDescending(h => h.CreatedAt).FirstOrDefault()?.StateName;
+                                if (IsPendingState(lastState))
+                                {
+                                    isAnyJobPending = true;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (!isAnyJobPending)
+                        {
+                            exec.CompletedAtUtc = nowUtc;
+                            if (string.Equals(exec.Status, "Started", StringComparison.OrdinalIgnoreCase) ||
+                                string.Equals(exec.Status, "Processing", StringComparison.OrdinalIgnoreCase) ||
+                                string.Equals(exec.Status, "Running", StringComparison.OrdinalIgnoreCase))
+                            {
+                                exec.Status = "Succeeded";
+                            }
+                            updatedAny = true;
+                        }
+                    }
+                    else if (exec.TriggeredAtUtc < cutoffNoJobsUtc)
+                    {
+                        exec.CompletedAtUtc = nowUtc;
+                        exec.Status = "Completed";
+                        updatedAny = true;
+                    }
+                }
+
+                if (updatedAny)
+                {
+                    await _centralDbContext.SaveChangesAsync(cancellationToken);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error al limpiar ejecuciones expiradas de sincronización automática.");
+            }
+        }
+
+        private static bool IsPendingState(string? state)
+        {
+            if (string.IsNullOrWhiteSpace(state)) return false;
+            return string.Equals(state, "Enqueued", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(state, "Processing", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(state, "Scheduled", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(state, "Awaiting", StringComparison.OrdinalIgnoreCase);
         }
 
         private string GetManualExecutorName()
@@ -425,12 +579,15 @@ namespace APITeamsV3.API.Controllers
                 return false;
             }
 
+            var cutoffUtc = DateTime.UtcNow.AddMinutes(-30);
+
             return await _centralDbContext.SyncScheduleExecutions
                 .AsNoTracking()
                 .AnyAsync(
                     e => e.CompanyConfigId == companyConfigId
                          && e.TriggerSource.ToLower() == "schedulerservice"
                          && e.CompletedAtUtc == null
+                         && e.TriggeredAtUtc >= cutoffUtc
                          && (
                              e.Status.ToLower() == "started"
                              || e.Status.ToLower() == "processing"

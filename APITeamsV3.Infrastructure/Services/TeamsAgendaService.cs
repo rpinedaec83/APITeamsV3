@@ -63,16 +63,33 @@ namespace APITeamsV3.Infrastructure.Services
                     ? recurrenceStart
                     : request.RecurrenceEndDate.Date;
 
-                var requiredAttendees = request.RequiredAttendeeEmails?
+                const int MaxAttendeesThreshold = 500;
+                var attendeeEmailsList = request.RequiredAttendeeEmails?
                     .Where(email => !string.IsNullOrWhiteSpace(email))
                     .Select(email => email.Trim())
                     .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList() ?? new List<string>();
+
+                if (attendeeEmailsList.Count > MaxAttendeesThreshold)
+                {
+                    _logger.LogWarning(
+                        "RequiredAttendeeEmails count ({Count}) exceeds threshold of {Threshold} for Team {TeamId}. Restricting attendees to presenters/teachers only to avoid Exchange timeout.",
+                        attendeeEmailsList.Count,
+                        MaxAttendeesThreshold,
+                        request.TeamId);
+
+                    var presenterSet = new HashSet<string>(request.PresenterEmails ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+                    var filtered = attendeeEmailsList.Where(e => presenterSet.Contains(e)).ToList();
+                    attendeeEmailsList = filtered.Count > 0 ? filtered : (request.PresenterEmails?.ToList() ?? new List<string>());
+                }
+
+                var requiredAttendees = attendeeEmailsList
                     .Select(email => new Attendee
                     {
                         EmailAddress = new EmailAddress { Address = email },
                         Type = AttendeeType.Required
                     })
-                    .ToList() ?? new List<Attendee>();
+                    .ToList();
 
                 var timeZoneId = ResolveTimeZoneId();
                 var graphClient = await CreateAgendaGraphClientAsync();
@@ -210,11 +227,25 @@ namespace APITeamsV3.Infrastructure.Services
 
                 var graphClient = await CreateAgendaGraphClientAsync();
                 var timeZoneId = ResolveTimeZoneId();
+                const int MaxAttendeesThreshold = 500;
                 var requestedEmails = (request.RequiredAttendeeEmails ?? Array.Empty<string>())
                     .Where(email => !string.IsNullOrWhiteSpace(email))
                     .Select(email => email.Trim())
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToList();
+
+                if (requestedEmails.Count > MaxAttendeesThreshold)
+                {
+                    _logger.LogWarning(
+                        "RequiredAttendeeEmails count ({Count}) exceeds threshold of {Threshold} for Event {EventId}. Restricting attendees to presenters/teachers only to avoid Exchange timeout.",
+                        requestedEmails.Count,
+                        MaxAttendeesThreshold,
+                        request.EventId);
+
+                    var presenterSet = new HashSet<string>(request.PresenterEmails ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+                    var filtered = requestedEmails.Where(e => presenterSet.Contains(e)).ToList();
+                    requestedEmails = filtered.Count > 0 ? filtered : (request.PresenterEmails?.ToList() ?? new List<string>());
+                }
 
                 var attendees = requestedEmails
                     .Select(email => new Attendee
@@ -1063,13 +1094,19 @@ namespace APITeamsV3.Infrastructure.Services
                 {
                     _logger.LogWarning(
                         ex,
-                        "Access denied for group calendar {TeamId}. Delegated permissions or group owner membership required for technical account.",
-                        teamId);
+                        "Access denied for group calendar {TeamId}. Retrying with delegated client for technical account (Attempt {Attempt}/{MaxAttempts})...",
+                        teamId,
+                        attempt,
+                        CreateGroupEventMaxAttempts);
                     
                     try
                     {
                         var delegatedClient = await _graphFactory.CreateDelegatedClientAsync();
                         return await delegatedClient.Groups[teamId].Events.PostAsync(newEvent, cancellationToken: cancellationToken);
+                    }
+                    catch (Exception delEx) when (IsTransientGroupProvisioningError(delEx))
+                    {
+                        lastException = delEx;
                     }
                     catch (Exception delEx)
                     {
@@ -1080,7 +1117,10 @@ namespace APITeamsV3.Infrastructure.Services
                 catch (Exception ex) when (IsTransientGroupProvisioningError(ex))
                 {
                     lastException = ex;
+                }
 
+                if (lastException != null)
+                {
                     if (attempt == CreateGroupEventMaxAttempts)
                     {
                         break;
@@ -1088,8 +1128,8 @@ namespace APITeamsV3.Infrastructure.Services
 
                     var delay = GetRetryDelay(attempt);
                     _logger.LogWarning(
-                        ex,
-                        "Group calendar is not ready for Team/Group {TeamId}. Attempt {Attempt}/{MaxAttempts}. Retrying in {Delay}s.",
+                        lastException,
+                        "Group calendar is not ready yet for Team/Group {TeamId}. Attempt {Attempt}/{MaxAttempts}. Retrying in {Delay}s.",
                         teamId,
                         attempt,
                         CreateGroupEventMaxAttempts,
@@ -1283,22 +1323,29 @@ namespace APITeamsV3.Infrastructure.Services
         private static bool IsTransientGroupProvisioningError(Exception ex)
         {
             var message = (ex.Message ?? string.Empty).ToLowerInvariant();
+            var fullText = (ex.ToString() ?? string.Empty).ToLowerInvariant();
+
             var textMatch =
                 (message.Contains("requested group") && message.Contains("invalid")) ||
-                (message.Contains("resource") && message.Contains("not found")) ||
                 (message.Contains("group") && message.Contains("invalid")) ||
+                (message.Contains("resource") && message.Contains("not found")) ||
                 message.Contains("failed to execute msgraph backend request") ||
                 message.Contains("does not exist") ||
                 message.Contains("mailbox") ||
-                message.Contains("not ready");
+                message.Contains("not ready") ||
+                (fullText.Contains("requested group") && fullText.Contains("invalid"));
+
+            if (textMatch)
+            {
+                return true;
+            }
 
             if (ex is ApiException apiException)
             {
-                return apiException.ResponseStatusCode is 400 or 404 or 409 or 429 or 503
-                    && textMatch;
+                return apiException.ResponseStatusCode is 400 or 404 or 409 or 429 or 503;
             }
 
-            return textMatch;
+            return false;
         }
 
         private static bool IsTransientChannelProvisioningError(Exception ex)

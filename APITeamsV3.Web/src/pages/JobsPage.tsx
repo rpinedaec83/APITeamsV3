@@ -1,5 +1,5 @@
 import type { SelectTabData, TabValue } from '@fluentui/react-components';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
     makeStyles,
     shorthands,
@@ -407,6 +407,19 @@ const JobsPage: React.FC = () => {
     const [tenantTimeZone, setTenantTimeZone] = useState('America/Lima');
     const [stats, setStats] = useState<HangfireStats | null>(null);
     const [loadingStats, setLoadingStats] = useState(false);
+    const [historyFilter, setHistoryFilter] = useState<'all' | 'succeeded' | 'failed' | 'processing' | 'enqueued'>('all');
+
+    const filteredHistory = useMemo(() => {
+        if (historyFilter === 'all') return history;
+        return history.filter(entry => {
+            const norm = (entry.state || '').toLowerCase();
+            if (historyFilter === 'succeeded') return norm.includes('succeed');
+            if (historyFilter === 'failed') return norm.includes('fail');
+            if (historyFilter === 'processing') return norm.includes('process');
+            if (historyFilter === 'enqueued') return norm.includes('enqueu') || norm.includes('schedul') || norm.includes('await');
+            return true;
+        });
+    }, [history, historyFilter]);
 
     const loadRecentJobs = async (silent = false) => {
         if (!silent) setLoadingHistory(true);
@@ -760,7 +773,16 @@ const JobsPage: React.FC = () => {
             </div>
 
             <div className={styles.summaryGrid}>
-                <div className={styles.summaryCard} style={{ borderLeftColor: tokens.colorPaletteGreenBorderActive }}>
+                <div 
+                    className={styles.summaryCard} 
+                    style={{ 
+                        borderLeftColor: tokens.colorPaletteGreenBorderActive, 
+                        cursor: 'pointer',
+                        boxShadow: historyFilter === 'succeeded' ? `0 0 0 2px ${tokens.colorPaletteGreenBorderActive}` : undefined,
+                        backgroundColor: historyFilter === 'succeeded' ? `${tokens.colorPaletteGreenBorderActive}11` : undefined
+                    }}
+                    onClick={() => setHistoryFilter(prev => prev === 'succeeded' ? 'all' : 'succeeded')}
+                >
                     <div className={styles.jobCardIcon} style={{ backgroundColor: `${tokens.colorPaletteGreenBorderActive}22`, color: tokens.colorPaletteGreenBorderActive }}>
                         <CheckmarkCircleRegular />
                     </div>
@@ -772,7 +794,16 @@ const JobsPage: React.FC = () => {
                     </div>
                 </div>
 
-                <div className={styles.summaryCard} style={{ borderLeftColor: tokens.colorPaletteRedBorderActive }}>
+                <div 
+                    className={styles.summaryCard} 
+                    style={{ 
+                        borderLeftColor: tokens.colorPaletteRedBorderActive, 
+                        cursor: 'pointer',
+                        boxShadow: historyFilter === 'failed' ? `0 0 0 2px ${tokens.colorPaletteRedBorderActive}` : undefined,
+                        backgroundColor: historyFilter === 'failed' ? `${tokens.colorPaletteRedBorderActive}11` : undefined
+                    }}
+                    onClick={() => setHistoryFilter(prev => prev === 'failed' ? 'all' : 'failed')}
+                >
                     <div className={styles.jobCardIcon} style={{ backgroundColor: `${tokens.colorPaletteRedBorderActive}22`, color: tokens.colorPaletteRedBorderActive }}>
                         <DismissCircleRegular />
                     </div>
@@ -784,7 +815,16 @@ const JobsPage: React.FC = () => {
                     </div>
                 </div>
 
-                <div className={styles.summaryCard} style={{ borderLeftColor: tokens.colorBrandStroke1 }}>
+                <div 
+                    className={styles.summaryCard} 
+                    style={{ 
+                        borderLeftColor: tokens.colorBrandStroke1, 
+                        cursor: 'pointer',
+                        boxShadow: historyFilter === 'processing' ? `0 0 0 2px ${tokens.colorBrandStroke1}` : undefined,
+                        backgroundColor: historyFilter === 'processing' ? `${tokens.colorBrandStroke1}11` : undefined
+                    }}
+                    onClick={() => setHistoryFilter(prev => prev === 'processing' ? 'all' : 'processing')}
+                >
                     <div className={styles.jobCardIcon} style={{ backgroundColor: `${tokens.colorBrandStroke1}22`, color: tokens.colorBrandStroke1 }}>
                         <Spinner size="tiny" />
                     </div>
@@ -796,7 +836,16 @@ const JobsPage: React.FC = () => {
                     </div>
                 </div>
 
-                <div className={styles.summaryCard} style={{ borderLeftColor: tokens.colorPaletteMarigoldBorderActive }}>
+                <div 
+                    className={styles.summaryCard} 
+                    style={{ 
+                        borderLeftColor: tokens.colorPaletteMarigoldBorderActive, 
+                        cursor: 'pointer',
+                        boxShadow: historyFilter === 'enqueued' ? `0 0 0 2px ${tokens.colorPaletteMarigoldBorderActive}` : undefined,
+                        backgroundColor: historyFilter === 'enqueued' ? `${tokens.colorPaletteMarigoldBorderActive}11` : undefined
+                    }}
+                    onClick={() => setHistoryFilter(prev => prev === 'enqueued' ? 'all' : 'enqueued')}
+                >
                     <div className={styles.jobCardIcon} style={{ backgroundColor: `${tokens.colorPaletteMarigoldBorderActive}22`, color: tokens.colorPaletteMarigoldBorderActive }}>
                         <ClockRegular />
                     </div>
@@ -1039,19 +1088,69 @@ const JobsPage: React.FC = () => {
             </div>
 
             <div className={styles.historyContainer}>
-                <div className={styles.sectionHeader}>
-                    <Title3>Historial de Ejecucion (Hangfire)</Title3>
-                    <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
-                        Refresco automatico cada 3 min
-                    </Text>
+                <div className={styles.sectionHeader} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+                    <div>
+                        <Title3>Historial de Ejecucion (Hangfire)</Title3>
+                        <Text size={200} style={{ color: tokens.colorNeutralForeground3, display: 'block', marginTop: '2px' }}>
+                            Refresco automatico cada 3 min
+                        </Text>
+                    </div>
+                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
+                        <Button
+                            size="small"
+                            appearance={historyFilter === 'all' ? 'primary' : 'outline'}
+                            onClick={() => setHistoryFilter('all')}
+                        >
+                            Todos ({history.length})
+                        </Button>
+                        <Button
+                            size="small"
+                            appearance={historyFilter === 'succeeded' ? 'primary' : 'outline'}
+                            icon={<CheckmarkCircleRegular style={{ color: historyFilter === 'succeeded' ? undefined : tokens.colorPaletteGreenForeground1 }} />}
+                            onClick={() => setHistoryFilter('succeeded')}
+                        >
+                            Completados ({stats?.succeeded ?? history.filter(e => (e.state || '').toLowerCase().includes('succeed')).length})
+                        </Button>
+                        <Button
+                            size="small"
+                            appearance={historyFilter === 'failed' ? 'primary' : 'outline'}
+                            icon={<ErrorCircleRegular style={{ color: historyFilter === 'failed' ? undefined : tokens.colorPaletteRedForeground1 }} />}
+                            onClick={() => setHistoryFilter('failed')}
+                        >
+                            Fallidos ({stats?.failed ?? history.filter(e => (e.state || '').toLowerCase().includes('fail')).length})
+                        </Button>
+                        <Button
+                            size="small"
+                            appearance={historyFilter === 'processing' ? 'primary' : 'outline'}
+                            icon={<Spinner size="tiny" />}
+                            onClick={() => setHistoryFilter('processing')}
+                        >
+                            En Proceso ({stats?.processing ?? history.filter(e => (e.state || '').toLowerCase().includes('process')).length})
+                        </Button>
+                        <Button
+                            size="small"
+                            appearance={historyFilter === 'enqueued' ? 'primary' : 'outline'}
+                            icon={<ClockRegular style={{ color: historyFilter === 'enqueued' ? undefined : tokens.colorPaletteMarigoldForeground1 }} />}
+                            onClick={() => setHistoryFilter('enqueued')}
+                        >
+                            En Cola ({(stats ? (stats.enqueued + stats.scheduled) : history.filter(e => {
+                                const norm = (e.state || '').toLowerCase();
+                                return norm.includes('enqueu') || norm.includes('schedul') || norm.includes('await');
+                            }).length)})
+                        </Button>
+                    </div>
                 </div>
                 <Divider />
 
-                {history.length === 0 ? (
+                {filteredHistory.length === 0 ? (
                     <div className={styles.emptyState}>
                         <ClockRegular style={{ fontSize: '48px', marginBottom: '12px', opacity: 0.4 }} />
-                        <div style={{ fontWeight: 600, marginBottom: '4px' }}>Sin ejecuciones visibles</div>
-                        <div style={{ fontSize: '13px' }}>No hay jobs recientes para este tenant.</div>
+                        <div style={{ fontWeight: 600, marginBottom: '4px' }}>Sin ejecuciones para este filtro</div>
+                        <div style={{ fontSize: '13px' }}>
+                            {history.length === 0 
+                                ? 'No hay jobs recientes para este tenant.' 
+                                : `No hay jobs con el estado "${historyFilter}".`}
+                        </div>
                     </div>
                 ) : (
                     <Table>
@@ -1068,7 +1167,7 @@ const JobsPage: React.FC = () => {
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            {history.map((entry) => (
+                            {filteredHistory.map((entry) => (
                                 <TableRow key={entry.jobId}>
                                     <TableCell>{getStateIcon(entry.state)}</TableCell>
                                     <TableCell style={{ fontWeight: 600 }}>

@@ -33,6 +33,8 @@ import {
     AddRegular,
     SaveRegular,
     CalendarRegular,
+    CalendarClockRegular,
+    ClockRegular,
     ArrowUploadRegular,
     GridDotsRegular,
     ArrowSyncRegular,
@@ -54,6 +56,20 @@ interface Member {
     status: string;
 }
 
+interface SectionSession {
+    numero: number;
+    fecha: string;
+    dia: string;
+    inicio: string;
+    fin: string;
+    horario: string;
+    facilitador?: string;
+    correoFacilitador?: string;
+    estado: string;
+    joinUrl?: string;
+    idEvento?: string;
+}
+
 interface SectionData {
     idSeccion: number;
     sede: string;
@@ -71,6 +87,8 @@ interface SectionData {
     unidadNegocio: string;
     fechaInicio?: string | null;
     fechaFin?: string | null;
+    frecuencia?: string | null;
+    horarios?: SectionSession[];
     linkGrabacion?: string | null;
     linkSharePoint?: string | null;
     sharePointTotalBytes?: number | null;
@@ -329,7 +347,7 @@ const OperationsPage: React.FC = () => {
     const [selectedTab, setSelectedTab] = useState<TabValue>('seccion');
 
     // State for Section Sub-tabs and Attendance
-    const [seccionSubTab, setSeccionSubTab] = useState<'alumnos' | 'asistencia'>('alumnos');
+    const [seccionSubTab, setSeccionSubTab] = useState<'alumnos' | 'horario' | 'asistencia'>('alumnos');
     const [attendanceData, setAttendanceData] = useState<any>(null);
     const [loadingAttendance, setLoadingAttendance] = useState(false);
     const [selectedReportId, setSelectedReportId] = useState<string>('');
@@ -396,6 +414,51 @@ const OperationsPage: React.FC = () => {
             direction: prev.key === key && prev.direction === 'ascending' ? 'descending' : 'ascending'
         }));
     };
+
+    // Schedule Grid State
+    const [scheduleSearch, setScheduleSearch] = useState('');
+    const [scheduleSortConfig, setScheduleSortConfig] = useState<{ key: string; direction: 'ascending' | 'descending' }>({
+        key: 'numero',
+        direction: 'ascending'
+    });
+
+    const handleScheduleSort = (key: string) => {
+        setScheduleSortConfig(prev => ({
+            key,
+            direction: prev.key === key && prev.direction === 'ascending' ? 'descending' : 'ascending'
+        }));
+    };
+
+    const processedHorarios = useMemo(() => {
+        let items = [...(seccionData?.horarios || [])];
+
+        if (scheduleSearch) {
+            const term = scheduleSearch.toLowerCase();
+            items = items.filter(h =>
+                h.numero.toString().includes(term) ||
+                (h.fecha || '').toLowerCase().includes(term) ||
+                (h.dia || '').toLowerCase().includes(term) ||
+                (h.horario || '').toLowerCase().includes(term) ||
+                (h.facilitador || '').toLowerCase().includes(term) ||
+                (h.correoFacilitador || '').toLowerCase().includes(term) ||
+                (h.estado || '').toLowerCase().includes(term)
+            );
+        }
+
+        if (scheduleSortConfig.key) {
+            items.sort((a: any, b: any) => {
+                const valA = a[scheduleSortConfig.key] ?? '';
+                const valB = b[scheduleSortConfig.key] ?? '';
+                if (typeof valA === 'number' && typeof valB === 'number') {
+                    return scheduleSortConfig.direction === 'ascending' ? valA - valB : valB - valA;
+                }
+                const cmp = valA.toString().localeCompare(valB.toString());
+                return scheduleSortConfig.direction === 'ascending' ? cmp : -cmp;
+            });
+        }
+
+        return items;
+    }, [seccionData?.horarios, scheduleSearch, scheduleSortConfig]);
 
     const teamActionProgressMessage = useMemo(() => {
         switch (teamActionInProgress) {
@@ -547,7 +610,22 @@ const OperationsPage: React.FC = () => {
             );
 
             if (isRunning) {
-                await showWarning('Se está ejecutando la sincronización automática');
+                const result = await showConfirm(
+                    'Se indica que se está ejecutando la sincronización automática. Si no hay procesos ejecutándose, ¿desea forzar el desbloqueo para continuar?',
+                    'Sincronización Automática Detectada'
+                );
+
+                if (result.isConfirmed) {
+                    try {
+                        await apiClient.post('/sync/unlock-automatic-sync');
+                        showSuccess('Sincronización automática desbloqueada exitosamente.');
+                        return true;
+                    } catch (err: unknown) {
+                        const message = err instanceof Error ? err.message : 'Error al desbloquear';
+                        showError(`No se pudo desbloquear: ${message}`);
+                        return false;
+                    }
+                }
                 return false;
             }
         } catch {
@@ -872,6 +950,7 @@ const OperationsPage: React.FC = () => {
                 ['Curso', seccionData.curso],
                 ['Programa', seccionData.programa],
                 ['Semestre', seccionData.semestre],
+                ['Horario de clases', seccionData.frecuencia || 'N/A'],
                 ['Inicio del curso', formatDisplayDate(seccionData.fechaInicio) || 'N/A'],
                 ['Fin del curso', formatDisplayDate(seccionData.fechaFin) || 'N/A'],
                 ['Facilitador Académico', seccionData.profesor || 'N/A'],
@@ -896,6 +975,25 @@ const OperationsPage: React.FC = () => {
             ws['!cols'] = [{ wch: 5 }, { wch: 15 }, { wch: 45 }, { wch: 15 }];
 
             XLSX.utils.book_append_sheet(wb, ws, 'Reporte');
+
+            if (seccionData.horarios && seccionData.horarios.length > 0) {
+                const scheduleRows = seccionData.horarios.map(h => [
+                    h.numero,
+                    formatDisplayDate(h.fecha),
+                    h.dia,
+                    h.horario,
+                    h.facilitador || seccionData.profesor || '',
+                    h.correoFacilitador || '',
+                    h.estado,
+                    h.joinUrl || seccionData.linkGrabacion || ''
+                ]);
+                const scheduleWs = XLSX.utils.aoa_to_sheet([
+                    ['#', 'Fecha', 'Día', 'Horario', 'Facilitador', 'Correo', 'Estado', 'Enlace Teams'],
+                    ...scheduleRows
+                ]);
+                scheduleWs['!cols'] = [{ wch: 5 }, { wch: 14 }, { wch: 12 }, { wch: 16 }, { wch: 35 }, { wch: 30 }, { wch: 14 }, { wch: 40 }];
+                XLSX.utils.book_append_sheet(wb, scheduleWs, 'Horario de Clases');
+            }
             XLSX.writeFile(wb, `Reporte_Seccion_${seccionCodigo || 'Export'}.xlsx`);
         } else if (selectedTab === 'alumno' && alumnoData) {
             const wb = XLSX.utils.book_new();
@@ -1085,6 +1183,7 @@ const OperationsPage: React.FC = () => {
                                 <DetailItem label="Promoción código" value={seccionData.promocionCodigo || 'N/A'} />
                                 <DetailItem label="Promoción nombre" value={seccionData.promocionNombre || 'N/A'} />
                                 <DetailItem label="Semestre" value={seccionData.semestre} />
+                                <DetailItem label="Horario de clases" value={seccionData.frecuencia || 'No registrado'} />
                                 <DetailItem label="Inicio del Curso" value={formatDisplayDate(seccionData.fechaInicio)} />
                                 <DetailItem label="Fin del Curso" value={formatDisplayDate(seccionData.fechaFin)} />
                                 <DetailItem label="Facilitador Académico" value={seccionData.profesor || 'N/A'} />
@@ -1305,7 +1404,7 @@ const OperationsPage: React.FC = () => {
                         <TabList
                             selectedValue={seccionSubTab}
                             onTabSelect={(_e, d) => {
-                                const val = d.value as 'alumnos' | 'asistencia';
+                                const val = d.value as 'alumnos' | 'horario' | 'asistencia';
                                 setSeccionSubTab(val);
                                 if (val === 'asistencia' && !attendanceData) {
                                     fetchAttendance();
@@ -1313,13 +1412,179 @@ const OperationsPage: React.FC = () => {
                             }}
                             appearance="subtle"
                         >
-                            <Tab value="alumnos">Listado de Alumnos</Tab>
+                            <Tab value="alumnos">Listado de Alumnos ({seccionData.members?.length || 0})</Tab>
+                            <Tab value="horario">Horario de Clases ({seccionData.horarios?.length || 0})</Tab>
                             <Tab value="asistencia">Asistencia de Reunión</Tab>
                         </TabList>
                     )}
                 </div>
                 <div className={styles.tableContainer}>
-                    {selectedTab === 'seccion' && seccionSubTab === 'asistencia' ? (
+                    {selectedTab === 'seccion' && seccionSubTab === 'horario' ? (
+                        <div>
+                            <div style={{ padding: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: tokens.colorNeutralBackground3, borderBottom: `1px solid ${tokens.colorNeutralStroke1}`, flexWrap: 'wrap', gap: '12px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                                    <div style={{ fontWeight: 600, color: tokens.colorNeutralForeground1 }}>
+                                        Sesiones Programadas ({processedHorarios.length})
+                                    </div>
+                                    {seccionData?.frecuencia && (
+                                        <Badge appearance="tint" color="brand" icon={<CalendarClockRegular />}>
+                                            {seccionData.frecuencia}
+                                        </Badge>
+                                    )}
+                                </div>
+                                <Input
+                                    placeholder="Filtrar por día, fecha, horario o docente..."
+                                    size="small"
+                                    contentBefore={<SearchRegular />}
+                                    value={scheduleSearch}
+                                    onChange={(_e, d) => setScheduleSearch(d.value)}
+                                    style={{ minWidth: '300px' }}
+                                />
+                            </div>
+
+                            {processedHorarios.length === 0 ? (
+                                <div style={{ padding: '40px', textAlign: 'center', color: tokens.colorNeutralForeground2 }}>
+                                    <CalendarClockRegular fontSize={48} style={{ marginBottom: '12px', opacity: 0.5 }} />
+                                    <div style={{ fontWeight: 600 }}>No se encontraron sesiones programadas para esta sección.</div>
+                                    {seccionData?.frecuencia && (
+                                        <div style={{ fontSize: '12px', marginTop: '6px', color: tokens.colorBrandForeground1 }}>
+                                            Frecuencia registrada: <b>{seccionData.frecuencia}</b>
+                                        </div>
+                                    )}
+                                </div>
+                            ) : (
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow>
+                                            <TableHeaderCell style={{ width: '50px', cursor: 'pointer' }} onClick={() => handleScheduleSort('numero')}>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                    #
+                                                    {scheduleSortConfig.key === 'numero' && (
+                                                        scheduleSortConfig.direction === 'ascending' ? <TriangleUpRegular /> : <TriangleDownRegular />
+                                                    )}
+                                                </div>
+                                            </TableHeaderCell>
+                                            <TableHeaderCell style={{ width: '130px', cursor: 'pointer' }} onClick={() => handleScheduleSort('fecha')}>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                    Fecha
+                                                    {scheduleSortConfig.key === 'fecha' && (
+                                                        scheduleSortConfig.direction === 'ascending' ? <TriangleUpRegular /> : <TriangleDownRegular />
+                                                    )}
+                                                </div>
+                                            </TableHeaderCell>
+                                            <TableHeaderCell style={{ width: '120px', cursor: 'pointer' }} onClick={() => handleScheduleSort('dia')}>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                    Día
+                                                    {scheduleSortConfig.key === 'dia' && (
+                                                        scheduleSortConfig.direction === 'ascending' ? <TriangleUpRegular /> : <TriangleDownRegular />
+                                                    )}
+                                                </div>
+                                            </TableHeaderCell>
+                                            <TableHeaderCell style={{ width: '150px', cursor: 'pointer' }} onClick={() => handleScheduleSort('inicio')}>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                    Horario
+                                                    {scheduleSortConfig.key === 'inicio' && (
+                                                        scheduleSortConfig.direction === 'ascending' ? <TriangleUpRegular /> : <TriangleDownRegular />
+                                                    )}
+                                                </div>
+                                            </TableHeaderCell>
+                                            <TableHeaderCell style={{ cursor: 'pointer' }} onClick={() => handleScheduleSort('facilitador')}>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                    Facilitador / Docente
+                                                    {scheduleSortConfig.key === 'facilitador' && (
+                                                        scheduleSortConfig.direction === 'ascending' ? <TriangleUpRegular /> : <TriangleDownRegular />
+                                                    )}
+                                                </div>
+                                            </TableHeaderCell>
+                                            <TableHeaderCell style={{ width: '130px', cursor: 'pointer' }} onClick={() => handleScheduleSort('estado')}>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                    Estado
+                                                    {scheduleSortConfig.key === 'estado' && (
+                                                        scheduleSortConfig.direction === 'ascending' ? <TriangleUpRegular /> : <TriangleDownRegular />
+                                                    )}
+                                                </div>
+                                            </TableHeaderCell>
+                                            <TableHeaderCell style={{ width: '180px' }}>
+                                                Enlace de Clase
+                                            </TableHeaderCell>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {processedHorarios.map((sesion, idx) => {
+                                            const isEnCurso = sesion.estado === 'En curso';
+                                            const isRealizada = sesion.estado === 'Realizada';
+                                            const isCancelada = sesion.estado === 'Cancelada';
+                                            const badgeColor = isEnCurso ? 'success' : isRealizada ? 'subtle' : isCancelada ? 'danger' : 'informative';
+                                            const joinUrl = sesion.joinUrl || seccionData?.linkGrabacion;
+
+                                            return (
+                                                <TableRow key={idx} style={isEnCurso ? { backgroundColor: tokens.colorPaletteGreenBackground1 } : undefined}>
+                                                    <TableCell>
+                                                        <Badge appearance="tint" shape="rounded" color={isEnCurso ? 'success' : 'brand'}>
+                                                            {sesion.numero}
+                                                        </Badge>
+                                                    </TableCell>
+                                                    <TableCell style={{ fontWeight: isEnCurso ? 'bold' : 'normal' }}>
+                                                        {formatDisplayDate(sesion.fecha)}
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        <Badge appearance="outline" color={isEnCurso ? 'success' : 'informative'}>
+                                                            {sesion.dia}
+                                                        </Badge>
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600 }}>
+                                                            <ClockRegular style={{ fontSize: '14px', color: isEnCurso ? tokens.colorPaletteGreenForeground1 : tokens.colorBrandForeground1 }} />
+                                                            <span>{sesion.horario}</span>
+                                                        </div>
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                                            <span style={{ fontWeight: 600 }}>{sesion.facilitador || seccionData?.profesor || 'Docente de Sección'}</span>
+                                                            {sesion.correoFacilitador && (
+                                                                <span style={{ fontSize: '11px', color: tokens.colorNeutralForeground2 }}>{sesion.correoFacilitador}</span>
+                                                            )}
+                                                        </div>
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        <Badge appearance={isRealizada ? 'tint' : 'filled'} color={badgeColor}>
+                                                            {sesion.estado}
+                                                        </Badge>
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        {joinUrl ? (
+                                                            <div style={{ display: 'flex', gap: '6px' }}>
+                                                                <Button
+                                                                    size="small"
+                                                                    appearance="subtle"
+                                                                    icon={<CopyRegular />}
+                                                                    title="Copiar enlace de clase"
+                                                                    onClick={() => handleCopyLinkGrabacion(joinUrl)}
+                                                                >
+                                                                    Copiar
+                                                                </Button>
+                                                                <Button
+                                                                    size="small"
+                                                                    appearance="primary"
+                                                                    icon={<VideoRegular />}
+                                                                    title="Abrir reunión en Teams"
+                                                                    onClick={() => window.open(joinUrl, '_blank')}
+                                                                >
+                                                                    Unirse
+                                                                </Button>
+                                                            </div>
+                                                        ) : (
+                                                            <span style={{ color: tokens.colorNeutralForeground4, fontSize: '12px' }}>Sin enlace</span>
+                                                        )}
+                                                    </TableCell>
+                                                </TableRow>
+                                            );
+                                        })}
+                                    </TableBody>
+                                </Table>
+                            )}
+                        </div>
+                    ) : selectedTab === 'seccion' && seccionSubTab === 'asistencia' ? (
                         loadingAttendance ? (
                             <div style={{ padding: '40px', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
                                 <Spinner label="Cargando asistencia desde Teams..." />

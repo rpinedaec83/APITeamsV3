@@ -36,10 +36,27 @@ namespace APITeamsV3.Application.UseCases.Sections
         public long? SharePointUsedBytes { get; set; }
         public long? SharePointRemainingBytes { get; set; }
         public double? SharePointPercentAvailable { get; set; }
+        public string? Frecuencia { get; set; }
+        public List<SectionSessionDto> Horarios { get; set; } = new();
         public List<StudentSummaryDto> Members { get; set; } = new();
         public bool HasTeam { get; set; }
         public bool EsTeams { get; set; }
         public string? IneligibilityReason { get; set; }
+    }
+
+    public class SectionSessionDto
+    {
+        public int Numero { get; set; }
+        public DateTime Fecha { get; set; }
+        public string Dia { get; set; } = string.Empty;
+        public string Inicio { get; set; } = string.Empty;
+        public string Fin { get; set; } = string.Empty;
+        public string Horario { get; set; } = string.Empty;
+        public string? Facilitador { get; set; }
+        public string? CorreoFacilitador { get; set; }
+        public string Estado { get; set; } = "Programada";
+        public string? JoinUrl { get; set; }
+        public string? IdEvento { get; set; }
     }
 
     public class StudentSummaryDto

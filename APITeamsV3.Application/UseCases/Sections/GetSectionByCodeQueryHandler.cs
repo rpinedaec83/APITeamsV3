@@ -221,6 +221,8 @@ namespace APITeamsV3.Application.UseCases.Sections
                                 ? "SIN CAMBIO"
                                 : "REEMPLAZO";
 
+            var (frecuencia, horarios) = await GetScheduleAndSessionsAsync(section.IdSeccion, linkGrabacion, cancellationToken);
+
             return new SectionDetailDto
             {
                 IdSeccion = section.IdSeccion,
@@ -240,6 +242,8 @@ namespace APITeamsV3.Application.UseCases.Sections
                 UnidadNegocio = section.UnidadNegocioNombre,
                 FechaInicio = section.FechaInicio == default ? null : section.FechaInicio,
                 FechaFin = section.FechaFin == default ? null : section.FechaFin,
+                Frecuencia = frecuencia,
+                Horarios = horarios,
                 LinkGrabacion = linkGrabacion,
                 LinkSharePoint = linkSharePoint,
                 SharePointTotalBytes = sharePointTotalBytes,
@@ -251,6 +255,206 @@ namespace APITeamsV3.Application.UseCases.Sections
                 EsTeams = eligibility.IsEligible,
                 IneligibilityReason = eligibility.IsEligible ? null : eligibility.Reason
             };
+        }
+
+        private async Task<(string Frecuencia, List<SectionSessionDto> Sessions)> GetScheduleAndSessionsAsync(
+            int idSeccion,
+            string? defaultJoinUrl,
+            CancellationToken cancellationToken)
+        {
+            var sessions = new List<SectionSessionDto>();
+            string? frecuencia = null;
+
+            // 1. Try to get frequency pattern from dbo.gFrecuenciaSeccionHorario
+            try
+            {
+                frecuencia = await _context.Database
+                    .SqlQueryRaw<string>("SELECT dbo.gFrecuenciaSeccionHorario({0})", idSeccion)
+                    .FirstOrDefaultAsync(cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "dbo.gFrecuenciaSeccionHorario no disponible o falló para IdSeccion={IdSeccion}", idSeccion);
+            }
+
+            // 2. Fetch sessions from HorarioSesion with Facilitador & Actor info
+            try
+            {
+                const string sqlSessions = @"
+SELECT HS.Numero,
+       HS.Fecha,
+       HS.Inicio,
+       HS.Fin,
+       HS.Estado,
+       ISNULL(A.NombreCompleto, ISNULL(F.EmailInstitucion, '')) AS Docente,
+       ISNULL(F.EmailInstitucion, '') AS CorreoDocente
+FROM HorarioSesion HS WITH (NOLOCK)
+LEFT JOIN Facilitador F WITH (NOLOCK)
+    ON F.IdFacilitador = ISNULL(HS.IdActorReemplazo, HS.IdActorProgramado)
+LEFT JOIN Actor A WITH (NOLOCK)
+    ON A.IdActor = F.IdFacilitador
+WHERE HS.IdSeccion = {0}
+  AND HS.Estado <> 'X'
+ORDER BY HS.Fecha, HS.Inicio, HS.Numero;";
+
+                var rawSessions = await _context.Database
+                    .SqlQueryRaw<RawSessionRow>(sqlSessions, idSeccion)
+                    .ToListAsync(cancellationToken);
+
+                // Fetch any session JoinUrls or meeting info from TeamsHorarios if available
+                var teamSessions = await _context.Set<TeamSession>()
+                    .AsNoTracking()
+                    .Where(th => th.IdCurso == idSeccion && th.Estado == "A")
+                    .Select(th => new { th.NumeroReunion, th.Fecha, th.Inicio, th.Fin, th.JoinUrl, th.IdEvento, th.CorreoFacilitador })
+                    .ToListAsync(cancellationToken);
+
+                if (rawSessions.Count > 0)
+                {
+                    var now = DateTime.Now;
+                    foreach (var s in rawSessions)
+                    {
+                        var matchingTeamSession = teamSessions.FirstOrDefault(ts =>
+                            (ts.NumeroReunion.HasValue && ts.NumeroReunion.Value == s.Numero) ||
+                            (ts.Fecha.HasValue && ts.Fecha.Value.Date == s.Fecha.Date && ts.Inicio == s.Inicio));
+
+                        var joinUrl = !string.IsNullOrWhiteSpace(matchingTeamSession?.JoinUrl)
+                            ? matchingTeamSession.JoinUrl
+                            : defaultJoinUrl;
+
+                        var idEvento = matchingTeamSession?.IdEvento;
+                        var teacherName = !string.IsNullOrWhiteSpace(s.Docente)
+                            ? s.Docente
+                            : matchingTeamSession?.CorreoFacilitador ?? string.Empty;
+
+                        var teacherEmail = !string.IsNullOrWhiteSpace(s.CorreoDocente)
+                            ? s.CorreoDocente
+                            : matchingTeamSession?.CorreoFacilitador ?? string.Empty;
+
+                        var sessionDate = s.Fecha.Date;
+                        var sessionStartHour = s.Inicio / 100;
+                        var sessionStartMin = s.Inicio % 100;
+                        var sessionEndHour = s.Fin / 100;
+                        var sessionEndMin = s.Fin % 100;
+                        var sessionStartDt = sessionDate.AddHours(sessionStartHour).AddMinutes(sessionStartMin);
+                        var sessionEndDt = sessionDate.AddHours(sessionEndHour).AddMinutes(sessionEndMin);
+
+                        string estadoCalculado;
+                        if (s.Estado == "X")
+                        {
+                            estadoCalculado = "Cancelada";
+                        }
+                        else if (now >= sessionStartDt && now <= sessionEndDt)
+                        {
+                            estadoCalculado = "En curso";
+                        }
+                        else if (now > sessionEndDt)
+                        {
+                            estadoCalculado = "Realizada";
+                        }
+                        else
+                        {
+                            estadoCalculado = "Programada";
+                        }
+
+                        sessions.Add(new SectionSessionDto
+                        {
+                            Numero = s.Numero,
+                            Fecha = s.Fecha,
+                            Dia = GetSpanishDayOfWeek(s.Fecha.DayOfWeek),
+                            Inicio = FormatHour(s.Inicio),
+                            Fin = FormatHour(s.Fin),
+                            Horario = $"{FormatHour(s.Inicio)} - {FormatHour(s.Fin)}",
+                            Facilitador = teacherName,
+                            CorreoFacilitador = teacherEmail,
+                            Estado = estadoCalculado,
+                            JoinUrl = joinUrl,
+                            IdEvento = idEvento
+                        });
+                    }
+                }
+                else if (teamSessions.Count > 0)
+                {
+                    // Fallback from TeamsHorarios if HorarioSesion was empty
+                    var distinctTeamSessions = teamSessions
+                        .GroupBy(ts => new { Fecha = ts.Fecha?.Date, ts.Inicio, ts.NumeroReunion })
+                        .Select(g => g.First())
+                        .OrderBy(ts => ts.Fecha)
+                        .ThenBy(ts => ts.Inicio)
+                        .ToList();
+
+                    var now = DateTime.Now;
+                    int num = 1;
+                    foreach (var ts in distinctTeamSessions)
+                    {
+                        var f = ts.Fecha ?? DateTime.Today;
+                        var inicio = ts.Inicio ?? 0;
+                        var fin = ts.Fin ?? 0;
+                        var sessionStartDt = f.AddHours(inicio / 100).AddMinutes(inicio % 100);
+
+                        sessions.Add(new SectionSessionDto
+                        {
+                            Numero = ts.NumeroReunion ?? num++,
+                            Fecha = f,
+                            Dia = GetSpanishDayOfWeek(f.DayOfWeek),
+                            Inicio = FormatHour(inicio),
+                            Fin = FormatHour(fin),
+                            Horario = fin > 0 ? $"{FormatHour(inicio)} - {FormatHour(fin)}" : FormatHour(inicio),
+                            Facilitador = ts.CorreoFacilitador,
+                            CorreoFacilitador = ts.CorreoFacilitador,
+                            Estado = now > sessionStartDt ? "Realizada" : "Programada",
+                            JoinUrl = ts.JoinUrl ?? defaultJoinUrl,
+                            IdEvento = ts.IdEvento
+                        });
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error al consultar sesiones para IdSeccion={IdSeccion}", idSeccion);
+            }
+
+            // 3. If frecuencia is empty, synthesize it from the sessions
+            if (string.IsNullOrWhiteSpace(frecuencia) && sessions.Count > 0)
+            {
+                var dayTimeGroups = sessions
+                    .GroupBy(s => new { s.Dia, s.Horario })
+                    .Select(g => $"{g.Key.Dia} {g.Key.Horario}")
+                    .Distinct();
+
+                frecuencia = string.Join(", ", dayTimeGroups);
+            }
+
+            return (frecuencia ?? string.Empty, sessions);
+        }
+
+        private static string GetSpanishDayOfWeek(DayOfWeek dayOfWeek) => dayOfWeek switch
+        {
+            DayOfWeek.Monday => "Lunes",
+            DayOfWeek.Tuesday => "Martes",
+            DayOfWeek.Wednesday => "Miércoles",
+            DayOfWeek.Thursday => "Jueves",
+            DayOfWeek.Friday => "Viernes",
+            DayOfWeek.Saturday => "Sábado",
+            DayOfWeek.Sunday => "Domingo",
+            _ => dayOfWeek.ToString()
+        };
+
+        private static string FormatHour(int hhmm)
+        {
+            var hours = hhmm / 100;
+            var minutes = hhmm % 100;
+            return $"{hours:D2}:{minutes:D2}";
+        }
+
+        private sealed class RawSessionRow
+        {
+            public int Numero { get; set; }
+            public DateTime Fecha { get; set; }
+            public int Inicio { get; set; }
+            public int Fin { get; set; }
+            public string Estado { get; set; } = string.Empty;
+            public string Docente { get; set; } = string.Empty;
+            public string CorreoDocente { get; set; } = string.Empty;
         }
 
         private static IEnumerable<string> BuildStudentIdentifiers(string? code, string? institutionalEmail, string? personalEmail)

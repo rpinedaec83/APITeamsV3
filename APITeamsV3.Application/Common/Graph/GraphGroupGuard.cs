@@ -38,9 +38,13 @@ namespace APITeamsV3.Application.Common.Graph
 
         public static bool IsMissingResource(Exception ex)
         {
-            if (ex is ODataError odataError && odataError.ResponseStatusCode == 404)
+            if (ex is ODataError odataError)
             {
-                return true;
+                if (odataError.ResponseStatusCode == 404) return true;
+                if (odataError.Message != null && odataError.Message.Contains("requested group", StringComparison.OrdinalIgnoreCase) && odataError.Message.Contains("invalid", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
             }
 
             if (ex is ApiException apiException && apiException.ResponseStatusCode == 404)
@@ -48,11 +52,16 @@ namespace APITeamsV3.Application.Common.Graph
                 return true;
             }
 
-            return ex.Message.Contains("404", StringComparison.OrdinalIgnoreCase) ||
-                   ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase) ||
-                   ex.Message.Contains("does not exist", StringComparison.OrdinalIgnoreCase) ||
-                   ex.Message.Contains("not present", StringComparison.OrdinalIgnoreCase) ||
-                   ex.Message.Contains("resource not found", StringComparison.OrdinalIgnoreCase);
+            var message = ex.Message ?? string.Empty;
+            var fullText = ex.ToString() ?? string.Empty;
+
+            return message.Contains("404", StringComparison.OrdinalIgnoreCase) ||
+                   message.Contains("not found", StringComparison.OrdinalIgnoreCase) ||
+                   message.Contains("does not exist", StringComparison.OrdinalIgnoreCase) ||
+                   message.Contains("not present", StringComparison.OrdinalIgnoreCase) ||
+                   message.Contains("resource not found", StringComparison.OrdinalIgnoreCase) ||
+                   (message.Contains("requested group", StringComparison.OrdinalIgnoreCase) && message.Contains("invalid", StringComparison.OrdinalIgnoreCase)) ||
+                   (fullText.Contains("requested group", StringComparison.OrdinalIgnoreCase) && fullText.Contains("invalid", StringComparison.OrdinalIgnoreCase));
         }
     }
 }

@@ -160,10 +160,22 @@ namespace APITeamsV3.Application.UseCases.Teams.Commands
                         .Distinct(StringComparer.OrdinalIgnoreCase)
                         .ToList();
 
+                    const int MaxAttendeesThreshold = 500;
                     var attendeeEmails = teacherEmails
                         .Concat(studentEmails)
                         .Distinct(StringComparer.OrdinalIgnoreCase)
                         .ToList();
+
+                    if (attendeeEmails.Count > MaxAttendeesThreshold)
+                    {
+                        _logger.LogWarning(
+                            "Section {SectionCode} has {Count} total attendees (>{Threshold}). Restricting agenda meeting attendees to teachers/facilitators only to avoid Exchange timeout.",
+                            sectionInfo.Codigo,
+                            attendeeEmails.Count,
+                            MaxAttendeesThreshold);
+
+                        attendeeEmails = teacherEmails.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                    }
 
                     var recurrenceDays = blockSessions
                         .Select(s => s.Fecha.DayOfWeek)

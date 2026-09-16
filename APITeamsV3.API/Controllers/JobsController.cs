@@ -881,7 +881,15 @@ namespace APITeamsV3.API.Controllers
                         ORDER BY st.Id DESC
                     ) AS s
                     WHERE COALESCE(s.Name, j.StateName, 'Unknown') <> 'Deleted'
-                    ORDER BY COALESCE(s.CreatedAt, j.CreatedAt) DESC, j.Id DESC;
+                    ORDER BY 
+                        CASE 
+                            WHEN COALESCE(s.Name, j.StateName, 'Unknown') = 'Processing' THEN 1
+                            WHEN COALESCE(s.Name, j.StateName, 'Unknown') IN ('Enqueued', 'Scheduled', 'Awaiting') THEN 2
+                            WHEN COALESCE(s.Name, j.StateName, 'Unknown') = 'Failed' THEN 3
+                            ELSE 4
+                        END ASC,
+                        COALESCE(s.CreatedAt, j.CreatedAt) DESC, 
+                        j.Id DESC;
                     """;
                 command.Parameters.Add(new SqlParameter("@take", System.Data.SqlDbType.Int) { Value = take });
 
@@ -926,7 +934,15 @@ namespace APITeamsV3.API.Controllers
                         ORDER BY st.Id DESC
                     ) AS s
                     WHERE COALESCE(s.Name, j.StateName, ''Unknown'') <> ''Deleted''
-                    ORDER BY COALESCE(s.CreatedAt, j.CreatedAt) DESC, j.Id DESC;
+                    ORDER BY 
+                        CASE 
+                            WHEN COALESCE(s.Name, j.StateName, ''Unknown'') = ''Processing'' THEN 1
+                            WHEN COALESCE(s.Name, j.StateName, ''Unknown'') IN (''Enqueued'', ''Scheduled'', ''Awaiting'') THEN 2
+                            WHEN COALESCE(s.Name, j.StateName, ''Unknown'') = ''Failed'' THEN 3
+                            ELSE 4
+                        END ASC,
+                        COALESCE(s.CreatedAt, j.CreatedAt) DESC, 
+                        j.Id DESC;
                 END
                 ');
                 """;
