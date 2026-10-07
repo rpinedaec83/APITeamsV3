@@ -9,6 +9,7 @@ namespace APITeamsV3.Domain.Entities
         public int? IdCurso { get; set; }
         public int? IdPromocion { get; set; }
         public int? IdPeriodo { get; set; }
+        public int? IdTipoModalidad { get; set; }
         public DateTime? FechaInicio { get; set; }
         public DateTime? FechaFin { get; set; }
         public string Estado { get; set; } = string.Empty;

@@ -15,5 +15,6 @@ namespace APITeamsV3.Infrastructure.Options
         public bool SkipIfFriendlyNameAlreadyExists { get; set; } = true;
         public bool DeleteSourceAfterCopy { get; set; } = true;
         public bool RequireSectionTokenMatch { get; set; } = true;
+        public int? RequiredModalidadId { get; set; } = 29690;
     }
 }

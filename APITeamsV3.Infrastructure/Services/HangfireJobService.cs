@@ -6,9 +6,11 @@ using APITeamsV3.Application.UseCases.Provisioning.Commands;
 using APITeamsV3.Application.UseCases.Recordings.Commands;
 using APITeamsV3.Application.UseCases.Teams.Commands;
 using APITeamsV3.Domain.Entities;
+using APITeamsV3.Infrastructure.Options;
 using APITeamsV3.Infrastructure.Persistence.Contexts;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Microsoft.Graph.Models.ODataErrors;
 using Microsoft.Kiota.Abstractions;
 using System;
@@ -25,6 +27,7 @@ namespace APITeamsV3.Infrastructure.Services
         private readonly TenantHangfireRuntime _tenantHangfireRuntime;
         private readonly ILogger<HangfireJobService> _logger;
         private readonly ITeamsRecordingTransferService _recordingTransferService;
+        private readonly RecordingTransferOptions _recordingTransferOptions;
 
         public HangfireJobService(
             IMediator mediator,
@@ -34,7 +37,8 @@ namespace APITeamsV3.Infrastructure.Services
             IEncryptionService encryptionService,
             TenantHangfireRuntime tenantHangfireRuntime,
             ILogger<HangfireJobService> logger,
-            ITeamsRecordingTransferService recordingTransferService)
+            ITeamsRecordingTransferService recordingTransferService,
+            IOptions<RecordingTransferOptions> recordingTransferOptions)
         {
             _mediator = mediator;
             _tenantProvider = tenantProvider;
@@ -44,6 +48,7 @@ namespace APITeamsV3.Infrastructure.Services
             _tenantHangfireRuntime = tenantHangfireRuntime;
             _logger = logger;
             _recordingTransferService = recordingTransferService;
+            _recordingTransferOptions = recordingTransferOptions.Value;
         }
 
         private string GetCurrentCompanyKey()
@@ -96,6 +101,15 @@ namespace APITeamsV3.Infrastructure.Services
 
             var allowed = config.PilotSections.Any(ps => ps.IdSeccion == idSeccion);
             if (allowed)
+            {
+                return true;
+            }
+
+            var allowedInSmart = await _smartDb.TeamsSeccionesPiloto
+                .AsNoTracking()
+                .AnyAsync(ps => ps.IdSeccion == idSeccion && ps.EsActivo);
+
+            if (allowedInSmart)
             {
                 return true;
             }
@@ -346,6 +360,7 @@ namespace APITeamsV3.Infrastructure.Services
             => RunPilotRecordingTransfers(companyKey, executedBy, null);
 
         [AutomaticRetry(Attempts = 0)]
+        [DisableConcurrentExecution(timeoutInSeconds: 3600)]
         [JobDisplayName("Transfer Pilot Recordings [{0}]")]
         public async Task RunPilotRecordingTransfers(string companyKey, string? executedBy, PerformContext? performContext)
         {
@@ -380,13 +395,41 @@ namespace APITeamsV3.Infrastructure.Services
                 return;
             }
 
+            var targetModalidadId = _recordingTransferOptions.RequiredModalidadId ?? 29690;
+            var validPilotSectionIds = await _smartDb.SeccionTable
+                .AsNoTracking()
+                .Where(s => pilotSectionIds.Contains(s.IdSeccion) && s.IdTipoModalidad == targetModalidadId)
+                .Select(s => s.IdSeccion)
+                .Distinct()
+                .ToListAsync(CancellationToken.None);
+
+            if (validPilotSectionIds.Count == 0)
+            {
+                _logger.LogInformation(
+                    "Recording transfer job omitted for tenant {CompanyKey}: none of the {TotalPilot} pilot sections match IdTipoModalidad={TargetModalidad}.",
+                    companyKey,
+                    pilotSectionIds.Count,
+                    targetModalidadId);
+                return;
+            }
+
+            if (validPilotSectionIds.Count < pilotSectionIds.Count)
+            {
+                var omittedCount = pilotSectionIds.Count - validPilotSectionIds.Count;
+                _logger.LogInformation(
+                    "Tenant {CompanyKey}: {OmittedCount} pilot section(s) omitted because they do not match IdTipoModalidad={TargetModalidad}.",
+                    companyKey,
+                    omittedCount,
+                    targetModalidadId);
+            }
+
             var failures = new List<string>();
             var state = new ProcessRecordingState();
             await ProcessRecordingTransfersForSections(
                 companyKey,
                 executedBy,
                 hangfireJobId,
-                pilotSectionIds,
+                validPilotSectionIds,
                 failures,
                 state);
 
@@ -397,6 +440,7 @@ namespace APITeamsV3.Infrastructure.Services
             => RunAllRecordingTransfers(companyKey, executedBy, null);
 
         [AutomaticRetry(Attempts = 0)]
+        [DisableConcurrentExecution(timeoutInSeconds: 7200)]
         [JobDisplayName("Transfer All Recordings [{0}]")]
         public async Task RunAllRecordingTransfers(string companyKey, string? executedBy, PerformContext? performContext)
         {
@@ -418,26 +462,29 @@ namespace APITeamsV3.Infrastructure.Services
                 return;
             }
 
-            // In non-pilot mode, process ALL active sections that have an active Team.
-            // We filter by active academic periods dynamically if needed, or rely on active Team status.
-            var activeSectionIds = await _smartDb.Set<TeamEntity>()
-                .AsNoTracking()
-                .Where(t => t.EstadoTeam == "A" && t.IsActive == "A" && t.IdSeccionSmart > 0)
-                .Select(t => t.IdSeccionSmart)
-                .Distinct()
-                .ToListAsync(CancellationToken.None);
+            var targetModalidadId = _recordingTransferOptions.RequiredModalidadId ?? 29690;
+
+            // In non-pilot mode, process ALL active sections that have an active Team and match the required modality.
+            var activeSectionIds = await (
+                from t in _smartDb.Set<TeamEntity>().AsNoTracking()
+                join s in _smartDb.SeccionTable.AsNoTracking() on t.IdSeccionSmart equals s.IdSeccion
+                where t.EstadoTeam == "A" && t.IsActive == "A" && t.IdSeccionSmart > 0
+                      && s.IdTipoModalidad == targetModalidadId
+                select t.IdSeccionSmart
+            ).Distinct().ToListAsync(CancellationToken.None);
 
             if (activeSectionIds.Count == 0)
             {
                 _logger.LogInformation(
-                    "Recording transfer job omitted for tenant {CompanyKey}: there are no active teams configured.",
-                    companyKey);
+                    "Recording transfer job omitted for tenant {CompanyKey}: there are no active teams with IdTipoModalidad={TargetModalidad}.",
+                    companyKey,
+                    targetModalidadId);
                 return;
             }
 
             _logger.LogInformation(
-                "Tenant {CompanyKey} running recording transfer for ALL active teams. Total sections: {Count}.",
-                companyKey, activeSectionIds.Count);
+                "Tenant {CompanyKey} running recording transfer for active teams with IdTipoModalidad={TargetModalidad}. Total sections: {Count}.",
+                companyKey, targetModalidadId, activeSectionIds.Count);
 
             var failures = new List<string>();
             var state = new ProcessRecordingState();
@@ -486,10 +533,32 @@ namespace APITeamsV3.Infrastructure.Services
             List<string> failures,
             ProcessRecordingState state)
         {
+            var targetModalidadId = _recordingTransferOptions.RequiredModalidadId ?? 29690;
+
             foreach (var idSeccion in sectionIds)
             {
                 try
                 {
+                    var sectionTable = await _smartDb.SeccionTable
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(s => s.IdSeccion == idSeccion, CancellationToken.None);
+
+                    if (sectionTable == null || sectionTable.IdTipoModalidad != targetModalidadId)
+                    {
+                        var msg = $"IdTipoModalidad ({sectionTable?.IdTipoModalidad}) no cumple con la regla requerida ({targetModalidadId}).";
+                        _logger.LogInformation(
+                            "Recording transfer skipped for tenant {CompanyKey}, section {IdSeccion}: {Reason}",
+                            companyKey,
+                            idSeccion,
+                            msg);
+
+                        if (sectionIds.Count == 1)
+                        {
+                            failures.Add($"Seccion {idSeccion}: {msg}");
+                        }
+
+                        continue;
+                    }
                     var anyTeam = await _smartDb.Set<TeamEntity>()
                         .AsNoTracking()
                         .FirstOrDefaultAsync(
